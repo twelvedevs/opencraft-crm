@@ -4,47 +4,98 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. The repo currently contains only a PRD (Product Requirements Document). No implementation exists yet.
+This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. No implementation exists yet.
 
-## Repository Contents
+## Key Documents
 
-- `docs/202603232109-ortho-crm-prd-1.md` — Full PRD (v1.0, March 2026). The authoritative source of truth for all product decisions.
+- `docs/00-prd-1.md` — Full PRD (v1.0, March 2026). Authoritative source for product decisions.
+- `docs/01-platform-arch-design.md` — Platform architecture design (Draft, March 2026). Authoritative source for technical decisions.
 
-## Planned Technology Stack
+## Architecture
+
+Two-layer SOA with 21 independently deployable services in a Turborepo monorepo:
+
+**Platform Layer (12 services)** — domain-agnostic, reusable across future products:
+Messaging (Twilio), Email (SendGrid), Notification (WebSocket), Template, Nurturing Engine (drip sequences), Automation Engine (event-driven workflows), Audience Engine (segment evaluation), AI (Claude API gateway), Analytics, Integration Hub (Google Ads + Meta), Identity (auth/RBAC), Media (S3/CloudFront)
+
+**Product Layer — Ortho CRM (8 services)** — consume platform via REST + events:
+Lead Service (core entity), Pipeline Engine (state machine), Conversation Service (SMS inbox), Campaign Service (email broadcasts), Referral Service, Reporting Service, Data Import Service (Ortho2 CSV), CRM API Gateway
+
+**Frontend (1 app):** React 18 + TypeScript SPA at `apps/crm/web`. Embeds platform UI components (`@platform/template-ui`, `@platform/sequence-ui`, `@platform/audience-ui`, `@platform/automation-ui`) as React packages.
+
+### Monorepo Structure
+
+```
+ortho/
+├── apps/
+│   ├── platform/        # 12 platform services (messaging, email, notification, etc.)
+│   └── crm/
+│       ├── lead/
+│       ├── pipeline/
+│       ├── conversation/
+│       ├── campaign/
+│       ├── referral/
+│       ├── reporting/
+│       ├── import/
+│       ├── api-gateway/
+│       └── web/         # React SPA
+├── packages/
+│   ├── @ortho/types         # shared TS interfaces for events + API contracts
+│   ├── @ortho/event-bus     # typed EventBridge client
+│   ├── @ortho/auth-middleware
+│   ├── @ortho/db            # Knex/Drizzle, migration runner
+│   ├── @ortho/logger        # Pino, Datadog-compatible
+│   ├── @ortho/testing       # fixtures, mocks, factories
+│   └── @platform/*-ui       # React component packages
+└── infra/               # IaC (AWS CDK or Terraform)
+```
+
+Each service follows: `src/{routes,services,repositories,events}/` + `migrations/` + `test/` + `Dockerfile`
+
+### Communication Patterns
+
+**Async — AWS EventBridge** for state-change propagation (no direct coupling between publisher and consumer).
+
+**Sync — REST** for queries and immediate commands (e.g. `POST /templates/render`, `POST /messages/send`, `POST /ai/complete`).
+
+### Golden Rules (from arch doc)
+
+1. Each service owns its DB schema — no cross-service table reads, all access through APIs or events.
+2. Platform services never import product types — Automation Engine receives generic `{ entity_type, entity_id, event_type, payload }`.
+3. Pipeline Engine only manages state — emits events; Automation Engine acts.
+4. Platform UIs (`@platform/*`) call their own service's API directly from the browser (not proxied through CRM API Gateway). Auth uses the same Identity Service JWT.
+
+## Technology Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React 18 + TypeScript, Tailwind CSS, React Query |
-| Backend | Node.js + TypeScript (Fastify), REST API |
-| Database | PostgreSQL (AWS RDS) — shared cluster with EHR, separate schema |
+| Backend | Node.js + TypeScript (Fastify) |
+| Database | PostgreSQL (AWS RDS Multi-AZ) — shared cluster, one schema per service |
 | Auth | Supabase Auth / Auth0, RBAC, SSO with EHR |
-| SMS/Voice | Twilio (two-way SMS, call tracking) |
-| Email | SendGrid API |
-| AI | Claude Sonnet 4.6 / Haiku 4.5 (smart replies, personalization, AI agent) |
+| SMS/Voice | Twilio |
+| Email | SendGrid |
+| AI | Claude Sonnet 4.6 (complex tasks) / Haiku 4.5 (high-volume) |
 | Ads APIs | Google Ads API, Meta Marketing API |
-| Infrastructure | AWS us-east-1 (ECS Fargate, RDS, S3, CloudFront) |
+| Event bus | AWS EventBridge |
+| Infra | AWS us-east-1 (ECS Fargate, RDS, S3, CloudFront) |
+| Monitoring | Datadog (APM, structured logs) |
+| Monorepo | Turborepo |
 | CI/CD | GitHub Actions |
 
-## Core Architecture (from PRD)
+## Core Product Concepts
 
 **Three Patient Pipelines:**
-1. **New Patient Pipeline** (7 stages): New Lead → Contacted → Exam Scheduled → Exam Completed → Tx Presented → Contract Signed → Lost
-2. **In Treatment Pipeline** (3 stages): New Patient → In Treatment → Treatment Complete
-3. **In Retention Pipeline** (3 stages): Active Retention → Recall Due → Long-term Follow
+1. New Patient (7 stages): New Lead → Contacted → Exam Scheduled → Exam Completed → Tx Presented → Contract Signed → Lost
+2. In Treatment (3 stages): New Patient → In Treatment → Treatment Complete
+3. In Retention (3 stages): Active Retention → Recall Due → Long-term Follow
 
-**Key Design Decisions:**
-- Browser-first (no desktop app)
-- Multi-location native (designed for 34 locations)
-- No PHI at launch — leads are prospective patients only, making it non-HIPAA initially
-- AI-augmented communications using Claude API for smart reply drafts, objection handling, and conversation summarization
-- Attribution-focused: every lead tagged with full UTM chain + call source + referral origin
+**Roles:** Call Center Agent, Call Center Manager, Marketing Staff, Marketing Manager
+
+**Lead channels:** Website forms, Google Ads, Facebook/Instagram Lead Ads, Twilio call tracking, referral links, walk-in/manual, chat widgets, Google Business Profile, CSV bulk import
+
+**Key constraints:**
+- No PHI at launch — leads are prospective patients, non-HIPAA initially
+- Multi-location native (34 locations)
 - Primary KPI: Cost per case start
-
-**Role-Based Access (4 roles):** Call Center Agent, Call Center Manager, Marketing Staff, Marketing Manager
-
-**Lead Channels:** Website forms, Google Ads, Facebook/Instagram Lead Ads, Twilio call tracking, referral links, walk-in/manual, chat widgets, Google Business Profile, CSV bulk import
-
-**Integrations:**
-- Ortho2 CSV bridge (weekly patient imports, daily appointment sync) until EHR launches
-- EHR integration via event streaming + API (future)
-- Google Ads API + Meta Marketing API for real-time spend/lead attribution
+- EHR integration is future (Ortho2 CSV bridge is temporary)
