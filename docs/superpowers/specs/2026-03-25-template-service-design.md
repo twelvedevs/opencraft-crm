@@ -131,6 +131,8 @@ POST   /templates/:id/enable   — re-enable a disabled template; status → act
 - If `current_version = active_version` (no pending draft): create a new `template_versions` row at `current_version + 1`, update `templates.current_version`. The new row is the draft; `active_version` is unchanged.
 - If `current_version > active_version` (draft already exists): update the existing `current_version` row in-place.
 
+**PATCH field validation:** Channel is immutable after creation. Fields that belong to the other channel (`body_html`, `body_unlayer`, `subject` sent on an SMS template; `body_text` sent on an email template for the plain-text field is valid) are ignored silently — they are not stored and do not produce an error. `body_text` is valid for both channels (plain-text fallback for email, body for SMS).
+
 **GET /templates/:id response:** Returns the group row plus the `current_version` content (the draft being edited). Also includes a separate `active_content` field (or null) with the `active_version` content if one exists. This allows the UI to load draft content into the editor while displaying what is currently live.
 
 **Activation rules:**
@@ -178,8 +180,10 @@ Response — SMS:
 ```
 
 **Render error responses:**
-- `404` — template not found, has no `active_version`, or is `disabled`
+- `404` — `active_version IS NULL` (template never activated) or `status = disabled`
 - `400` — malformed request (missing `template_id` or `context`)
+
+The state `status = draft AND active_version IS NOT NULL` cannot occur: activation sets `status → active` and there is no path back to `draft` once activated. Render logic therefore reduces to: render if `active_version IS NOT NULL AND status != disabled`, otherwise 404.
 
 ---
 
@@ -206,7 +210,8 @@ POST /templates/render
 **Caching:**
 - In-memory cache per instance, 30s TTL
 - Cache key: `template:{id}:active`
-- Invalidation is TTL-based only — activation takes effect within 30 seconds across all running instances (same pattern as Automation Engine rule cache)
+- Invalidation is TTL-based only — activation and enable take effect within 30 seconds across all running instances (same pattern as Automation Engine rule cache)
+- `POST /templates/:id/disable` eagerly evicts the cache entry for that `template_id` — a disabled template should stop rendering as quickly as possible, as it may have been disabled due to an error in the content. Enable and activate rely on TTL expiry since delayed effect is not safety-critical for those operations.
 
 ---
 
@@ -256,7 +261,7 @@ Simple textarea:
 apps/platform/template/
 ├── src/
 │   ├── routes/
-│   │   ├── templates.ts          # CRUD routes (create, list, get, patch, activate, disable)
+│   │   ├── templates.ts          # CRUD routes (create, list, get, patch, activate, disable, enable)
 │   │   └── render.ts             # POST /templates/render
 │   ├── services/
 │   │   ├── template-renderer.ts  # pure merge tag resolution — no I/O
@@ -309,9 +314,11 @@ Pure function coverage — no external dependencies:
 - Activate increments `active_version` to match `current_version`
 - `PATCH` on never-activated template → updates version row in-place, `current_version` unchanged
 - `PATCH` on active template (no pending draft) → creates new version row, `current_version` increments, `active_version` unchanged
-- `POST /templates/:id/disable` → subsequent render returns 404
-- `POST /templates/:id/enable` → subsequent render returns content again
+- `POST /templates/:id/disable` → render returns 404 immediately (cache eagerly evicted)
+- Render within 30s of disable (before TTL) → 404 (eager eviction ensures this)
+- `POST /templates/:id/enable` → subsequent render returns content again (within 30s TTL window)
 - `POST /templates/:id/enable` on template with no `active_version` → 400
+- `PATCH` with email-only fields on SMS template → fields ignored, no error
 
 ### Contract Tests
 
