@@ -127,31 +127,32 @@ Entry: created by `/convert` when In Treatment lead reaches `treatment_complete`
 ```typescript
 interface StageConfig {
   pipeline: 'new_patient' | 'in_treatment' | 'in_retention'
-  timeoutDays: number | null   // null = no timeout; poller skips
-  timeoutStage: string | null  // null = archive (for lost) or no timeout
-  allowedTransitions: string[] // valid next stages for automated calls
+  timeoutDays: number | null    // null = no timeout; poller skips (recall_due uses caller-provided timeout_at)
+  timeoutStage: string | null   // null = archive (for lost) or no timeout
+  requiresCallerTimeoutAt: boolean  // true = caller must provide timeout_at in transition request
+  allowedTransitions: string[]  // valid next stages for automated calls
 }
 
 const STAGES: Record<string, StageConfig> = {
-  new_lead:           { pipeline: 'new_patient',   timeoutDays: null, timeoutStage: null,              allowedTransitions: ['contacted', 'lost'] },
-  contacted:          { pipeline: 'new_patient',   timeoutDays: 5,    timeoutStage: 'lost',            allowedTransitions: ['exam_scheduled', 'lost'] },
-  exam_scheduled:     { pipeline: 'new_patient',   timeoutDays: null, timeoutStage: null,              allowedTransitions: ['exam_completed', 'contacted'] },
-  exam_completed:     { pipeline: 'new_patient',   timeoutDays: 7,    timeoutStage: 'lost',            allowedTransitions: ['tx_presented', 'lost'] },
-  tx_presented:       { pipeline: 'new_patient',   timeoutDays: 14,   timeoutStage: 'lost',            allowedTransitions: ['contract_signed', 'lost'] },
-  contract_signed:    { pipeline: 'new_patient',   timeoutDays: null, timeoutStage: null,              allowedTransitions: [] },
-  lost:               { pipeline: 'new_patient',   timeoutDays: 30,   timeoutStage: null,              allowedTransitions: ['contacted'] },
-  new_patient:        { pipeline: 'in_treatment',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['in_treatment'] },
-  in_treatment:       { pipeline: 'in_treatment',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['treatment_complete'] },
-  treatment_complete: { pipeline: 'in_treatment',  timeoutDays: null, timeoutStage: null,              allowedTransitions: [] },
-  active_retention:   { pipeline: 'in_retention',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['recall_due'] },
-  recall_due:         { pipeline: 'in_retention',  timeoutDays: null, timeoutStage: 'long_term_follow', allowedTransitions: ['long_term_follow'] },
-  long_term_follow:   { pipeline: 'in_retention',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['active_retention'] },
+  new_lead:           { pipeline: 'new_patient',  timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: ['contacted', 'lost'] },
+  contacted:          { pipeline: 'new_patient',  timeoutDays: 5,    timeoutStage: 'lost',             requiresCallerTimeoutAt: false, allowedTransitions: ['exam_scheduled', 'lost'] },
+  exam_scheduled:     { pipeline: 'new_patient',  timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: ['exam_completed', 'contacted'] },
+  exam_completed:     { pipeline: 'new_patient',  timeoutDays: 7,    timeoutStage: 'lost',             requiresCallerTimeoutAt: false, allowedTransitions: ['tx_presented', 'lost'] },
+  tx_presented:       { pipeline: 'new_patient',  timeoutDays: 14,   timeoutStage: 'lost',             requiresCallerTimeoutAt: false, allowedTransitions: ['contract_signed', 'lost'] },
+  contract_signed:    { pipeline: 'new_patient',  timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: [] },
+  lost:               { pipeline: 'new_patient',  timeoutDays: 30,   timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: ['contacted'] },
+  new_patient:        { pipeline: 'in_treatment', timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: ['in_treatment'] },
+  in_treatment:       { pipeline: 'in_treatment', timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: ['treatment_complete'] },
+  treatment_complete: { pipeline: 'in_treatment', timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: [] },
+  active_retention:   { pipeline: 'in_retention', timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: ['recall_due'] },
+  recall_due:         { pipeline: 'in_retention', timeoutDays: null, timeoutStage: 'long_term_follow', requiresCallerTimeoutAt: true,  allowedTransitions: ['long_term_follow'] },
+  long_term_follow:   { pipeline: 'in_retention', timeoutDays: null, timeoutStage: null,               requiresCallerTimeoutAt: false, allowedTransitions: ['active_retention'] },
 }
 ```
 
-`recall_due` has `timeoutDays: null` because its timeout is a variable recall date — the caller passes `timeout_at` explicitly when transitioning to this stage. The poller uses the stored `timeout_at` value directly.
+`recall_due` has `timeoutDays: null` and `requiresCallerTimeoutAt: true` — its timeout is the patient's recall appointment date, which varies per patient. The caller must provide `timeout_at` (absolute datetime) in the transition request body. `transition.service.ts` validates this: `400` if `stage == 'recall_due' && timeout_at` is absent. `computeTimeoutAt(stage, enteredAt, callerProvidedTimeoutAt?)` returns `callerProvidedTimeoutAt` for this stage and ignores `enteredAt`. The poller uses the stored `timeout_at` value directly. When `recall_due` times out, the poller transitions to `long_term_follow` and publishes both `lead.stage_changed` + `lead.stage_timeout` (identical to all other non-null `timeoutStage` cases).
 
-`lost` has `timeoutStage: null` — when `lost` times out after 30 days, the poller sets `status = 'archived'` on the membership rather than transitioning to another stage.
+`lost` has `timeoutStage: null` — when `lost` times out after 30 days, the poller sets `status = 'archived'` on the membership rather than transitioning to another stage. It still publishes `lead.stage_changed` (with `stage_to: null`, `reason: 'archived'`) so Lead Service and Automation Engine are notified of the archival (see Section 7).
 
 ---
 
@@ -175,7 +176,7 @@ previous_stage            varchar      NULL                 -- stage before curr
 last_transition_override  boolean      NOT NULL DEFAULT false
 closed_at                 timestamptz  NULL
 closed_reason             varchar      NULL
-                          CHECK (closed_reason IN ('converted', 'timed_out', 'archived', 'manual'))
+                          CHECK (closed_reason IN ('converted', 'timed_out', 'archived', 'manual', 'import'))
 created_at                timestamptz  NOT NULL DEFAULT now()
 updated_at                timestamptz  NOT NULL DEFAULT now()
 ```
@@ -197,11 +198,11 @@ id               uuid         PRIMARY KEY DEFAULT gen_random_uuid()
 membership_id    uuid         NOT NULL REFERENCES pipeline_memberships(id)
 lead_id          uuid         NOT NULL    -- denormalized to avoid join
 pipeline         varchar      NOT NULL    -- denormalized
-stage_from       varchar      NULL        -- NULL on initial enrollment
-stage_to         varchar      NOT NULL
+stage_from       varchar      NULL        -- NULL on initial enrollment; NULL on archival (lost → archived)
+stage_to         varchar      NULL        -- NULL on archival (status = archived, no new stage)
 override         boolean      NOT NULL DEFAULT false
 triggered_by     uuid         NULL        -- user_id; NULL for automated transitions
-reason           varchar      NULL        -- manual|timeout|no_show|converted|import
+reason           varchar      NULL        -- manual|timeout|no_show|converted|import|archived
 transitioned_at  timestamptz  NOT NULL DEFAULT now()
 ```
 
@@ -260,10 +261,13 @@ Move a lead to a new stage within the same pipeline.
 
 **Responses:**
 - `200` — updated membership object
+- `400` — `timeout_at` missing when transitioning to `recall_due`: `{ "error": "timeout_at_required" }`
 - `422` — invalid transition: `{ "error": "invalid_transition", "from": "new_lead", "to": "tx_presented", "allowed": ["contacted", "lost"] }`
 - `409` — membership is not `active`
 
 Graph check is skipped when `override: true`. The Gateway enforces that only coordinator roles may set `override: true`.
+
+**Concurrency:** `transition.service.ts` reads the membership row with `SELECT ... FOR UPDATE` before validating and applying the transition. This serializes concurrent requests on the same membership row, preventing duplicate history rows or double-fired events from two simultaneous calls.
 
 ---
 
@@ -281,7 +285,14 @@ Atomically close the source membership and open a new one in the target pipeline
 }
 ```
 
-**Response:** `201` — new membership object. Single DB transaction: source membership → `status: closed, closed_reason: converted`; new membership created; two history rows inserted. Publishes `lead.converted` post-commit.
+**Valid conversions** (only these source/target pairs are accepted — `422` otherwise):
+
+| From pipeline | From stage (required) | To pipeline | To stage |
+|---|---|---|---|
+| `new_patient` | `contract_signed` | `in_treatment` | `new_patient` |
+| `in_treatment` | `treatment_complete` | `in_retention` | `active_retention` |
+
+**Response:** `201` — new membership object. Single DB transaction: source membership → `status: closed, closed_reason: converted`; new membership created; two history rows inserted. Publishes `lead.converted` post-commit. Returns `422` if the source membership's current stage does not match the required `from_stage` for the conversion.
 
 ---
 
@@ -289,7 +300,7 @@ Atomically close the source membership and open a new one in the target pipeline
 
 | Method | Path | Query params | Response |
 |---|---|---|---|
-| `GET` | `/pipeline/memberships` | `lead_id`, `pipeline`, `stage`, `location_id`, `status`, `cursor`, `limit` | Paginated list (default 50) |
+| `GET` | `/pipeline/memberships` | `lead_id`, `pipeline`, `stage`, `location_id`, `status`, `cursor`, `limit` | Paginated list (default 50). Default `status` filter: **all statuses** (active + closed + archived). Pass `status=active` to get only live memberships — this is the query Lead Service uses for cache seeding on startup. |
 | `GET` | `/pipeline/memberships/:id` | — | Single membership. `404` if not found. |
 | `GET` | `/pipeline/memberships/:id/history` | — | Array of history rows, `transitioned_at ASC` |
 
@@ -389,7 +400,7 @@ Published by the timeout polling job after the auto-transition commits. The same
 
 ### Execution flow
 
-1. **Guard:** skip run if a previous run is still in progress (in-process flag)
+1. **Guard:** skip run if a previous run is still in progress within this instance (in-process flag prevents re-entrancy within one ECS task — not a cross-instance lock; see multi-instance note below)
 2. **Query** up to 100 overdue active memberships:
    ```sql
    SELECT * FROM pipeline_memberships
@@ -402,15 +413,16 @@ Published by the timeout polling job after the auto-transition commits. The same
    ```
 3. **For each overdue row** (individual transaction per row):
    - Look up `timeoutStage` from hardcoded `STAGES` config
-   - If `timeoutStage` is a stage name: run atomic write (UPDATE membership + INSERT history, `reason: 'timeout'`), then publish `lead.stage_changed` + `lead.stage_timeout`
-   - If `timeoutStage` is `null` (i.e. `lost` timing out after 30 days): UPDATE membership `status = 'archived'`, INSERT history row, no events published
+   - If `timeoutStage` is a stage name (e.g. `contacted → lost`, `recall_due → long_term_follow`): run atomic write (UPDATE membership + INSERT history, `reason: 'timeout'`), then publish `lead.stage_changed` (reason: `'timeout'`) + `lead.stage_timeout`
+   - If `timeoutStage` is `null` (i.e. `lost` timing out after 30 days): UPDATE membership `status = 'archived'` + INSERT history row (`stage_to: null`, `reason: 'archived'`), then publish `lead.stage_changed` (with `stage_to: null`, `reason: 'archived'`) so Lead Service and Automation Engine are notified of archival
 4. **Log** summary: N leads processed, any per-row failures
 
 ### Design properties
 
-- **Idempotency:** `FOR UPDATE SKIP LOCKED` prevents two concurrent runs from processing the same row. Once updated, `timeout_at` is reset to the new stage's value (or `NULL`), so the row won't reappear in future scans.
+- **Multi-instance safety:** ECS Fargate deployments run multiple Pipeline Engine instances simultaneously. `FOR UPDATE SKIP LOCKED` is the cross-instance safety mechanism — each instance claims a disjoint set of rows. The in-process flag only prevents re-entrancy within a single instance and is not relied on for cross-instance correctness.
+- **Idempotency:** Once a row is processed, its `timeout_at` is reset to the new stage's value (or `NULL`), so it won't reappear in future scans across any instance.
 - **Per-row transactions:** A failure on one lead does not affect others. Failures are logged to Datadog; the row is retried on the next run 15 minutes later.
-- **Batch cap of 100:** Sufficient for 34 locations at realistic lead volumes. Remainder caught in the next run.
+- **Batch cap of 100:** Sufficient for 34 locations at realistic lead volumes. Remainder caught in the next run (or processed concurrently by another instance).
 - **Post-commit publish:** EventBridge publish failure after commit is logged but does not roll back the DB state.
 - **`new_lead` 2-hour window:** No `timeout_at` is set for `new_lead`. The UI reads `entered_stage_at` and displays a visual warning after 2 hours — no automated transition.
 
@@ -469,10 +481,12 @@ EventBridge publish mocked via HTTP interceptor:
 - Invalid transition — `422` with `allowed[]` array; no DB write, no event
 - Override transition — accepted regardless of graph; `last_transition_override: true` on membership
 - Convert — source closed (`closed_reason: converted`), target created, two history rows, `lead.converted` published; idempotent (second call → `409`)
-- Timeout poll — overdue row auto-transitioned; `lead.stage_changed` + `lead.stage_timeout` both published
-- Timeout poll — `lost` 30-day expiry → `status = archived`, no transition event
-- Timeout poll — `SKIP LOCKED` prevents double-processing in concurrent runs
+- Timeout poll — overdue row auto-transitioned; `lead.stage_changed` (reason: `timeout`) + `lead.stage_timeout` both published
+- Timeout poll — `recall_due` expiry → transitions to `long_term_follow`; both events published (same path as all non-null `timeoutStage` cases)
+- Timeout poll — `lost` 30-day expiry → `status = archived`; `lead.stage_changed` published with `stage_to: null`, `reason: 'archived'`; no `lead.stage_timeout`
+- Timeout poll — `SKIP LOCKED` prevents double-processing across concurrent runs (simulated with two concurrent DB connections)
 - `recall_due` transition — requires `timeout_at` in request body; `400` if missing
+- Concurrent identical transition calls — second call is serialized via `SELECT ... FOR UPDATE`; results in single history row and single event
 
 ### Contract Tests
 
