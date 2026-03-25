@@ -82,7 +82,7 @@ Three authentication paths, detected in order by the `auth` plugin on every requ
 
 Applied to exactly four routes:
 - `GET /health` — ECS Fargate health check (unversioned)
-- `GET /v1/referrals/r/:code` — click redirect (302) for practice website referral links
+- `GET /v1/referrals/r/:code` — click redirect (302) for practice website referral links. `@fastify/reply-from` must be configured with `followRedirects: false` on this route so the `302` is returned to the browser as-is rather than silently followed by the gateway. This preserves the click-tracking intent of the Referral Service redirect.
 - `GET /v1/referrals/links/:code` — link info for the embeddable form widget
 - `GET /v1/referrals/portal/:token` — doctor referral portal (long-lived token auth enforced in Referral Service)
 
@@ -109,7 +109,9 @@ The JWT is forwarded unchanged in the `Authorization` header — downstream serv
 4. Cache the validated `{ permissions }` keyed on `key_hash`. Update `last_used_at` on cache misses only.
 5. Store `{ keyHash, permissions }` in request context. `keyHash` is used as the rate limit key and the log field.
 
-**Downstream forwarding for API key requests:** The gateway strips the `Authorization: Bearer ak_<...>` header and does NOT forward it. Instead it injects `X-Api-Key-Permissions: <comma-separated permissions>` into the forwarded request. Downstream product services are VPC-internal and rely on the gateway as the auth boundary — they do not independently validate `ak_` keys.
+**Downstream forwarding for externally-routed API key requests:** The gateway strips the `Authorization: Bearer ak_<...>` header and does NOT forward it. Instead it injects `X-Api-Key-Permissions: <comma-separated permissions>` into the forwarded request. For requests arriving from external callers (EHR, Automation Engine, etc.) and routed by the gateway to a downstream service, the downstream product service receives only `X-Api-Key-Permissions` and does not need to validate `ak_` keys independently.
+
+**Gateway-initiated VPC calls (channel resolution):** When the gateway itself calls Lead Service for channel resolution (Section 4.2), this is a direct VPC service-to-service call that bypasses the gateway routing layer. The gateway sends `Authorization: Bearer <LEAD_SERVICE_API_KEY>` as a raw `ak_` key directly to the Lead Service. The Lead Service must validate this `ak_` key independently (via Identity Service VPC endpoint) on the internal route used for channel resolution — consistent with the service-to-service `ak_` key pattern used elsewhere (e.g., Reporting Service → Analytics Service, Referral Service → Lead Service).
 
 `X-User-Id`, `X-User-Role`, and `X-User-Locations` are omitted for API key requests.
 
@@ -140,7 +142,7 @@ The request body includes a `lead_id` field identifying the lead being converted
 **Failure cases:**
 - Lead Service returns `404` → gateway returns `404 { "error": "lead_not_found" }` without forwarding
 - Lead Service unreachable or returns `5xx` → gateway returns `502 { "error": "upstream_unavailable" }` without forwarding
-- Lead Service returns `200` but `channel` is `null`, absent, or not a member of the valid enum → gateway returns `422 { "error": "channel_resolution_failed" }` without forwarding. Valid `channel` values: `google_ads | facebook | website | referral_patient | referral_doctor | call_tracking | walk_in | chat | google_business | import | unknown`
+- Lead Service returns `200` but `channel` is `null`, absent, not in the valid enum, or the response body is malformed/unparseable → all treated identically: gateway returns `422 { "error": "channel_resolution_failed" }` without forwarding. Valid `channel` values: `google_ads | facebook | website | referral_patient | referral_doctor | call_tracking | walk_in | chat | google_business | import | unknown`
 
 ---
 
@@ -168,7 +170,7 @@ The gateway strips any client-supplied `X-User-*` and `X-Api-Key-Permissions` he
 
 | Header | Value | Notes |
 |---|---|---|
-| `X-Request-ID` | UUID v4 | Generated if not present in incoming request; the incoming value is accepted and forwarded if already present (for tracing continuity from a trusted upstream) |
+| `X-Request-ID` | UUID v4 | Always generated fresh by the gateway — any client-supplied `X-Request-ID` is discarded. This prevents log injection via spoofed trace IDs. |
 | `X-Forwarded-For` | ALB-injected rightmost IP (real client IP) | The gateway uses the rightmost value appended by the ALB as the authoritative client IP. The full original chain is forwarded for downstream logging. Client-supplied `X-Forwarded-For` values are not trusted for rate limiting. |
 | `X-User-Id` | JWT `sub` claim | JWT routes only |
 | `X-User-Role` | JWT `role` claim | JWT routes only |
@@ -245,7 +247,7 @@ No auth, no rate limiting, no `/v1/` prefix. Returns `200 { "status": "ok" }`. U
 
 The `referrals` route plugin registers public and JWT-protected routes in the same plugin file using Fastify's scoped plugin pattern. Public routes are registered first with `{ config: { auth: false } }` — the `auth` plugin checks this config flag and skips JWT verification for those routes. All remaining `/v1/referrals/*` routes fall through to the global JWT enforcement.
 
-This keeps the public/JWT split explicit and colocated in one file, with the auth plugin as the single enforcement point.
+This keeps the public/JWT split explicit and colocated in one file, with the auth plugin as the single enforcement point. Routes without `{ config: { auth: false } }` receive the full JWT enforcement described in Section 3.2 — a missing or invalid `Authorization` header returns `401 { "error": "unauthorized" }` (see Section 6.2).
 
 ---
 
