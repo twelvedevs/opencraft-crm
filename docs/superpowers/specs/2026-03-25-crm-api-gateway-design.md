@@ -103,15 +103,17 @@ The JWT is forwarded unchanged in the `Authorization` header — downstream serv
 `Authorization: Bearer ak_<hex>` — detected by the `ak_` prefix.
 
 **Validation flow:**
-1. Check in-process LRU cache (500 entries, `API_KEY_CACHE_TTL_MS` TTL, default 60s) keyed on the raw key string
-2. On cache miss: call `POST /identity/api-keys/validate` (VPC-only) with `X-Internal-Secret: <INTERNAL_API_SECRET>` and body `{ "key": "<raw key>" }`. Response: `{ "key_id": "<uuid>", "permissions": [...] }` or `401`
+1. Compute `key_hash = SHA256(raw_key)`. Check in-process LRU cache (500 entries, `API_KEY_CACHE_TTL_MS` TTL, default 60s) keyed on `key_hash`.
+2. On cache miss: call `POST /identity/api-keys/validate` (VPC-only) with `X-Internal-Secret: <INTERNAL_API_SECRET>` and body `{ "key": "<raw key>" }`. Response: `{ "permissions": [...] }` or `401`.
 3. On Identity Service unreachable (timeout or 5xx): fail closed — return `503 { "error": "auth_unavailable" }` to the caller. Never fail open.
-4. Cache the validated `{ key_id, permissions }`. Update `last_used_at` on cache misses only.
-5. Store `{ keyId, permissions }` in request context
+4. Cache the validated `{ permissions }` keyed on `key_hash`. Update `last_used_at` on cache misses only.
+5. Store `{ keyHash, permissions }` in request context. `keyHash` is used as the rate limit key and the log field.
 
 **Downstream forwarding for API key requests:** The gateway strips the `Authorization: Bearer ak_<...>` header and does NOT forward it. Instead it injects `X-Api-Key-Permissions: <comma-separated permissions>` into the forwarded request. Downstream product services are VPC-internal and rely on the gateway as the auth boundary — they do not independently validate `ak_` keys.
 
 `X-User-Id`, `X-User-Role`, and `X-User-Locations` are omitted for API key requests.
+
+**`triggered_by` on pipeline routes for API key callers:** Internal services (Automation Engine, Data Import Service) that call pipeline endpoints via API key are responsible for including `triggered_by` in the request body. The gateway forwards the body field as-is. No gateway injection of `triggered_by` for API key requests.
 
 ---
 
@@ -123,7 +125,7 @@ The gateway enforces RBAC above `@ortho/auth-middleware` for exactly two cross-s
 
 **Route:** `POST /v1/pipeline/transitions` with `override: true` in the request body.
 
-The gateway reads the JWT `role` claim before forwarding. Permitted roles: `call_center_manager`, `marketing_manager`, `super_admin`. Blocked roles: `call_center_agent`, `marketing_staff`. If a blocked role sends `override: true`, the gateway returns `403 { "error": "forbidden" }` without forwarding. `super_admin` bypasses all gateway permission checks unconditionally.
+The gateway reads the JWT `role` claim before forwarding. Permitted roles: `call_center_manager`, `marketing_manager`, `super_admin`. Blocked roles: `call_center_agent`, `marketing_staff`. If a blocked role sends `override: true`, the gateway returns `403 { "error": "forbidden" }` without forwarding. `super_admin` is included in the permitted list and is allowed to set `override: true` — this is the extent of `super_admin`'s special treatment for this check only.
 
 `override: false` and absent `override` field are treated identically — no RBAC check is triggered; the request is forwarded as-is.
 
@@ -133,11 +135,12 @@ Pipeline Engine trusts the forwarded `override` and `triggered_by` fields — it
 
 **Route:** `POST /v1/pipeline/convert`
 
-The request body includes a `lead_id` field identifying the lead being converted. Before forwarding, the gateway calls `GET /leads/:lead_id` on the Lead Service (VPC-internal, `Authorization: Bearer <LEAD_SERVICE_API_KEY>`) to resolve the lead's immutable attribution channel. The resolved `channel` string is injected into the forwarded request body. Pipeline Engine requires a valid `channel` value and returns `400` if absent.
+The request body includes a `lead_id` field identifying the lead being converted. Before forwarding, the gateway calls `GET /leads/:lead_id` on the Lead Service (VPC-internal, `Authorization: Bearer <LEAD_SERVICE_API_KEY>`) to resolve the lead's immutable attribution channel. The gateway always overwrites any client-supplied `channel` field in the request body with the gateway-resolved value, preventing spoofing. Pipeline Engine requires a valid `channel` value and returns `400` if absent.
 
 **Failure cases:**
 - Lead Service returns `404` → gateway returns `404 { "error": "lead_not_found" }` without forwarding
 - Lead Service unreachable or returns `5xx` → gateway returns `502 { "error": "upstream_unavailable" }` without forwarding
+- Lead Service returns `200` but `channel` is `null`, absent, or not a member of the valid enum → gateway returns `422 { "error": "channel_resolution_failed" }` without forwarding. Valid `channel` values: `google_ads | facebook | website | referral_patient | referral_doctor | call_tracking | walk_in | chat | google_business | import | unknown`
 
 ---
 
@@ -147,9 +150,9 @@ Implemented via `@fastify/rate-limit` as a global plugin. The rate-limit plugin 
 
 | Tier | Applied to | Key | Limit |
 |---|---|---|---|
-| Public | Unauthenticated routes (excluding `/health`) | IP address | 60 req/min |
+| Public | Unauthenticated routes (excluding `/health`) | IP address (ALB-injected rightmost value in `X-Forwarded-For`) | 60 req/min |
 | User | JWT-authenticated routes | `sub` claim | 300 req/min |
-| API key | `ak_`-authenticated routes | Key ID | 600 req/min |
+| API key | `ak_`-authenticated routes | `keyHash` (SHA256 of raw key) | 600 req/min |
 
 Rate limit exceeded: `429 { "error": "rate_limit_exceeded" }` with a `Retry-After` header.
 
@@ -166,13 +169,15 @@ The gateway strips any client-supplied `X-User-*` and `X-Api-Key-Permissions` he
 | Header | Value | Notes |
 |---|---|---|
 | `X-Request-ID` | UUID v4 | Generated if not present in incoming request; the incoming value is accepted and forwarded if already present (for tracing continuity from a trusted upstream) |
-| `X-Forwarded-For` | Client IP | Passed through for downstream logging |
+| `X-Forwarded-For` | ALB-injected rightmost IP (real client IP) | The gateway uses the rightmost value appended by the ALB as the authoritative client IP. The full original chain is forwarded for downstream logging. Client-supplied `X-Forwarded-For` values are not trusted for rate limiting. |
 | `X-User-Id` | JWT `sub` claim | JWT routes only |
 | `X-User-Role` | JWT `role` claim | JWT routes only |
 | `X-User-Locations` | JWT `locations` as comma-separated string | JWT routes only; **omitted entirely** when `locations[]` is empty (i.e., `marketing_staff`, `marketing_manager`, `super_admin`). Downstream services interpret absence of this header as "all locations" for those roles. |
 | `X-Api-Key-Permissions` | Comma-separated permissions from validated key | API key routes only |
 
 The original `Authorization` header is forwarded unchanged on JWT routes. On API key routes, `Authorization` is stripped and not forwarded (replaced by `X-Api-Key-Permissions`).
+
+**Expired vs invalid JWT:** Both return `401 { "error": "unauthorized" }`. The `401` status is the signal for the browser to attempt a token refresh via `POST /identity/session` with the refresh token. No `token_expired` sub-code is surfaced — the frontend handles all `401` responses on authenticated routes as a refresh trigger.
 
 ### 6.2 Gateway-generated error responses
 
@@ -187,6 +192,7 @@ Downstream errors pass through as-is (status code + body unchanged). The gateway
 | `override: true` RBAC violation | 403 | `{ "error": "forbidden" }` |
 | Rate limit exceeded | 429 | `{ "error": "rate_limit_exceeded" }` |
 | Lead not found during channel resolution | 404 | `{ "error": "lead_not_found" }` |
+| Lead channel null/invalid/missing | 422 | `{ "error": "channel_resolution_failed" }` |
 | Upstream service unreachable or timeout | 502 | `{ "error": "upstream_unavailable" }` |
 
 ### 6.3 Upstream timeout
@@ -195,7 +201,7 @@ All proxied requests use a timeout controlled by `UPSTREAM_TIMEOUT_MS` (default 
 
 ### 6.4 Logging
 
-Every request logged via `@ortho/logger` (Pino, Datadog-compatible) with: `request_id`, `method`, `path`, `status_code`, `duration_ms`, `user_id` (JWT routes), `key_id` (API key routes), `upstream_service`. No request or response body logging.
+Every request logged via `@ortho/logger` (Pino, Datadog-compatible) with: `request_id`, `method`, `path`, `status_code`, `duration_ms`, `user_id` (JWT routes), `key_hash` (API key routes — SHA256 of raw key, never the raw key itself), `upstream_service`. No request or response body logging.
 
 ---
 
@@ -216,6 +222,8 @@ JWT auth required. The gateway streams the Notification Service response directl
 - `Content-Type: text/event-stream`
 - `Cache-Control: no-cache`
 - `X-Accel-Buffering: no` — added by gateway to suppress nginx / ALB response buffering
+
+**SSE headers:** `@fastify/reply-from` in streaming mode handles `Transfer-Encoding` automatically — the gateway does not manually set or forward `Transfer-Encoding` headers from the upstream. `Connection: keep-alive` is set by the gateway on the client-facing response to maintain the long-lived connection.
 
 **Concurrent SSE connections:** No per-user concurrent connection limit is enforced at v1. Each authenticated SSE request opens one upstream connection. Connection exhaustion monitoring is deferred to post-launch observability.
 
@@ -295,7 +303,7 @@ apps/crm/api-gateway/
 | `REPORTING_SERVICE_URL` | Reporting Service base URL | — |
 | `IMPORT_SERVICE_URL` | Data Import Service base URL | — |
 | `NOTIFICATION_SERVICE_URL` | Notification Service base URL | — |
-| `IDENTITY_SERVICE_URL` | Identity Service base URL (VPC-internal) | — |
+| `IDENTITY_SERVICE_URL` | Identity Service base URL (VPC-internal). JWKS endpoint derived as `{IDENTITY_SERVICE_URL}/.well-known/jwks.json` — no separate env var needed. | — |
 | `LEAD_SERVICE_API_KEY` | `ak_`-prefixed key for channel resolution calls to Lead Service | — |
 | `INTERNAL_API_SECRET` | Shared secret for `POST /identity/api-keys/validate` | — |
 | `JWKS_CACHE_TTL_MS` | JWKS cache TTL | `300000` |
@@ -303,6 +311,8 @@ apps/crm/api-gateway/
 | `UPSTREAM_TIMEOUT_MS` | Upstream request timeout (non-SSE routes) | `30000` |
 | `PORT` | Gateway listen port | `3000` |
 | `LOG_LEVEL` | Pino log level | `info` |
+| `MAX_BODY_SIZE_BYTES` | Maximum request body size for all routes except `/v1/imports/upload` | `1048576` (1MB) |
+| `IMPORT_MAX_BODY_SIZE_BYTES` | Maximum request body size for `/v1/imports/upload` (Ortho2 CSV files) | `5242880` (5MB) |
 
 All `*_URL` and `*_KEY` / `*_SECRET` values are required at startup — the service fails fast on missing config.
 
