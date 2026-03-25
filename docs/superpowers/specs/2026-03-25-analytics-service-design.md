@@ -202,7 +202,7 @@ All events follow the standard envelope defined in `@ortho/types`. The dimension
 }
 ```
 
-`AdSpendSyncedHandler` iterates `records` and upserts each entry into `metrics_ad_spend_daily` — `ON CONFLICT (date, platform, campaign_id) DO UPDATE` overwrites the full row. Re-syncs are idempotent regardless of `event_id`.
+`AdSpendSyncedHandler` iterates `records` and upserts each entry into `metrics_ad_spend_daily` — `ON CONFLICT (date, platform, location_id, campaign_id) DO UPDATE` overwrites the full row. Re-syncs are idempotent regardless of `event_id`.
 
 **Idempotency for `AdSpendSyncedHandler` differs from counter-increment handlers.** For all other handlers, the raw `analytics_events` insert uses `ON CONFLICT (event_id) DO NOTHING`, and if the insert is skipped the rollup update is also skipped (no double-count). For `AdSpendSyncedHandler`, this rule is relaxed: the rollup upsert always executes even if the raw `analytics_events` row already exists. This allows Integration Hub to re-publish a corrected spend figure using the same `event_id` without the correction being silently ignored. The `analytics_events` row records the first delivery only; the rollup row always reflects the latest synced figures.
 
@@ -315,9 +315,10 @@ For all counter-increment handlers (`lead.created`, `lead.stage_changed`, `lead.
 
 ### 6.3 Partition Maintenance
 
-`analytics_events` is partitioned by month on `occurred_at`. A BullMQ repeatable job runs on the 1st of each month:
-1. Creates the partition for the next calendar month
-2. Drops the partition from 25 months ago (retaining exactly 24 months of data)
+`analytics_events` is partitioned by month on `occurred_at`. The table is created with a **default partition** (`analytics_events_default`) to catch any rows that arrive before the monthly partition is pre-created — this prevents insert failures if the maintenance job fires late. A BullMQ repeatable job runs at 00:01 on the 1st of each month:
+1. Creates the named partition for the next calendar month
+2. Moves any rows from the default partition that fall within the newly created month range
+3. Drops the partition from 25 months ago (retaining exactly 24 months of data)
 
 Example: when the job runs on 2026-04-01, it creates the `2026-05` partition and drops the `2024-03` partition. This retains 24 complete prior months (2024-04 through 2026-03) plus the active current-month partition (2026-04) that is still being written to.
 
@@ -334,9 +335,11 @@ Analytics does not evaluate filter condition trees. The generic DSL performs sim
 | Dependency | Type | Notes |
 |---|---|---|
 | Integration Hub | EventBridge (`ad_spend.synced`) | Payload: `platform`, `location_id`, `synced_date` at top level; `records[]` with `campaign_id`, `campaign_name`, `impressions`, `clicks`, `spend` per entry |
+| Pipeline Engine | EventBridge (`lead.stage_changed`, `lead.converted`) | `lead.stage_changed` must include `location_id`, `pipeline`, `stage_to`. `lead.converted` must include `location_id`, `channel`. **Both payload shapes must be confirmed in Pipeline Engine spec — requires amendment.** |
+| Messaging Service | EventBridge (`message.delivered`, `message.failed`, `opt_out.received`) | All three events must include `location_id` in payload. Currently unspecified in Messaging Service spec. **Requires amendment to Messaging Service spec.** |
 | Campaign Service | EventBridge (`campaign.sent`) | Payload must include `campaign_id`, `location_id`. **Required fields not yet defined in arch doc event table — requires amendment.** |
 | Email Service | EventBridge (`email.opened`, `email.clicked`) | Payload must include `campaign_id`, `location_id`. **Not yet in arch doc event table — requires amendment.** |
-| Lead Service | EventBridge (`lead.converted`) | Payload must include `location_id` and `channel` (the lead's first-touch attribution channel). **`channel` field must be confirmed in Lead Service event schema.** |
+| Lead Service | EventBridge (`lead.created`) | Payload must include `location_id` and `channel` (first-touch attribution channel, e.g. `google_ads`). **`channel` field must be confirmed in Lead Service event schema.** |
 | Reporting Service | REST consumer (`GET /analytics/metrics/*`, `POST /analytics/query`) | All Ortho-specific metric computation (cost per case, ROAS, coordinator metrics) lives in Reporting Service |
 | Identity Service | JWT validation | All API endpoints require JWT with valid signature and non-expired claims |
 
