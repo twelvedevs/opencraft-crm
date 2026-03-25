@@ -139,6 +139,8 @@ Response shape per item:
 
 `unread_count` = count of `conversation_messages` where `created_at` is after the `created_at` of `conversation_reads.last_read_message_id` for the calling user (subquery on primary key). If no read record exists, `unread_count` = total message count.
 
+`last_message_preview` = `body` of the most recent `conversation_messages` row (by `created_at DESC`), truncated to 80 characters. Fetched via JOIN — not a stored column. Applies to any direction (inbound or outbound).
+
 ```
 GET /conversations/:id
 ```
@@ -243,11 +245,13 @@ GET /bulk-sends/:job_id
 ```
 GET   /settings/locations/:id
 PATCH /settings/locations/:id
-      { inactivity_days?, agent_mode_enabled?, agent_max_exchanges?, location_phone? }
+      { inactivity_days?, agent_mode_enabled?, agent_max_exchanges?, location_phone?, practice_number? }
 ```
 `marketing_manager` role only.
 
-**Validation:** `PATCH` with `agent_mode_enabled: true` returns `422` if `location_phone` is not already set and not provided in the same request — the disclosure footer cannot be rendered without it.
+**Validation:** `PATCH` with `agent_mode_enabled: true` returns `422` if `location_phone` is not already set and not provided in the same request — the disclosure footer cannot be rendered without it. Similarly, `422` if `practice_number` (the Twilio outbound number for bulk sends) is not already set.
+
+`practice_number` is also used as the `from_number` for bulk SMS sends. This is the location's primary Twilio number for outbound broadcasts.
 
 ---
 
@@ -356,7 +360,8 @@ BullMQ job: ai-agent-reply { conversation_id, trigger_message_id }
   → POST /messages/send on Messaging Service:
       { to: conversation.lead_phone,
         from_number: conversation.practice_number,
-        body: text + '\n\n' + disclosure_footer(settings.location_phone) }
+        body: text + '\n\n' + disclosure_footer(settings.location_phone),
+        dedup_key: 'agent:' + conversation_id + ':' + conversation.agent_exchange_count }
   → INSERT conversation_messages (is_agent: true, status: 'queued')
   → UPDATE conversations SET agent_exchange_count += 1, last_message_at = now()
 ```
@@ -405,10 +410,11 @@ BullMQ job: bulk-send { job_id, segment, body, location_id }
         snapshot: false
     }
     → returns matched lead IDs
+  → UPDATE bulk_send_jobs SET total = matched_lead_ids.length
   → for each matched lead_id (batched):
       → phone = leadMap.get(lead_id).phone   ← reuse from paginate step, no re-fetch
       → POST /messages/send on Messaging Service
-          { to: phone, from_number: conversation.practice_number, body,
+          { to: phone, from_number: settings.practice_number, body,
             dedup_key: job_id + ':' + lead_id }
       → increment sent or failed counter
   → UPDATE bulk_send_jobs SET status = 'completed', sent = N, failed = M
@@ -444,7 +450,7 @@ On escalation: `conversations.escalated = true`, `agent_mode_active = false`, es
 
 - **Manual send** (`POST /conversations/:id/messages`): sets `agent_mode_active = false` immediately. Subsequent inbound messages are not AI-handled.
 - **Coordinator assignment** (`PATCH /conversations/:id { assigned_to }`): once `assigned_to IS NOT NULL`, the inbound handler does not enqueue AI agent jobs regardless of `agent_mode_enabled`. Coordinator has ownership.
-- **Re-enable**: `marketing_manager` can set `agent_mode_active: true` via `PATCH /conversations/:id` to hand back to the AI agent for a specific conversation (e.g., after resolving an escalation).
+- **Re-enable**: `marketing_manager` can set `agent_mode_active: true` via `PATCH /conversations/:id` to hand back to the AI agent for a specific conversation (e.g., after resolving an escalation). When re-enabling, `agent_exchange_count` is reset to `0` — otherwise the conversation would immediately escalate again if the prior count had reached the maximum.
 - Any coordinator can set `agent_mode_active: false` (disable) via `PATCH /conversations/:id`.
 
 ### 6.4 AI Service Prompt Requirements
@@ -571,9 +577,10 @@ location_conversation_settings (
   inactivity_days      integer NOT NULL DEFAULT 30,
   agent_mode_enabled   boolean NOT NULL DEFAULT false,
   agent_max_exchanges  integer NOT NULL DEFAULT 3,
-  location_phone       text,                     -- E.164; required before agent_mode_enabled=true (enforced at API layer)
+  location_phone       text,                     -- E.164 voice number; used in AI agent disclosure footer
+  practice_number      text,                     -- E.164 Twilio number; used as from_number in bulk SMS sends
   updated_at           timestamptz NOT NULL DEFAULT now(),
-  CHECK (agent_mode_enabled = false OR location_phone IS NOT NULL)
+  CHECK (agent_mode_enabled = false OR (location_phone IS NOT NULL AND practice_number IS NOT NULL))
 )
 
 -- Bulk SMS job tracking
