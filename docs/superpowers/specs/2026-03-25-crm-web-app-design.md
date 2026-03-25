@@ -177,7 +177,7 @@ Fixed left sidebar (~220px). Navigation items derived from the user's role at re
 | marketing_manager | Leads, Inbox, Analytics, Campaigns, Sequences, Automation, Audience, Templates, Referrals, Reports, CSV Import, Settings |
 | super_admin | Same as marketing_manager |
 
-`call_center_agent` accesses analytics scoped to their own data via the `/analytics/coordinators` tab, surfaced as "My Performance" in the sidebar. The `/analytics` route is accessible to this role but the API returns only own-coordinator data (enforced by the Reporting Service when `location_id` is scoped to the agent's single location and the role is `call_center_agent`).
+`call_center_agent` "My Performance" sidebar item links directly to `/analytics/coordinators` (not `/analytics`). The other analytics tabs (Channel Performance, Funnel, Locations) are not meaningful for this role and are not linked. The Reporting Service enforces agent scope by overwriting the `coordinator_id` filter with the agent's JWT `sub`, so only their own row is returned regardless of location.
 
 `marketing_staff` triggers bulk SMS from the Campaigns module (Campaigns → audience → Send) — they have no Inbox nav item (PRD Section 10: marketing_staff "No" for inbox access).
 
@@ -288,7 +288,7 @@ Authorization: Bearer <JWT>
 Last-Event-ID: <lastSeq>
 ```
 
-When `activeLocationId` is `null` (All Locations mode), the `location:{locationId}:*` channel is omitted entirely — only the user-scoped channel is subscribed. Location-scoped notifications for marketing roles are delivered via the Notification Service's JWT claim validation, which grants access to all `location:*` channels when `locations[] = []` in the JWT. The client only needs the `user:{userId}` channel for personal notifications (assignments, escalations, task reminders).
+When `activeLocationId` is `null` (All Locations mode), the `location:{locationId}:*` channel is omitted entirely — only the user-scoped channel is subscribed. Marketing roles in All Locations mode receive personal notifications (assignments, escalations, task reminders) via `user:{userId}`. Location-scoped real-time notifications (e.g. inbound SMS alerts) are not delivered in this mode; marketing roles access location activity via the analytics and leads modules instead. Note: the Notification Service enforces channel access by checking whether the requested `location_id` is present in the JWT's `locations[]` claim — it has no special behavior for `locations: []`.
 
 When `activeLocationId` changes to a specific location, the provider closes and re-opens the stream with the updated channel params. `lastSeq` (the last received monotonic sequence number) is stored in `NotificationProvider` component state — it is session-scoped and not persisted to `localStorage`.
 
@@ -429,7 +429,7 @@ Sub-navigation tabs within the section: Channel Performance (default), Funnel, L
 
 **Locations tab:** Side-by-side location comparison table, sortable by any metric. Visible to `marketing_staff+` only.
 
-**Coordinators tab:** Per-coordinator metrics — exams booked, avg response time, case conversion rate. Coordinator identity uses the `triggered_by` field on `lead.stage_changed` events (a user ID). The Reporting Service returns `triggered_by` as a user ID in the response; the frontend resolves display names via a batch `GET /identity/users?ids=...` call (or the Reporting Service may denormalize names — to be confirmed during implementation). `call_center_agent` users see only their own row in this tab.
+**Coordinators tab:** Per-coordinator metrics — exams booked, avg response time, case conversion rate. Coordinator identity uses the `triggered_by` field on `lead.stage_changed` events (a user ID). The Reporting Service denormalizes coordinator display names in its response by calling `GET /identity/users/:id` during report generation — the frontend receives `coordinator_name` alongside the metrics and never calls Identity Service directly for this purpose. `call_center_agent` users see only their own row: the Reporting Service enforces this by overwriting the `coordinator_id` filter with the agent's JWT `sub`, not merely via location scoping.
 
 **Reports tab:** Saved report list, scheduled deliveries, run history.
 
@@ -495,7 +495,7 @@ Used for high-frequency coordinator actions:
 | Unit | Vitest | `ROLE_PERMISSIONS` map, `usePermission` hook, priority score display logic, `apiFetch` wrapper |
 | Component | React Testing Library | `<RequirePermission>`, `<LeadCard>`, `<QuickActions>`, `<NotificationBell>` — with mocked `AuthContext` |
 | Integration | RTL + MSW | Full page renders with mocked API responses: LeadQueuePage loads and filters, move-stage mutation fires and optimistically updates, inbox reply sends |
-| E2E | Playwright | Critical flows: login → view lead queue → move stage → send SMS; login → view inbox → reply; marketing manager → publish campaign; login with `must_change_password=true` → blocked from all routes → change password → access restored |
+| E2E | Playwright | Critical flows: login → view lead queue → move stage → send SMS; login → view inbox → reply; marketing manager → publish campaign; login with `must_change_password=true` → attempt `/leads` → assert redirect to `/settings/password` → complete password change → assert `/leads` now accessible |
 | Platform UI | Per-package | `@platform/*` packages maintain their own test suites; CRM shell only tests correct prop passing and mount/unmount |
 
 Shared test utilities from `@ortho/testing`: auth context factories for all 4 roles, location context factory, MSW handlers for all CRM Gateway endpoints, lead/conversation/campaign fixtures.
