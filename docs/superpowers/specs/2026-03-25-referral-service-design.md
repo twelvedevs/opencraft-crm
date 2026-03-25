@@ -390,7 +390,7 @@ Published after Branch B of `lead-converted.ts` commits (patient referrer + link
     "location_id":        "uuid",
     "referral_link_id":   "uuid",
     "referral_code":      "abc123XY",
-    "referral_link_url":  "https://yourpractice.com/ref/abc123XY",
+    "referral_link_url":  "https://api.yourpractice.com/referrals/r/abc123XY",
     "created_at":         "..."
   }
 }
