@@ -15,7 +15,7 @@ The Pipeline Engine is a **product-layer service** (`apps/crm/pipeline`) that ow
 - Validate stage transitions against a hardcoded transition graph
 - Allow coordinator override of the graph with an `override` flag
 - Enforce stage time limits via a node-cron polling job (every 15 min)
-- Publish `lead.stage_changed`, `lead.converted`, and `lead.stage_timeout` to EventBridge
+- Publish `lead.stage_changed`, `lead.converted`, `lead.stage_timeout`, and `lead.archived` to EventBridge
 - Support atomic pipeline conversion (e.g. New Patient → In Treatment)
 
 **Out of scope:**
@@ -96,7 +96,7 @@ Pipelines and stages are hardcoded in `src/services/state-machine.ts` as TypeScr
 | `tx_presented` | `contract_signed`, `lost` |
 | `lost` | `contacted` (re-engagement) |
 
-Coordinator-initiated requests may include `override: true` to bypass the graph and move to any stage within the same pipeline. RBAC enforcement (only `call_center_agent`, `call_center_manager`, `marketing_manager` may set `override: true`) is performed by the CRM API Gateway before forwarding.
+Coordinator-initiated requests may include `override: true` to bypass the graph and move to any stage within the same pipeline. RBAC enforcement (only `call_center_agent`, `call_center_manager`, `marketing_manager`, and `super_admin` may set `override: true`) is performed by the CRM API Gateway before forwarding. `super_admin` bypasses all Gateway permission checks and may always set `override: true`.
 
 ### 3.2 In Treatment Pipeline (3 stages)
 
@@ -176,7 +176,11 @@ previous_stage            varchar      NULL                 -- stage before curr
 last_transition_override  boolean      NOT NULL DEFAULT false
 closed_at                 timestamptz  NULL
 closed_reason             varchar      NULL
-                          CHECK (closed_reason IN ('converted', 'timed_out', 'archived', 'manual', 'import'))
+                          CHECK (closed_reason IN ('converted', 'archived', 'manual', 'import'))
+                          -- 'converted': moved to another pipeline via /convert
+                          -- 'archived': lost stage timed out after 30 days
+                          -- 'manual': manually closed by coordinator
+                          -- 'import': closed via Data Import Service
 created_at                timestamptz  NOT NULL DEFAULT now()
 updated_at                timestamptz  NOT NULL DEFAULT now()
 ```
@@ -198,11 +202,11 @@ id               uuid         PRIMARY KEY DEFAULT gen_random_uuid()
 membership_id    uuid         NOT NULL REFERENCES pipeline_memberships(id)
 lead_id          uuid         NOT NULL    -- denormalized to avoid join
 pipeline         varchar      NOT NULL    -- denormalized
-stage_from       varchar      NULL        -- NULL on initial enrollment; NULL on archival (lost → archived)
-stage_to         varchar      NULL        -- NULL on archival (status = archived, no new stage)
+stage_from       varchar      NULL        -- NULL on initial enrollment
+stage_to         varchar      NOT NULL    -- always a valid stage name; archival writes a dedicated lead.archived event, not a history row with null stage_to
 override         boolean      NOT NULL DEFAULT false
 triggered_by     uuid         NULL        -- user_id; NULL for automated transitions
-reason           varchar      NULL        -- manual|timeout|no_show|converted|import|archived
+reason           varchar      NULL        -- manual|timeout|no_show|converted|import
 transitioned_at  timestamptz  NOT NULL DEFAULT now()
 ```
 
@@ -228,16 +232,18 @@ If EventBridge publish fails after commit, the DB state stands. The stage change
 All endpoints are called by the CRM API Gateway. RBAC is enforced at the Gateway — Pipeline Engine trusts the forwarded `triggered_by` and `override` fields.
 
 ### `POST /pipeline/memberships`
-Enroll a lead in a pipeline at an initial stage.
+Enroll a lead in a pipeline at an initial stage. Publishes `lead.stage_changed` post-commit (`stage_from: null`).
 
 **Request:**
 ```json
 {
-  "lead_id":    "uuid",
-  "location_id": "uuid",
-  "pipeline":   "new_patient",
-  "stage":      "new_lead",
-  "timeout_at": "2026-03-26T..."   // optional override
+  "lead_id":      "uuid",
+  "location_id":  "uuid",
+  "pipeline":     "new_patient",
+  "stage":        "new_lead",
+  "triggered_by": "user-uuid",    // null for automated enrollment (e.g. Data Import Service)
+  "reason":       "manual",       // manual|import
+  "timeout_at":   "2026-03-26T..."  // optional override
 }
 ```
 
@@ -281,9 +287,11 @@ Atomically close the source membership and open a new one in the target pipeline
   "to_stage":     "new_patient",
   "triggered_by": "user-uuid",
   "reason":       "converted",
-  "channel":      "google"        // attribution channel — included in lead.converted payload
+  "channel":      "google_ads"    // attribution channel — included in lead.converted payload
 }
 ```
+
+Valid `channel` values (must match exactly — `400` otherwise): `google_ads` | `facebook` | `website` | `referral_patient` | `referral_doctor` | `call_tracking` | `walk_in` | `chat` | `google_business` | `import` | `unknown`. The CRM API Gateway is responsible for resolving the lead's attribution channel from Lead Service before calling this endpoint.
 
 **Valid conversions** (only these source/target pairs are accepted — `422` otherwise):
 
@@ -292,7 +300,7 @@ Atomically close the source membership and open a new one in the target pipeline
 | `new_patient` | `contract_signed` | `in_treatment` | `new_patient` |
 | `in_treatment` | `treatment_complete` | `in_retention` | `active_retention` |
 
-**Response:** `201` — new membership object. Single DB transaction: source membership → `status: closed, closed_reason: converted`; new membership created; two history rows inserted. Publishes `lead.converted` post-commit. Returns `422` if the source membership's current stage does not match the required `from_stage` for the conversion.
+**Response:** `201` — new membership object. Single DB transaction (with `SELECT ... FOR UPDATE` on the source membership to prevent concurrent double-conversion): source membership → `status: closed, closed_reason: converted`; new membership created; two history rows inserted. Publishes `lead.converted` post-commit. Returns `422` if the source membership's current stage does not match the required `from_stage` for the conversion.
 
 ---
 
@@ -392,6 +400,30 @@ Published by the timeout polling job after the auto-transition commits. The same
 
 **Subscribers:** Automation Engine (re-engagement SMS, coordinator alerts, task creation).
 
+### `lead.archived`
+
+Published by the timeout polling job when a `lost` membership's 30-day re-engagement window expires. This is a terminal event — the lead is no longer active in any pipeline. It is a dedicated event type (not `lead.stage_changed`) to avoid ambiguity in downstream handlers that require a non-null `stage_to`.
+
+```json
+{
+  "event_id":    "uuid",
+  "event_type":  "lead.archived",
+  "entity_type": "lead",
+  "entity_id":   "<lead_id>",
+  "payload": {
+    "membership_id": "uuid",
+    "lead_id":       "uuid",
+    "location_id":   "uuid",
+    "pipeline":      "new_patient",
+    "archived_at":   "..."
+  }
+}
+```
+
+**Subscribers:** Lead Service (clears `current_pipeline` / `current_stage` cache fields), Automation Engine (cancel any in-flight sequences for this lead).
+
+> **Analytics cross-reference:** The `lead.stage_changed` payload in this spec includes all fields required by Analytics Service (`location_id`, `pipeline`, `stage_to`). The `lead.converted` payload includes `location_id` and `channel`. These payload shapes satisfy the pending amendment documented in the Analytics Service spec.
+
 ---
 
 ## 7. Timeout Polling Job
@@ -414,7 +446,7 @@ Published by the timeout polling job after the auto-transition commits. The same
 3. **For each overdue row** (individual transaction per row):
    - Look up `timeoutStage` from hardcoded `STAGES` config
    - If `timeoutStage` is a stage name (e.g. `contacted → lost`, `recall_due → long_term_follow`): run atomic write (UPDATE membership + INSERT history, `reason: 'timeout'`), then publish `lead.stage_changed` (reason: `'timeout'`) + `lead.stage_timeout`
-   - If `timeoutStage` is `null` (i.e. `lost` timing out after 30 days): UPDATE membership `status = 'archived'` + INSERT history row (`stage_to: null`, `reason: 'archived'`), then publish `lead.stage_changed` (with `stage_to: null`, `reason: 'archived'`) so Lead Service and Automation Engine are notified of archival
+   - If `timeoutStage` is `null` (i.e. `lost` timing out after 30 days): UPDATE membership `status = 'archived'`, `closed_reason = 'archived'` — **no history row inserted, no `lead.stage_changed` published** (archival is not a stage transition). Publish dedicated `lead.archived` event so Lead Service clears its cache and Automation Engine can react.
 4. **Log** summary: N leads processed, any per-row failures
 
 ### Design properties
@@ -448,7 +480,7 @@ apps/crm/pipeline/
 │   ├── jobs/
 │   │   └── timeout-poll.job.ts  # node-cron, every 15 min
 │   ├── events/
-│   │   └── publisher.ts         # EventBridge publish (lead.stage_changed, lead.converted, lead.stage_timeout)
+│   │   └── publisher.ts         # EventBridge publish (lead.stage_changed, lead.converted, lead.stage_timeout, lead.archived)
 │   └── index.ts
 ├── migrations/
 ├── test/
@@ -483,7 +515,7 @@ EventBridge publish mocked via HTTP interceptor:
 - Convert — source closed (`closed_reason: converted`), target created, two history rows, `lead.converted` published; idempotent (second call → `409`)
 - Timeout poll — overdue row auto-transitioned; `lead.stage_changed` (reason: `timeout`) + `lead.stage_timeout` both published
 - Timeout poll — `recall_due` expiry → transitions to `long_term_follow`; both events published (same path as all non-null `timeoutStage` cases)
-- Timeout poll — `lost` 30-day expiry → `status = archived`; `lead.stage_changed` published with `stage_to: null`, `reason: 'archived'`; no `lead.stage_timeout`
+- Timeout poll — `lost` 30-day expiry → `status = archived`; `lead.archived` published; no `lead.stage_changed`, no `lead.stage_timeout`
 - Timeout poll — `SKIP LOCKED` prevents double-processing across concurrent runs (simulated with two concurrent DB connections)
 - `recall_due` transition — requires `timeout_at` in request body; `400` if missing
 - Concurrent identical transition calls — second call is serialized via `SELECT ... FOR UPDATE`; results in single history row and single event
@@ -494,6 +526,7 @@ Verify published event payloads against `@ortho/event-bus` schema:
 - `lead.stage_changed` — all required fields present: `location_id`, `pipeline`, `stage_to`, `reason`
 - `lead.converted` — `location_id` + `channel` present (required by Analytics Service)
 - `lead.stage_timeout` — `timed_out_stage` + `new_stage` present
+- `lead.archived` — `lead_id`, `location_id`, `pipeline` present
 
 ---
 
