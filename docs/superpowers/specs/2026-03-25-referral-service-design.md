@@ -14,8 +14,9 @@ The Referral Service is a **product-layer service** (`apps/crm/referral`) that o
 - Manage referrers: patient referrers (auto-created when a patient completes treatment) and doctor referrers (staff-created with contact info)
 - Generate unique referral link codes; serve a public click-tracking redirect endpoint
 - Resolve codes to referrer identity (called by the embeddable form widget before lead submission)
-- React to `lead.created` (with `referrer_id`) to create referral tracking records
+- React to `lead.created` (with `referrer_id` + `referral_code`) to create referral tracking records pinned to the specific clicked link
 - React to stage/conversion events to advance referral status, notify referring patients via SMS, and publish `referral.converted`
+- Publish `referrer.created` after patient referrer creation so Automation Engine can enroll the patient in the post-treatment sequence with the referral link URL in context
 - Two-state reward tracking: `pending` auto-created on conversion → `issued` by staff
 - Doctor portal via long-lived token URL (no login required)
 - Leaderboard query endpoint for staff
@@ -23,8 +24,8 @@ The Referral Service is a **product-layer service** (`apps/crm/referral`) that o
 **Out of scope:**
 - Payment processing for rewards — CRM logs the reward event only
 - Duplicate detection of referred leads — Lead Service handles dedup
-- Sequence enrollment for post-treatment thank-you messages — Automation Engine's responsibility; it calls Referral Service to retrieve the link URL, then enrolls the entity in the sequence with the link in context
-- Click-to-lead session stitching — referral attribution is captured at form submission via the hidden `referral_code` field resolved by the form widget
+- Sequence enrollment for post-treatment thank-you messages — Automation Engine's responsibility; it subscribes to `referrer.created` (published by Referral Service after patient referrer creation in Branch B) and enrolls the entity in the post-treatment sequence using `referral_link_url` from the event payload as context. This avoids a race condition where the Automation Engine fetches the link URL before Branch B has committed.
+- Doctor thank-you notifications on conversion — out of scope for launch. Doctor relationship management is handled through manual outreach or future Campaign Service email campaigns.
 
 ---
 
@@ -60,18 +61,18 @@ The Referral Service is a **product-layer service** (`apps/crm/referral`) that o
                     │      ├─ lead-stage-changed.ts             │
                     │      └─ lead-converted.ts                 │
                     └──────────────────────────────────────────┘
-                         │            │              │
-              calls      │            │ publishes    │ calls
-           Lead Service  │     EventBridge           │ Messaging Service
-           (patient info │     referral.converted    │ (SMS notifications)
-            at creation) │                           │
+                         │            │               │
+              calls      │            │ publishes     │ calls
+           Lead Service  │     EventBridge            │ Messaging Service
+           (patient info │     referral.converted     │ (SMS notifications)
+            at creation) │     referrer.created       │
                          ▼
                     crm_referrals schema
 ```
 
 **Key architectural properties:**
 - SQS worker pattern identical to Lead Service — EventBridge → SQS queue → BullMQ worker → typed handlers. Each handler runs atomically (state update in a single DB transaction).
-- Public endpoints (link resolution, click redirect, doctor portal) are exposed without JWT via CRM API Gateway route configuration.
+- Public endpoints (link resolution, click redirect, doctor portal) are exposed without JWT via CRM API Gateway route configuration. Rate limiting for public endpoints is enforced at the CRM API Gateway layer — Referral Service does not implement per-IP rate limiting itself.
 - Referral Service calls Lead Service (`GET /leads/:id`) once at patient referrer creation time using an internal service API key — stores `phone` and `name` denormalized on the `referrers` row for all future SMS sends.
 - No Redis or BullMQ for scheduling — all processing is event-driven.
 
@@ -84,15 +85,17 @@ The Referral Service is a **product-layer service** (`apps/crm/referral`) that o
 The embeddable form widget (JavaScript, hosted by CRM, embedded on practice websites) handles referral attribution client-side:
 
 1. Practice website receives `yourpractice.com/ref/:code` — this URL redirects through (or is proxied to) the CRM API Gateway's public redirect endpoint `GET /referrals/r/:code`
-2. Referral Service records the click (`click_count` incremented), returns `302` to `redirect_url` with `?ref=:code` appended
+2. Referral Service records the click (`click_count` incremented), returns `302` to `redirect_url` with `?ref=:code` appended. Unknown codes return `404`; inactive codes return `302` to `redirect_url` **without** `?ref=` (prospective patient still reaches the practice website, just without referral attribution)
 3. Landing page loads with `?ref=:code` in the URL
-4. Form widget reads `?ref=:code`, calls `GET /referrals/links/:code` → receives `{ referrer_id, referrer_type, referrer_name }`
-5. Form widget embeds `referrer_id` and `referrer_type` as hidden fields
-6. Form submits → Lead Service creates lead with `referrer_id` in immutable attribution
-7. Lead Service publishes `lead.created` with `referrer_id` in payload
-8. Referral Service SQS worker receives `lead.created`, creates `referrals` tracking record
+4. Form widget reads `?ref=:code`, calls `GET /referrals/links/:code` → receives `{ referrer_id, referral_link_id, referrer_type, referrer_name }`. Returns `404` for unknown or inactive codes.
+5. Form widget embeds `referrer_id`, `referral_link_id`, `referrer_type`, and `referral_code` as hidden fields
+6. Form submits → Lead Service creates lead with `referrer_id`, `referrer_type`, and `referral_code` in immutable attribution
+7. Lead Service publishes `lead.created` with `referrer_id`, `referrer_type`, and `referral_code` in payload
+8. Referral Service SQS worker receives `lead.created`, resolves `referral_code` → specific `referral_link_id`, creates `referrals` tracking record pinned to that exact link
 
-If the code is invalid or inactive, `GET /referrals/links/:code` returns `404` — form widget submits without referral attribution; lead is still created normally.
+If the code is invalid or inactive at step 4, the form widget submits without referral attribution; the lead is still created normally.
+
+**Dependency note:** Steps 6–8 depend on `referral_code`, `referrer_id`, and `referrer_type` being added to the Lead Service `leads` table and `lead.created` event payload (see Section 10, Pending Amendment 1). The `lead-created.ts` handler must not be shipped until this amendment is in place. A contract test (see Section 8) validates the incoming payload shape at deploy time.
 
 ---
 
@@ -134,7 +137,7 @@ One or more links per referrer; at most one active link at a time. Staff can dea
 id            uuid         PRIMARY KEY DEFAULT gen_random_uuid()
 referrer_id   uuid         NOT NULL REFERENCES referrers(id)
 code          varchar      NOT NULL UNIQUE    -- 8-char alphanumeric, URL-safe
-redirect_url  varchar      NOT NULL           -- landing page URL (with ?ref=:code appended on redirect)
+redirect_url  varchar      NOT NULL           -- landing page URL (redirect appends ?ref=:code when active)
 click_count   integer      NOT NULL DEFAULT 0
 status        varchar      NOT NULL DEFAULT 'active'
               CHECK (status IN ('active', 'inactive'))
@@ -145,21 +148,22 @@ created_at    timestamptz  NOT NULL DEFAULT now()
 **Indexes:**
 ```sql
 INDEX (referrer_id, status)
-INDEX (code)                   -- public lookup on every form widget call
+-- Note: UNIQUE (code) constraint above implicitly creates a unique index in Postgres;
+-- no separate INDEX (code) needed.
 ```
 
 Code generation: 8-char random alphanumeric (`[A-Za-z0-9]`). `link.service.ts` retries up to 5 times on collision before returning `500`.
 
 ### `referrals`
 
-One row per referred lead. Created by the `lead-created` SQS handler.
+One row per referred lead. Created by the `lead-created` SQS handler, pinned to the specific `referral_link_id` from the `lead.created` payload.
 
 ```sql
 id                   uuid         PRIMARY KEY DEFAULT gen_random_uuid()
 referral_link_id     uuid         NOT NULL REFERENCES referral_links(id)
 referrer_id          uuid         NOT NULL REFERENCES referrers(id)
 lead_id              uuid         NOT NULL UNIQUE  -- opaque ref, no FK across schemas
-location_id          uuid         NOT NULL
+location_id          uuid         NOT NULL         -- from payload.location_id
 status               varchar      NOT NULL DEFAULT 'created'
                      CHECK (status IN ('created', 'exam_scheduled', 'converted'))
 exam_scheduled_at    timestamptz  NULL
@@ -187,14 +191,15 @@ referral_id    uuid         NOT NULL REFERENCES referrals(id)
 referrer_id    uuid         NOT NULL REFERENCES referrers(id)
 status         varchar      NOT NULL DEFAULT 'pending'
                CHECK (status IN ('pending', 'issued'))
-reward_type    varchar      NULL      -- e.g. 'gift_card', 'account_credit'
+reward_type    varchar      NULL      -- e.g. 'gift_card', 'account_credit'; required on issued transition
 reward_amount  numeric      NULL
 reward_notes   text         NULL
 issued_at      timestamptz  NULL
 issued_by      uuid         NULL      -- staff user ID
+created_at     timestamptz  NOT NULL DEFAULT now()  -- when reward obligation was created (on conversion)
 
 UNIQUE (referral_id)                  -- one reward per conversion
-INDEX (status, referrer_id)
+INDEX (status, created_at)            -- work queue: pending rewards sorted by age
 INDEX (referrer_id)
 ```
 
@@ -209,24 +214,28 @@ token        uuid         NOT NULL UNIQUE DEFAULT gen_random_uuid()
 created_by   uuid         NOT NULL
 created_at   timestamptz  NOT NULL DEFAULT now()
 
-UNIQUE (referrer_id)     -- one active token per referrer
+UNIQUE (referrer_id)     -- one active token per referrer; UPSERT replaces on regeneration
 INDEX (token)            -- public lookup on every portal load
+-- Note: patient referrer guard (400 if referrer_type = 'patient') is enforced at the
+-- service layer in POST /referrals/referrers/:id/portal-token. No DB-level constraint
+-- possible without a trigger; implementation must not omit this check.
 ```
 
 ---
 
 ## 5. API
 
-All staff endpoints require a valid JWT via `@ortho/auth-middleware`. Location scoping enforced via `require-location.ts`.
+All staff endpoints require a valid JWT via `@ortho/auth-middleware`. Location scoping enforced via `require-location.ts` — agents see only their assigned location(s) (`locations[]` from JWT claims; empty array = all locations for marketing/super_admin roles).
 
 ### 5.1 Public Endpoints (no auth)
 
 #### `GET /referrals/r/:code`
 
-Click tracking redirect. Increments `click_count` on the matching `referral_links` row, then returns `302` to `redirect_url` with `?ref=:code` appended.
+Click tracking redirect. Increments `click_count` on the matching `referral_links` row, then redirects.
 
-- `404` — code not found or `status = 'inactive'`
-- Increment is best-effort (fire-and-forget update; redirect always proceeds)
+- Active code → `302` to `redirect_url` with `?ref=:code` appended. Increment is best-effort (fire-and-forget update; redirect always proceeds).
+- Inactive code → `302` to `redirect_url` **without** `?ref=` (prospective patient still reaches the practice website; no referral attribution captured).
+- Unknown code → `404`
 
 #### `GET /referrals/links/:code`
 
@@ -235,13 +244,14 @@ Code resolution for the embeddable form widget. Called client-side before form s
 **Response `200`:**
 ```json
 {
-  "referrer_id":   "uuid",
-  "referrer_type": "patient",
-  "referrer_name": "Jane Smith"
+  "referrer_id":      "uuid",
+  "referral_link_id": "uuid",
+  "referrer_type":    "patient",
+  "referrer_name":    "Jane Smith"
 }
 ```
 
-- `404` — code not found or `status = 'inactive'`
+- `404` — code not found **or** `status = 'inactive'` (form widget treats both as no referral attribution)
 
 #### `GET /referrals/portal/:token`
 
@@ -251,15 +261,15 @@ Doctor portal. Returns referrer profile, all referrals, and aggregate stats.
 ```json
 {
   "referrer": {
-    "id": "uuid",
-    "name": "Dr. Smith",
+    "id":            "uuid",
+    "name":          "Dr. Smith",
     "practice_name": "Smile Dental",
-    "location_id": "uuid"
+    "location_id":   "uuid"
   },
   "stats": {
-    "total_referrals":    12,
-    "exams_scheduled":    8,
-    "cases_started":      5
+    "total_referrals": 12,
+    "exams_scheduled": 8,
+    "cases_started":   5
   },
   "referrals": [
     {
@@ -272,8 +282,14 @@ Doctor portal. Returns referrer profile, all referrals, and aggregate stats.
 }
 ```
 
+Stats are computed from the `referrals` table:
+- `total_referrals` = COUNT of `referrals` rows for this referrer
+- `exams_scheduled` = COUNT WHERE `status IN ('exam_scheduled', 'converted')`
+- `cases_started` = COUNT WHERE `status = 'converted'`
+
+All three counts are unscoped by date (lifetime totals) on the portal. The portal `referrals[]` array omits `lead_id` and lead PII — doctor sees statuses and timestamps only.
+
 - `404` — token not found
-- Referral rows intentionally omit `lead_id` and lead PII — doctor sees counts and statuses only
 
 ---
 
@@ -281,46 +297,46 @@ Doctor portal. Returns referrer profile, all referrals, and aggregate stats.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `POST` | `/referrals/referrers` | Marketing Staff+ | Create doctor referrer. Body: `{ referrer_type: 'doctor', name, location_id, phone?, email?, practice_name?, address? }`. Automatically generates initial `referral_links` row. Returns `201` with referrer + link. `referrer_type` must be `'doctor'` — patient referrers are auto-created via event. |
-| `GET` | `/referrals/referrers` | Any staff | Filter: `location_id`, `referrer_type`, `status`. Paginated cursor (default 50). |
+| `POST` | `/referrals/referrers` | Marketing Staff+ | Create doctor referrer. Body: `{ referrer_type: 'doctor', name, location_id, phone?, email?, practice_name?, address? }`. `referrer_type` must be `'doctor'` — patient referrers are auto-created via event. Automatically generates initial `referral_links` row with `redirect_url` from `DEFAULT_REFERRAL_LANDING_URL` env var. Returns `201` with referrer + link. |
+| `GET` | `/referrals/referrers` | Any staff | Filter: `location_id`, `referrer_type`, `status`. Paginated cursor (default 50). Location scoped — agents see own location only. |
 | `GET` | `/referrals/referrers/:id` | Any staff | Full referrer record with active link + summary counts (`total_referrals`, `exams_scheduled`, `cases_started`). |
-| `PATCH` | `/referrals/referrers/:id` | Marketing Staff+ | Update doctor contact info (`name`, `phone`, `email`, `practice_name`, `address`). `lead_id`, `referrer_type`, and `location_id` are immutable. Patient referrer `phone` and `name` are immutable via API (updated only via internal Lead Service call on creation). |
+| `PATCH` | `/referrals/referrers/:id` | Marketing Staff+ | Update doctor contact info (`name`, `phone`, `email`, `practice_name`, `address`). `lead_id`, `referrer_type`, and `location_id` are immutable. Patient referrer `phone` and `name` are immutable via API — updated only via Lead Service call at auto-creation. |
 | `PATCH` | `/referrals/referrers/:id/status` | Marketing Manager+ | Body: `{ status: 'active' \| 'inactive' }`. Deactivating a referrer does not deactivate their links automatically — caller must deactivate links separately if desired. |
 
 ### 5.3 Referral Links
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `POST` | `/referrals/referrers/:id/links` | Marketing Staff+ | Generate new link. Body: `{ redirect_url }`. Deactivates any existing active link for this referrer. Returns new link with `code` and full URL. |
+| `POST` | `/referrals/referrers/:id/links` | Marketing Staff+ | Generate new link. Body: `{ redirect_url }`. Deactivates any existing active link for this referrer. Returns new link with `code` and full redirect URL. |
 | `GET` | `/referrals/referrers/:id/links` | Any staff | List all links (active + inactive) with `click_count`. |
-| `PATCH` | `/referrals/links/:id/status` | Marketing Staff+ | Body: `{ status: 'active' \| 'inactive' }`. At most one active link per referrer — activating a link deactivates any other active link for the same referrer. |
+| `PATCH` | `/referrals/links/:id/status` | Marketing Staff+ | Body: `{ status: 'active' \| 'inactive' }`. Activating a link deactivates any other active link for the same referrer (at most one active per referrer). |
 
 ### 5.4 Referrals
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `GET` | `/referrals` | Any staff | List tracking records. Filter: `referrer_id`, `status`, `location_id`, `created_after`, `created_before`. Paginated cursor. |
-| `GET` | `/referrals/:id` | Any staff | Full referral record including reward event (if exists). |
+| `GET` | `/referrals` | Any staff | List tracking records. Filter: `referrer_id`, `status`, `location_id`, `created_after`, `created_before`. Paginated cursor. Location scoped — agents see own location only. |
+| `GET` | `/referrals/:id` | Any staff | Full referral record including reward event if exists. |
 | `PATCH` | `/referrals/:id/notifications` | Any staff | Body: `{ notify_on_exam?: boolean, notify_on_conversion?: boolean }`. Per-referral notification preferences. |
 
 ### 5.5 Rewards
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `GET` | `/referrals/rewards` | Any staff | List reward events. Filter: `status` (`pending`\|`issued`), `location_id`, `referrer_id`. Paginated cursor. Primary use: staff work queue for pending rewards. |
-| `PATCH` | `/referrals/rewards/:id` | Marketing Staff+ | Mark issued. Body: `{ status: 'issued', reward_type, reward_amount?, reward_notes? }`. Sets `issued_at = now()`, `issued_by = JWT sub`. Returns `400` if already issued. `reward_type` required when marking issued. |
+| `GET` | `/referrals/rewards` | Any staff | List reward events. Filter: `status` (`pending`\|`issued`), `location_id`, `referrer_id`. Default sort: `created_at ASC` (oldest pending first). Paginated cursor. Location scoped — agents see own location only. |
+| `PATCH` | `/referrals/rewards/:id` | Marketing Staff+ | Mark issued. Body: `{ status: 'issued', reward_type, reward_amount?, reward_notes? }`. `reward_type` is required. Sets `issued_at = now()`, `issued_by = JWT sub`. Returns `400` if already issued. |
 
 ### 5.6 Leaderboard
 
-| Method | Path | Notes |
-|---|---|---|
-| `GET` | `/referrals/leaderboard` | Query params: `referrer_type` (`patient`\|`doctor`; default both), `location_id`, `period_start`, `period_end`, `limit` (default 20, max 100). Returns referrers ranked by `cases_started` DESC, with `exams_scheduled` and `total_referrals` as secondary columns. |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| `GET` | `/referrals/leaderboard` | Any staff | Query params: `referrer_type` (`patient`\|`doctor`; default both), `location_id`, `period_start`, `period_end`, `limit` (default 20, max 100). Returns referrers ranked by `cases_started` DESC (within period), with `exams_scheduled` and `total_referrals` as secondary columns. Location scoped — agents see own location only. Period scoping uses `referrals.converted_at` for `cases_started`, `referrals.exam_scheduled_at` for `exams_scheduled`, and `referrals.created_at` for `total_referrals`. |
 
 ### 5.7 Doctor Portal Token
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `POST` | `/referrals/referrers/:id/portal-token` | Marketing Staff+ | Generate (or regenerate) portal token. Replaces any existing token (`UPSERT` on `referrer_id`). Returns `{ token, portal_url }`. Doctors only (`400` if referrer_type = 'patient'). |
+| `POST` | `/referrals/referrers/:id/portal-token` | Marketing Staff+ | Generate (or regenerate) portal token for a doctor referrer. `400` if `referrer_type = 'patient'`. Replaces any existing token (`UPSERT` on `referrer_id`). Returns `{ token, portal_url }`. |
 
 ---
 
@@ -353,7 +369,34 @@ Published when a referred lead signs a contract (triggered by `lead.converted` t
 }
 ```
 
-**Subscribers:** Lead Service (activity timeline entry), Analytics Service (referral conversion metrics).
+**Subscribers:** Lead Service (activity timeline entry), Analytics Service (referral conversion metrics). Automation Engine is intentionally excluded from subscribers for launch — no referral-triggered automation workflows are in scope.
+
+---
+
+#### `referrer.created`
+
+Published after Branch B of `lead-converted.ts` commits (patient referrer + link created on treatment completion). Automation Engine subscribes to this event to enroll the patient in the post-treatment retention sequence with the referral link URL in context, avoiding a race condition where the Automation Engine might otherwise fetch the link before it exists.
+
+```json
+{
+  "event_id":    "uuid",
+  "event_type":  "referrer.created",
+  "entity_type": "referrer",
+  "entity_id":   "<referrer_id>",
+  "payload": {
+    "referrer_id":        "uuid",
+    "referrer_type":      "patient",
+    "lead_id":            "uuid",
+    "location_id":        "uuid",
+    "referral_link_id":   "uuid",
+    "referral_code":      "abc123XY",
+    "referral_link_url":  "https://yourpractice.com/ref/abc123XY",
+    "created_at":         "..."
+  }
+}
+```
+
+**Subscribers:** Automation Engine (trigger post-treatment sequence enrollment with `referral_link_url` in context).
 
 ---
 
@@ -363,44 +406,49 @@ EventBridge routes all subscribed events to one SQS queue. BullMQ worker polls a
 
 #### `lead.created` → `lead-created.ts`
 
-**Condition:** `payload.referrer_id` is non-null.
+**Precondition:** This handler requires `referral_code`, `referrer_id`, and `referrer_type` to be present in the `lead.created` payload. **This handler must not be shipped until Pending Amendment 1 (Lead Service spec) is implemented.** A contract test (Section 8) validates the payload shape at deploy time and will fail if the fields are absent.
+
+**Condition:** `payload.referrer_id` is non-null AND `payload.referral_code` is non-null.
 
 **Handler behavior:**
-1. Look up active `referral_links` row for `referrer_id` — if none found, log warn + skip (referrer may have been deactivated)
-2. Insert `referrals` row: `{ referral_link_id, referrer_id, lead_id, location_id, status: 'created' }`
+1. Look up `referral_links` row by `payload.referral_code` — if found (active or inactive), use that `referral_link_id`. If code not found in DB (true data-integrity edge case — code was never created or was hard-deleted, which is not a normal operational state), log warn + skip. **Do not fall back to the active link** — mis-attributing a referral to a link the lead never clicked is worse than not recording the referral. The inactive-link case is handled upstream: `GET /referrals/links/:code` returns `404` for inactive codes, so the form widget never embeds referral fields for inactive links; `referral_code` will be absent from the `lead.created` payload in that case.
+2. Insert `referrals` row: `{ referral_link_id, referrer_id: payload.referrer_id, lead_id: payload.lead_id, location_id: payload.location_id, status: 'created' }`
 3. **Idempotency:** `ON CONFLICT (lead_id) DO NOTHING` — safe on SQS at-least-once redelivery
 
 #### `lead.stage_changed` → `lead-stage-changed.ts`
 
-**Condition:** `payload.stage_to = 'exam_scheduled'`
+**Condition:** `payload.pipeline = 'new_patient'` AND `payload.stage_to = 'exam_scheduled'`
+
+The pipeline guard is required — do not fire on stages named `exam_scheduled` in other pipelines (defensive against future changes to the state machine).
 
 **Handler behavior:**
-1. Look up `referrals` row by `lead_id` — if not found, skip (lead was not a referred lead)
+1. Look up `referrals` row by `payload.lead_id` — if not found, skip (lead was not a referred lead)
 2. Update: `status = 'exam_scheduled'`, `exam_scheduled_at = payload.transitioned_at`
-3. If `referrals.notify_on_exam = true` AND `referrer.referrer_type = 'patient'`:
-   - Call `POST /messages/send` (Messaging Service) with referrer's `phone`
-   - Message body: configurable template stored in `notification.service.ts`; includes referrer name and location name from referrer record
-4. **Idempotency:** status update is idempotent (same value on re-delivery)
+3. If `referrals.notify_on_exam = true` AND `referrer.referrer_type = 'patient'` AND referrer `phone` is non-null:
+   - Call `POST /messages/send` (Messaging Service) with referrer's `phone` and `dedup_key = "referral_exam_notify:{referral_id}"` to prevent duplicate SMS on SQS redelivery
+   - Message body: built by `notification.service.ts`; includes referrer first name
+4. **Idempotency:** DB status update is idempotent on redelivery; `dedup_key` on Messaging Service call prevents duplicate SMS
 
 #### `lead.converted` → `lead-converted.ts`
 
 Two separate branches in the same handler based on `payload.to_pipeline`:
 
 **Branch A — `to_pipeline = 'in_treatment'` (contract signed):**
-1. Look up `referrals` row by `lead_id` — if not found, skip
+1. Look up `referrals` row by `payload.lead_id` — if not found, skip
 2. Update: `status = 'converted'`, `converted_at = payload.converted_at`
 3. Insert `reward_events` row: `{ referral_id, referrer_id, status: 'pending' }` — idempotency via `UNIQUE (referral_id)` + `ON CONFLICT DO NOTHING`
-4. If `notify_on_conversion = true` AND `referrer_type = 'patient'`:
-   - Call `POST /messages/send` with referrer's `phone`
+4. If `notify_on_conversion = true` AND `referrer_type = 'patient'` AND referrer `phone` is non-null:
+   - Call `POST /messages/send` with referrer's `phone` and `dedup_key = "referral_conversion_notify:{referral_id}"` to prevent duplicate SMS on SQS redelivery
 5. Publish `referral.converted` to EventBridge (post-commit)
 
 **Branch B — `to_pipeline = 'in_retention'` (treatment complete → patient referrer creation):**
-1. Check if `referrers` row already exists for `lead_id` — if yes, skip (idempotent)
+1. Check if `referrers` row already exists for `lead_id` — if yes, skip (idempotent on SQS redelivery)
 2. Call `GET /leads/:lead_id` (Lead Service, internal API key) → get `{ first_name, last_name, phone, location_id }`
-3. Insert `referrers` row: `{ referrer_type: 'patient', lead_id, location_id, name: full_name, phone, created_by: null }`
-4. Insert `referral_links` row with generated `code` and default `redirect_url` (configured via `DEFAULT_REFERRAL_REDIRECT_URL` env var)
+3. Insert `referrers` row: `{ referrer_type: 'patient', lead_id, location_id, name: first_name + ' ' + last_name, phone, created_by: null }`
+4. Insert `referral_links` row with generated `code` and `redirect_url` from `DEFAULT_REFERRAL_LANDING_URL` env var (the practice landing page URL — distinct from `REFERRAL_BASE_URL` which is the API gateway base used in the redirect endpoint URL)
+5. Publish `referrer.created` to EventBridge (post-commit) with `referral_link_url` constructed as `REFERRAL_BASE_URL` + `/referrals/r/` + `code` — where `REFERRAL_BASE_URL` is the CRM API Gateway's public base URL (e.g. `https://api.yourpractice.com`). This URL routes through the click-tracking redirect endpoint so all clicks originating from the post-treatment sequence are counted in `click_count`. Do **not** use the landing page URL with `?ref=` baked in — that would bypass click tracking.
 
-If Lead Service call fails in Branch B: log error to Datadog + dead-letter the job. Staff can manually trigger referrer creation via `POST /referrals/referrers` as a fallback.
+If Lead Service call fails in Branch B: log error to Datadog + dead-letter the job. Staff can manually create the referrer via `POST /referrals/referrers` as a fallback — after manual creation the Automation Engine won't receive `referrer.created`, so sequence enrollment must be triggered manually as well.
 
 ---
 
@@ -437,7 +485,7 @@ apps/crm/referral/
 │   │       ├── lead-stage-changed.ts
 │   │       └── lead-converted.ts
 │   ├── events/
-│   │   └── publisher.ts           # referral.converted
+│   │   └── publisher.ts           # referral.converted + referrer.created
 │   ├── clients/
 │   │   └── lead-service.client.ts # GET /leads/:id with internal API key
 │   └── index.ts
@@ -450,7 +498,7 @@ apps/crm/referral/
 
 **Runtime dependencies:**
 - PostgreSQL (shared RDS cluster, `crm_referrals` schema)
-- AWS EventBridge (publish `referral.converted`)
+- AWS EventBridge (publish `referral.converted`, `referrer.created`)
 - AWS SQS (subscribe to `lead.created`, `lead.stage_changed`, `lead.converted`)
 - Messaging Service (REST — SMS notifications)
 - Lead Service (REST — internal API key, patient info at referrer creation)
@@ -462,26 +510,28 @@ apps/crm/referral/
 
 ### Unit Tests (Vitest)
 
-- `link.service.ts` — code generation produces 8-char alphanumeric; collision retry logic (up to 5 attempts); unique constraint respected
-- `notification.service.ts` — correct phone selected from referrer record; correct message body per notification type (`exam_scheduled`, `converted`); skips when `notify_on_exam = false` or `notify_on_conversion = false`; skips when `referrer_type = 'doctor'` (no SMS for doctors on these events)
-- `reward.service.ts` — `400` on double-issue attempt; `issued_at` and `issued_by` set correctly
+- `link.service.ts` — code generation produces 8-char alphanumeric; collision retry logic (up to 5 attempts); returns `500` on 5 consecutive collisions
+- `notification.service.ts` — correct phone selected from referrer record; correct message body per notification type (`exam_scheduled`, `converted`); skips when `notify_on_exam = false` or `notify_on_conversion = false`; skips when `referrer_type = 'doctor'`; skips when `phone` is null
+- `reward.service.ts` — `400` on double-issue attempt; `issued_at` and `issued_by` set correctly; `reward_type` required on issue
 
 ### Integration Tests (Vitest + real Postgres, Messaging Service + Lead Service mocked)
 
-- `lead-created` handler — `referrals` row created when `referrer_id` present + active link exists; skip when `referrer_id` null; skip when no active link; idempotent on duplicate delivery (`ON CONFLICT DO NOTHING`)
-- `lead-stage-changed` handler — status advances to `exam_scheduled`, `exam_scheduled_at` set; SMS called for patient referrer; no SMS called for doctor referrer; non-`exam_scheduled` stages skipped; missing referral record skipped
-- `lead-converted` handler (Branch A) — status `converted`; `reward_events` row created with `pending`; `referral.converted` published; SMS sent; idempotent on duplicate delivery
-- `lead-converted` handler (Branch B) — `referrers` + `referral_links` rows created; idempotent (second delivery skips); Lead Service call failure → dead-letters job
-- `GET /referrals/r/:code` — `302` with correct redirect URL (`?ref=:code` appended); `click_count` incremented; `404` for inactive/unknown code
-- `GET /referrals/links/:code` — `200` with `referrer_id`, `referrer_type`, `referrer_name`; `404` for inactive/unknown
-- `GET /referrals/portal/:token` — `200` with referrer + referrals + correct stats; `404` for unknown token; referral rows omit `lead_id`
-- `PATCH /referrals/rewards/:id` — `pending → issued` with `reward_type`, `issued_at`, `issued_by` set; `400` on double-issue; `reward_type` required
-- `GET /referrals/leaderboard` — correct ranking by `cases_started` DESC; `referrer_type` filter works; `period_start`/`period_end` scoping correct
-- `POST /referrals/referrers/:id/portal-token` — token generated; regeneration replaces previous token; `400` if patient referrer
+- `lead-created` handler — `referrals` row created pinned to the specific link matching `referral_code`; fallback to active link when code not in DB; skip when `referrer_id` null; skip when no active/matching link found; idempotent on duplicate delivery
+- `lead-stage-changed` handler — status advances to `exam_scheduled`, `exam_scheduled_at` set; SMS sent with correct `dedup_key` for patient referrer; no SMS for doctor referrer; non-`exam_scheduled` stage skipped; `pipeline != 'new_patient'` skipped; missing referral record skipped; Messaging Service `dedup_key` prevents duplicate SMS on second delivery of same event
+- `lead-converted` handler (Branch A) — status `converted`; `reward_events` row created with `pending`; `referral.converted` published; SMS sent with `dedup_key`; idempotent on duplicate delivery
+- `lead-converted` handler (Branch B) — `referrers` + `referral_links` rows created; `referrer.created` published with `referral_link_url`; idempotent (second delivery skips); Lead Service call failure → dead-letters job
+- `GET /referrals/r/:code` — active code: `302` with `?ref=:code` appended + `click_count` incremented; inactive code: `302` without `?ref=` + no increment; unknown code: `404`
+- `GET /referrals/links/:code` — `200` with `referrer_id`, `referral_link_id`, `referrer_type`, `referrer_name`; `404` for inactive; `404` for unknown
+- `GET /referrals/portal/:token` — `200` with referrer + referrals + correct stats (`total_referrals`, `exams_scheduled`, `cases_started` computed correctly); `404` for unknown token; referral rows omit `lead_id`
+- `PATCH /referrals/rewards/:id` — `pending → issued` with `reward_type`, `issued_at`, `issued_by` set; `400` on double-issue; `400` when `reward_type` absent
+- `GET /referrals/leaderboard` — correct ranking by `cases_started` DESC; `referrer_type` filter applied; `period_start`/`period_end` scoping uses correct date columns per metric; location scoping for agents
+- `POST /referrals/referrers/:id/portal-token` — token generated; regeneration replaces previous token (UPSERT); `400` if `referrer_type = 'patient'`
 
 ### Contract Tests
 
-- `referral.converted` payload contains all required fields: `referral_id`, `lead_id`, `referrer_id`, `referrer_type`, `location_id`, `converted_at`
+- Incoming `lead.created` payload shape: assert `referrer_id`, `referrer_type`, and `referral_code` fields exist (nullable). **This test must fail if the Lead Service amendment has not been deployed** — blocks `lead-created.ts` handler from shipping prematurely.
+- Outgoing `referral.converted` payload: all required fields present (`referral_id`, `lead_id`, `referrer_id`, `referrer_type`, `location_id`, `converted_at`)
+- Outgoing `referrer.created` payload: all required fields present (`referrer_id`, `lead_id`, `location_id`, `referral_link_id`, `referral_code`, `referral_link_url`); assert `referral_link_url` matches pattern `*/referrals/r/<code>` (contains redirect endpoint path, not a landing page URL with `?ref=` baked in)
 
 ---
 
@@ -490,18 +540,32 @@ apps/crm/referral/
 | Decision | Choice | Rationale |
 |---|---|---|
 | Referral attribution flow | Client-side resolution by form widget | Preserves Lead Service's zero-outbound-call pattern at creation time; attribution immutability unaffected; soft-fail on invalid code keeps lead creation robust |
+| Specific link pinning | `referral_code` passed through form widget → Lead Service → `lead.created` payload | Ensures `referrals.referral_link_id` is accurate; prevents mis-attribution when a referrer's link is deactivated between click and form submission |
+| Sequence enrollment timing | Automation Engine subscribes to `referrer.created` (not `lead.converted`) | Eliminates race condition where Automation Engine fetches referral link before Branch B has committed |
 | Patient referrer creation | Reactive on `lead.converted` to `in_retention` | Automatic, no staff action required; idempotent on SQS redelivery |
-| Referrer phone storage | Denormalized on `referrers` row at creation | Avoids per-SMS lookup of Lead Service; acceptable stale risk for MVP |
-| SMS notifications | Direct call to Messaging Service | Simpler than publishing an event and configuring an Automation Engine rule for referral-specific logic |
+| Referrer phone storage | Denormalized on `referrers` row at creation | Avoids per-SMS lookup of Lead Service; acceptable stale risk for MVP (patient phones rarely change post-treatment) |
+| SMS notifications | Direct call to Messaging Service with `dedup_key` | Simpler than event-based approach; `dedup_key` ensures idempotency on SQS redelivery |
+| Doctor thank-you | Deferred for launch | Doctor relationship is managed through manual outreach; SMS requires phone which is optional for doctors; future Campaign Service email campaigns can cover this |
 | Reward lifecycle | Two-state (`pending → issued`) | Gives staff an actionable work queue; no approval overhead for MVP |
 | Doctor portal auth | Long-lived token in URL | No account management overhead; acceptable for a low-sensitivity, read-only view |
-| Click tracking | Increment-on-redirect (best-effort) | Redirect never blocked by DB failure; analytics value doesn't justify blocking the user |
+| Click tracking | `302` for inactive codes (no `?ref=`) rather than `404` | Prospective patient still reaches the practice website; `404` looks broken when shared in SMS/email |
 | Code generation | 8-char alphanumeric with collision retry | URL-safe, short enough for SMS links, collision probability negligible at expected volumes |
 
 ---
 
 ## 10. Pending Amendments Required
 
-1. **Lead Service spec** — add `referrer_id` (uuid nullable) and `referrer_type` (varchar nullable) to `lead.created` event payload so Referral Service SQS worker can identify referred leads without a follow-up REST call
-2. **Arch doc event table** — add `referral.converted` row: publisher = Referral Service, subscribers = Lead Service + Analytics Service
+1. **Lead Service spec** — add the following to the `leads` table DDL and `lead.created` event payload:
+   - `referrer_id` (uuid nullable) — already present in the `leads` table per Lead Service spec; confirm it is included in the `lead.created` payload
+   - `referrer_type` (varchar nullable) — add to `leads` table DDL and `lead.created` payload
+   - `referral_code` (varchar nullable) — add to `leads` table DDL and `lead.created` payload; stores the raw 8-char code from the form widget; immutable after creation
+
+2. **Arch doc event table** — add:
+   - `referral.converted`: publisher = Referral Service, subscribers = Lead Service + Analytics Service
+   - `referrer.created`: publisher = Referral Service, subscribers = Automation Engine
+
 3. **Analytics Service spec** — add `referral.converted` handler to the SQS worker (new rollup table `metrics_referrals_daily` or routed through existing generic DSL — to be decided in Analytics spec amendment)
+
+4. **Automation Engine spec** — add `referrer.created` to the supported event trigger catalog with `entity_type = 'referrer'` and `event_type = 'referrer.created'`. Document that event payload fields (e.g. `referral_link_url`, `lead_id`, `location_id`) are available as context variables in downstream action steps. Specifically, the post-treatment workflow rule subscribes to `referrer.created`, reads `referral_link_url` from the event payload, and passes it as a context field when calling `POST /sequences/enroll` — so the Nurturing Engine can include the referral link URL in the post-treatment thank-you SMS template.
+
+5. **Pipeline Engine spec** — confirm that the `lead.converted` event payload includes `to_pipeline` field (values: `'in_treatment'` | `'in_retention'`). The Referral Service `lead-converted.ts` handler branches on this field. Per the existing Pipeline Engine spec Section 6, the `lead.converted` payload includes `to_pipeline` as `"to_pipeline": "in_treatment"` — this amendment is a cross-reference confirmation, not a new field addition.
