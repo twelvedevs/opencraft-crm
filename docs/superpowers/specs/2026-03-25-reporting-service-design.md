@@ -119,7 +119,7 @@ On each dashboard or metric request, `metrics-calculator.ts` fans out parallel c
 | Stage entries by stage | `GET /analytics/metrics/pipeline` | Exam conversion rate, exam show rate, case conversion rate |
 | Conversion counts by channel | `GET /analytics/metrics/conversions` | Cost per case, ROAS, revenue attributed |
 | Ad spend by platform + campaign | `GET /analytics/metrics/ad-spend` | All cost metrics |
-| Coordinator stats | `GET /analytics/metrics/coordinators` | Coordinator performance *(new endpoint — see Section 7)* |
+| Coordinator stats | `GET /analytics/metrics/coordinators` | Coordinator performance *(new endpoint — see Section 8.2)* |
 | Campaign stats | `GET /analytics/metrics/campaigns` | Campaign analytics report |
 
 All calls pass through the same `period`, `location_id[]`, and `granularity` params received from the caller. Location access control is enforced before these calls — the Analytics Service receives only the location IDs the caller is permitted to see.
@@ -245,7 +245,7 @@ POST  /reporting/runs/:id/retry                → re-enqueue a failed run as a 
 
 **`GET /reporting/runs?config_id=` authorization:** Before returning run history, the service verifies the caller has read access to the named `report_config_id` using the same rules as `GET /reporting/report-configs` (own config, or `marketing_manager+` for any config).
 
-**`/retry`:** Creates a new `report_run` row inheriting `format` and `recipient_emails` from the original failed run. Enqueues a fresh `generate-report` job — does not mutate the failed run row.
+**`/retry` authorization:** Same ownership/location-access check as `/download` — caller must be (a) the `triggered_by` user of the original run, or (b) have location access to all `location_ids` in the run's report config parameters. `marketing_manager+` passes check (b) unconditionally. Creates a new `report_run` row inheriting `format` and `recipient_emails` from the original failed run. Enqueues a fresh `generate-report` job — does not mutate the failed run row.
 
 ### 4.5 Configuration
 
