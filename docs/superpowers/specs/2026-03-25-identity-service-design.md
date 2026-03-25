@@ -177,7 +177,7 @@ last_used_at timestamptz  NULLABLE
 revoked_at   timestamptz  NULLABLE
 ```
 
-Raw key returned once on creation, never stored. Key format: `ak_<32 random bytes hex>`.
+Raw key returned once on creation, never stored. Key format: `ak_<32 random bytes hex>`. API keys do not expire — revocation is the only deactivation path. No `expires_at` column is needed for launch.
 
 ---
 
@@ -201,7 +201,7 @@ Raw key returned once on creation, never stored. Key format: `ak_<32 random byte
 | `POST` | `/identity/users` | Create user with initial password; `force_password_reset: true` |
 | `GET` | `/identity/users` | List users; filterable by `role`, `status`; cursor-paginated (default page size: 50) |
 | `GET` | `/identity/users/:id` | Get user |
-| `PUT` | `/identity/users/:id` | Update name, role, location assignments, or status. When `status` is set to `inactive`: all active refresh tokens for that user are bulk-revoked (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = :id AND revoked_at IS NULL`) and `AuthProvider.deactivateUser()` is called. Outstanding JWTs remain valid for up to 15 minutes — accepted consequence of the stateless JWT model. |
+| `PUT` | `/identity/users/:id` | Update name, role, location assignments, or status. When `status` is set to `inactive`: all active refresh tokens for that user are bulk-revoked (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = :id AND revoked_at IS NULL`) and `AuthProvider.deactivateUser()` is called. Outstanding JWTs remain valid for up to 15 minutes — accepted consequence of the stateless JWT model. Re-activation (setting `status` back to `active`) is out of scope for launch; the endpoint returns `422` if `status: active` is passed for an already-inactive user. |
 | `PUT` | `/identity/users/:id/password` | Admin password reset. Automatically sets `force_password_reset = true`. No notification is sent — the admin communicates the new password out-of-band. |
 
 ### API Key Management — `require-role(['marketing_manager', 'super_admin'])`
@@ -296,7 +296,8 @@ src/
 ├── plugin.ts              # verifies JWT via JWKS (caches keys, selects by kid),
 │                          # attaches user context to request;
 │                          # rejects must_change_password: true with 403 on all routes
-│                          # except PUT /identity/me/password and GET /identity/me
+│                          # except PUT /identity/me/password, GET /identity/me,
+│                          # and DELETE /identity/session
 ├── permissions.ts         # static ROLE_PERMISSIONS map (from PRD permission table)
 ├── require-permission.ts  # preHandler: checks ROLE_PERMISSIONS[role].includes(permission)
 │                          # → 403 if not found. Primary enforcement mechanism for
