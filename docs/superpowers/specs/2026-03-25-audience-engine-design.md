@@ -193,9 +193,9 @@ Error responses: `404` if segment not found. `400` if `filter` is invalid.
 
 ---
 
-**`POST /audiences/segments/:id/activate`** — Promote current draft to active. Marketing Manager only. `current_version` must have a saved filter — returns `400` if `current_version` has never been saved with a filter.
+**`POST /audiences/segments/:id/activate`** — Promote current draft to active. Sets `status = 'active'` and advances `active_version` to `current_version`. Marketing Manager only. Returns `400` if `current_version` has never been saved with a filter.
 
-Response `200`: `{ "segment_id": "uuid", "active_version": 4 }`
+Response `200`: `{ "segment_id": "uuid", "active_version": 4, "status": "active" }`
 
 Error responses: `404` if segment not found. `403` if caller is not Marketing Manager role. `400` if no filter has been saved for `current_version`.
 
@@ -213,7 +213,13 @@ Error responses: `404` if segment not found. `403` if caller is not Marketing Ma
 
 Query params: `?limit=100&offset=0`
 
-Response: `[{ segment_id, name, status, active_version, current_version, updated_at }]`
+Response:
+```json
+{
+  "items": [{ "segment_id": "uuid", "name": "...", "status": "active", "active_version": 2, "current_version": 2, "updated_at": "..." }],
+  "total": 47
+}
+```
 
 ---
 
@@ -247,6 +253,7 @@ Request:
 }
 ```
 
+- `snapshot_id` is required. Returns `400` if absent.
 - `snapshot_id` is caller-generated (UUID). On first call, the engine creates the snapshot row using `INSERT ... ON CONFLICT (id) DO NOTHING` — concurrent first-batch calls with the same `snapshot_id` are safe; only one row is created.
 - Every batch call validates that the existing `audience_snapshots.segment_id` matches the `:id` in the URL. Returns `400` if mismatch — prevents cross-segment snapshot pollution.
 - Submitting the same `(snapshot_id, entity_id)` pair twice is idempotent — `INSERT INTO audience_snapshot_members ... ON CONFLICT DO NOTHING`.
@@ -275,7 +282,7 @@ Request:
 - `snapshot_id` is required when `snapshot: true`; ignored (and optional) when `snapshot: false`. Returns `400` if `snapshot: true` and `snapshot_id` is absent.
 - `snapshot: false` is only valid with `done: true`. Returns `400` if `snapshot: false` and `done: false` — there is no in-memory accumulation across stateless HTTP calls.
 - `snapshot: false` (default) — engine evaluates and returns matched entity IDs in the response body. No snapshot row written.
-- `snapshot: true` — engine accumulates into a snapshot (same paging model as named evaluate). Useful for large one-off sends.
+- `snapshot: true` — engine accumulates into a snapshot (same paging model as named evaluate). Useful for large one-off sends. On first batch, `filter_snapshot` is written from the request's `filter` field. On subsequent batches, if the incoming `filter` does not match the stored `filter_snapshot`, returns `400` — prevents silently mixing different filters across batches for the same snapshot.
 
 Response (`snapshot: false`, `done: true`):
 ```json
@@ -329,7 +336,7 @@ Response `200`:
 ```
 
 - Returns `404` if segment has no active version or is disabled.
-- Segment resolution is cached: the full resolved segment (group row + active filter) is stored in-memory keyed by `segment_id` with a 30s TTL. A single cache entry per `segment_id` — no secondary cache needed. On a cache miss, the service loads `audience_segments` (to get `active_version`) and `audience_segment_versions` (to get the filter) in one query. Cache invalidated on TTL expiry only — a new version activation takes effect within 30 seconds across all running instances. The `segment_version` returned in the response reflects the version in the cached entry.
+- Segment resolution is cached: the full resolved segment (group row + active filter) is stored in-memory keyed by `segment_id` with a 30s TTL. A single cache entry per `segment_id` — no secondary cache needed. On a cache miss, the service loads `audience_segments` (to get `active_version`) and `audience_segment_versions` (to get the filter) in one query. Cache invalidated on TTL expiry only — a new version activation or a `disable` operation takes effect within 30 seconds across all running instances. During this window, `check` calls may still return membership results for a recently disabled segment rather than `404`. The `segment_version` returned in the response reflects the version in the cached entry.
 
 ---
 
@@ -451,9 +458,12 @@ The CRM configures the available fields and entity data provider at mount time:
   ]}
   onSelect={(segmentId) => { /* Campaign Service captures segment ID */ }}
   onFetchEntities={async (filter) => {
-    // CRM calls Lead Service to get a sample of candidate entities
-    // Returns EntityRecord[] — the component posts them to the Audience Engine for preview
-    return await leadService.getSample({ limit: 500 });
+    // CRM calls Lead Service to get a sample of candidate entities.
+    // The filter is passed as an optional pre-filter hint — the Lead Service can use
+    // CRM-specific fields (pipeline, stage, location) to narrow results before the
+    // Audience Engine applies the full filter. Pre-filtering is recommended for large
+    // datasets but not required — the Audience Engine will apply all conditions regardless.
+    return await leadService.getSample({ limit: 500, hint: filter });
   }}
 />
 ```
