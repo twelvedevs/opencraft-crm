@@ -18,7 +18,7 @@ The Conversation Service (`apps/crm/conversation`) bridges the platform-layer Me
 - Outbound send: coordinator sends → call `POST /messages/send` on Messaging Service → store locally
 - Track Twilio delivery status per message (from `message.delivered` / `message.failed`)
 - Scheduled send: BullMQ delayed jobs owned entirely by this service
-- Bulk SMS: BullMQ batch job calling Audience Engine + Lead Service + Messaging Service
+- Bulk SMS: BullMQ batch job calling Lead Service + Audience Engine + Messaging Service
 - AI features: smart reply drafts, conversation summary, objection handling (on-demand, calling AI Service)
 - AI Agent autonomous mode: location-level on/off, BullMQ job per inbound reply, auto-escalation to human
 - Publish `message.received` to EventBridge → Automation Engine consumes it; call `POST /notifications/publish` directly → Notification Service
@@ -44,7 +44,7 @@ Coordinator ──────► │  REST API                                 
                     │    ├── notes          (internal notes)           │
                     │    ├── scheduled      (scheduled sends)          │
                     │    ├── ai             (drafts, summary, objection)│
-                    │    ├── bulk-send      (segment broadcast)        │
+                    │    ├── bulk-sends     (segment broadcast)        │
                     │    └── settings       (per-location config)      │
                     │                                                  │
 EventBridge ──────► │  Event Handlers (via SQS)                        │
@@ -82,14 +82,16 @@ A conversation is keyed by `(lead_id, practice_number)` where `practice_number` 
 ```
 inbound_message.received { from_number, to_number, ... }
   → GET /leads?phone={from_number} on Lead Service
-      no match → log warn, skip (unknown number)
-  → load location_conversation_settings for lead's location_id
+      response includes: { id, location_id, phone, current_stage, treatment_interest, ... }
+      no match → log warn, skip (unknown number — no conversation created)
+  → load location_conversation_settings for lead.location_id
   → SELECT most recent conversation WHERE
         lead_id = resolved_lead_id
     AND practice_number = to_number
     AND last_message_at > now() - inactivity_days
       found → append to existing conversation
-      not found → INSERT new conversation
+      not found → INSERT new conversation (lead_id, location_id=lead.location_id,
+                    practice_number=to_number, lead_phone=from_number)
 ```
 
 ### 3.2 Multi-Conversation Per Lead
@@ -104,16 +106,38 @@ All conversations for a lead are accessible via `GET /conversations?lead_id=uuid
 
 ## 4. API
 
+**Route registration order note:** `/bulk-sends` and `/bulk-sends/:job_id` routes must be registered before `/:id` parameter routes to prevent Fastify from matching the literal string `bulk-sends` as a conversation ID.
+
 ### 4.1 Inbox
 
 ```
 GET /conversations
     ?location_id=uuid&lead_id=uuid&status=open&assigned_to=me&page=1&limit=25
 ```
-Returns conversation list with `unread_count` per conversation and last message preview. Access-scoped by JWT:
+Returns conversation list. Access-scoped by JWT:
 - `call_center_agent` — own location only
 - `call_center_manager` — assigned locations
 - `marketing_manager` / `super_admin` — all locations
+
+Response shape per item:
+```json
+{
+  "id": "uuid",
+  "lead_id": "uuid",
+  "location_id": "uuid",
+  "practice_number": "+15551234567",
+  "lead_phone": "+15559876543",
+  "status": "open",
+  "assigned_to": "uuid | null",
+  "escalated": false,
+  "agent_mode_active": false,
+  "last_message_at": "2026-03-25T10:00:00Z",
+  "last_message_preview": "Hey I had a question about...",
+  "unread_count": 3
+}
+```
+
+`unread_count` = count of `conversation_messages` where `created_at` is after the `created_at` of `conversation_reads.last_read_message_id` for the calling user (subquery on primary key). If no read record exists, `unread_count` = total message count.
 
 ```
 GET /conversations/:id
@@ -129,14 +153,18 @@ Paginated thread, cursor-based (newest-first).
 PATCH /conversations/:id
       { assigned_to?, escalated?, status?, agent_mode_active? }
 ```
-- `assigned_to` — any coordinator role
-- `agent_mode_active` — `marketing_manager` role only
+- `assigned_to` — any coordinator role; once set, AI agent stops handling new inbound messages for this conversation
+- `agent_mode_active: false` — any coordinator role (disable agent for this conversation)
+- `agent_mode_active: true` — `marketing_manager` role only (re-enable agent on a conversation)
 - `status: 'closed'` — closes conversation
+- `status: 'open'` — re-opens a closed conversation (any coordinator role)
+
+**Conversation status and inbound routing:** `status = 'closed'` is a UI-layer signal only — it does not block inbound message append. If a lead replies to a closed conversation within the `inactivity_days` window, the message is appended and the conversation is automatically set back to `status = 'open'`. If the inactivity window has expired, a new conversation is created regardless of the closed conversation's status.
 
 ```
 POST /conversations/:id/read
 ```
-Upserts `conversation_reads` for calling user (marks conversation as read up to the latest message).
+Upserts `conversation_reads` for calling user, setting `last_read_message_id` to the most recent message in the conversation at the time of the call.
 
 ### 4.2 Outbound & Scheduled
 
@@ -155,7 +183,7 @@ Creates a pending scheduled send and enqueues a BullMQ delayed job. Returns `201
 ```
 DELETE /conversations/:id/scheduled-messages/:msg_id
 ```
-Cancels a pending scheduled send. Returns `409` if already sent.
+Cancels a pending scheduled send: updates `status = 'cancelled'` in DB and removes the BullMQ job via `job.remove()`. Returns `409` if already sent.
 
 ```
 GET /conversations/:id/scheduled-messages
@@ -172,38 +200,41 @@ Internal notes are visible to all staff at the location. Not visible to leads.
 
 ### 4.4 AI Features
 
+All AI features call `POST /ai/complete` on the AI Service. Prompt IDs below must be registered in the AI Service prompt registry.
+
 ```
 POST /conversations/:id/ai/drafts
 ```
-Returns 2-3 reply draft options. Calls AI Service with `prompt_id: conversation_reply_drafts`, context includes last 10 messages + lead stage + treatment interest.
+Returns 2-3 reply draft options. Calls AI Service with `prompt_id: "conversation-reply-drafts"`, context includes last 10 messages + lead stage + treatment interest.
 Response: `{ drafts: [{ body, label }] }`
 
 ```
 POST /conversations/:id/ai/summary
 ```
-Returns a 3-sentence conversation briefing. Calls AI Service with `prompt_id: conversation_summary`. Triggered when coordinator opens a thread with 10+ messages.
+Returns a 3-sentence conversation briefing. Calls AI Service with `prompt_id: "conversation-summary"`. Triggered when coordinator opens a thread with 10+ messages.
 Response: `{ summary }`
 
 ```
 POST /conversations/:id/ai/objection
      { objection_type }
 ```
-Returns objection handling strategies. Calls AI Service with `prompt_id: conversation_objection_handling`.
+Returns objection handling strategies. Calls AI Service with `prompt_id: "conversation-objection-handling"`.
 Response: `{ strategies: [{ title, body }] }`
 
 ### 4.5 Bulk SMS
 
 ```
-POST /conversations/bulk-send
+POST /bulk-sends
      { segment: { ...audience filter fields... }, body, location_id }
 ```
-Enqueues a BullMQ bulk-send job. Calls Audience Engine (`POST /audiences/evaluate`) to resolve lead IDs, then Lead Service for phone numbers, then Messaging Service per recipient. Returns `202 { job_id }`.
+Enqueues a BullMQ bulk-send job. Returns `202 { job_id }`.
 
+Access:
 - `call_center_manager` — own location only
 - `marketing_manager` — all locations
 
 ```
-GET /conversations/bulk-send/:job_id
+GET /bulk-sends/:job_id
     → { status, total, sent, failed }
 ```
 
@@ -212,9 +243,11 @@ GET /conversations/bulk-send/:job_id
 ```
 GET   /settings/locations/:id
 PATCH /settings/locations/:id
-      { inactivity_days?, agent_mode_enabled?, agent_max_exchanges? }
+      { inactivity_days?, agent_mode_enabled?, agent_max_exchanges?, location_phone? }
 ```
 `marketing_manager` role only.
+
+**Validation:** `PATCH` with `agent_mode_enabled: true` returns `422` if `location_phone` is not already set and not provided in the same request — the disclosure footer cannot be rendered without it.
 
 ---
 
@@ -226,26 +259,38 @@ PATCH /settings/locations/:id
 EventBridge: inbound_message.received
   → SQS → inbound-message.handler.ts
   → GET /leads?phone={from_number} on Lead Service
+      response: { id, location_id, phone, current_stage, treatment_interest, ... }
       no match → log warn, return (unknown number — no conversation created)
-  → load location_conversation_settings for lead's location_id
-  → find or create conversation (lead_id, practice_number=to_number, inactivity window)
+  → load location_conversation_settings for lead.location_id
+  → find or create conversation:
+      SELECT most recent conversation WHERE lead_id = ? AND practice_number = to_number
+        AND last_message_at > now() - inactivity_days
+        → found (any status): append + if status = 'closed' → set status = 'open'
+        → not found: INSERT new conversation
   → INSERT conversation_messages (direction: 'inbound', status: 'received',
       message_type from event, messaging_message_id from event.message_id)
   → UPDATE conversations SET last_message_at = now()
   → publish message.received to EventBridge:
-      { message_id, conversation_id, lead_id, location_id, body,
-        message_type, from_number, practice_number: to_number, received_at }
+      { entity_type: 'lead', entity_id: lead.id,
+        message_id, conversation_id, lead_id: lead.id, location_id: lead.location_id,
+        body, message_type, from_number, practice_number: to_number, received_at }
   → POST /notifications/publish:
       { channel: 'location:{location_id}:conversations',
-        payload: { type: 'inbound_message', conversation_id, lead_id, preview: body[:80] } }
-  → if agent_mode_enabled AND conversation.assigned_to IS NULL
+        payload: { type: 'inbound_message', conversation_id, lead_id: lead.id, preview: body[:80] } }
+  → if message_type != 'normal':
+      skip AI agent processing (STOP/UNSTOP are opt-out commands, not conversational replies)
+      return
+  → if agent_mode_enabled AND conversation.agent_mode_active
+                           AND conversation.assigned_to IS NULL
                            AND NOT conversation.escalated:
       if agent_exchange_count >= agent_max_exchanges:
         UPDATE conversations SET escalated = true
-        POST /notifications/publish (type: 'agent_escalation')
+        POST /notifications/publish { type: 'agent_escalation', conversation_id }
       else:
         enqueue BullMQ job 'ai-agent-reply' { conversation_id, trigger_message_id }
 ```
+
+**Note:** `message.delivered` / `message.failed` events are published by Messaging Service for all outbound messages system-wide. The delivery status handler updates `conversation_messages` by `messaging_message_id`. When no matching row is found (i.e., the message was sent by another service — Automation Engine, Nurturing Engine, etc.), the handler silently no-ops — this is expected behavior.
 
 ### 5.2 Outbound Send Flow (Coordinator)
 
@@ -272,35 +317,53 @@ POST /conversations/:id/messages { body }
 EventBridge: message.delivered
   → UPDATE conversation_messages SET status = 'delivered', delivered_at = event.delivered_at
       WHERE messaging_message_id = event.message_id
+  (no rows matched = message owned by another service — silent no-op)
 
 EventBridge: message.failed
   → UPDATE conversation_messages SET status = 'failed'
       WHERE messaging_message_id = event.message_id
+  (no rows matched = silent no-op)
 ```
 
 ### 5.4 AI Agent Reply Flow
 
+The `conversation-agent-reply` prompt instructs Claude to return structured JSON in `response.text`:
+```json
+{ "text": "reply body here", "escalate": false }
+```
+or
+```json
+{ "text": "", "escalate": true, "reason": "clinical_question" }
+```
+If `response.text` cannot be parsed as valid JSON, the worker treats it as an escalation (fail-safe).
+
 ```
 BullMQ job: ai-agent-reply { conversation_id, trigger_message_id }
   → load conversation + last 10 messages
+  → load settings = location_conversation_settings for conversation.location_id
   → GET /leads/:lead_id on Lead Service (for context: name, stage, treatment interest)
   → POST /ai/complete {
-        prompt_id: 'conversation_agent_reply',
+        prompt_id: 'conversation-agent-reply',
         context: { lead_name, lead_stage, treatment_interest,
                    location_name, recent_messages }
     }
-  → evaluate response:
-      if confidence < 0.7 OR clinical keyword detected:
+  → parse response.text as JSON → { text, escalate, reason? }
+      parse failure OR escalate = true:
         UPDATE conversations SET escalated = true, agent_mode_active = false
-        POST /notifications/publish { type: 'agent_escalation', conversation_id }
+        POST /notifications/publish { channel: 'location:{id}:conversations',
+                                       payload: { type: 'agent_escalation', conversation_id } }
         return
   → POST /messages/send on Messaging Service:
-      { body: response.text + '\n\n' + disclosure_footer }
+      { to: conversation.lead_phone,
+        from_number: conversation.practice_number,
+        body: text + '\n\n' + disclosure_footer(settings.location_phone) }
   → INSERT conversation_messages (is_agent: true, status: 'queued')
   → UPDATE conversations SET agent_exchange_count += 1, last_message_at = now()
 ```
 
-Disclosure footer: `"This message was sent automatically. Reply STOP to opt out or call us at [location_phone] to speak with our team."`
+Disclosure footer template: `"This message was sent automatically. Reply STOP to opt out or call us at {location_phone} to speak with our team."`
+
+`location_phone` is stored in `location_conversation_settings.location_phone`.
 
 ### 5.5 Scheduled Send Flow
 
@@ -309,12 +372,46 @@ POST /conversations/:id/scheduled-messages { body, scheduled_for }
   → INSERT scheduled_messages (status: 'pending')
   → enqueue BullMQ delayed job 'scheduled-send',
       delay = scheduled_for - now()
+      job data: { scheduled_message_id }
+
+DELETE /conversations/:id/scheduled-messages/:msg_id
+  → UPDATE scheduled_messages SET status = 'cancelled' (if status = 'pending')
+  → call job.remove() on the BullMQ job
+      if job already executing → worker's idempotency guard (status != 'pending') skips send
+  → 409 if status was already 'sent'
 
 BullMQ job: scheduled-send { scheduled_message_id }
-  → load scheduled_message — verify status = 'pending' (idempotency guard)
+  → load scheduled_message — verify status = 'pending' (idempotency guard; 'cancelled' → skip)
   → POST /messages/send on Messaging Service
   → INSERT conversation_messages
   → UPDATE scheduled_messages SET status = 'sent', sent_at = now()
+```
+
+### 5.6 Bulk SMS Flow
+
+The Audience Engine uses a hybrid push model — callers must provide entity data; the engine never fetches it independently.
+
+**Cross-spec dependency:** This flow requires `GET /leads?location_id={id}&status=active` with cursor-based pagination on the Lead Service. This endpoint is not yet in the Lead Service spec and must be added. Required response fields per lead: `id`, `location_id`, `phone`, plus any filterable fields the Audience Engine segment may reference (e.g., `current_stage`, `current_pipeline`, `created_at`, `tags`).
+
+```
+BullMQ job: bulk-send { job_id, segment, body, location_id }
+  → UPDATE bulk_send_jobs SET status = 'processing'
+  → paginate through GET /leads?location_id={location_id}&status=active on Lead Service
+      (fetch all candidate leads with filter fields required by segment)
+      → accumulate lead objects in Map<lead_id, lead> (phone + filter fields in memory)
+  → POST /audiences/evaluate {
+        filter: segment,
+        entities: [{ id: lead.id, ...lead fields used in filter }],
+        snapshot: false
+    }
+    → returns matched lead IDs
+  → for each matched lead_id (batched):
+      → phone = leadMap.get(lead_id).phone   ← reuse from paginate step, no re-fetch
+      → POST /messages/send on Messaging Service
+          { to: phone, from_number: conversation.practice_number, body,
+            dedup_key: job_id + ':' + lead_id }
+      → increment sent or failed counter
+  → UPDATE bulk_send_jobs SET status = 'completed', sent = N, failed = M
 ```
 
 ---
@@ -323,11 +420,12 @@ BullMQ job: scheduled-send { scheduled_message_id }
 
 ### 6.1 Configuration
 
-Agent mode is a **location-level setting** (`location_conversation_settings.agent_mode_enabled`). When enabled, all new inbound messages on unassigned conversations at that location are handled autonomously by the AI until a human takes over or escalation triggers.
+Agent mode is a **location-level setting** (`location_conversation_settings.agent_mode_enabled`). When enabled, all new inbound messages on unassigned, non-escalated conversations at that location are handled autonomously by the AI until a human takes over or escalation triggers.
 
 Configurable per location:
 - `agent_mode_enabled` — on/off (default: false)
 - `agent_max_exchanges` — max autonomous back-and-forth before forced escalation (default: 3)
+- `location_phone` — practice phone number used in disclosure footer
 
 ### 6.2 Escalation Conditions
 
@@ -336,14 +434,29 @@ Any of the following triggers escalation (human takeover):
 | Condition | Mechanism |
 |---|---|
 | `agent_exchange_count >= agent_max_exchanges` | Checked in inbound handler before enqueueing job |
-| AI confidence below 0.7 | Checked in BullMQ worker after AI Service response |
-| Clinical keyword detected in AI response | Checked in BullMQ worker |
+| AI returns `escalate: true` in structured response | Checked in BullMQ worker after AI Service call |
+| `response.text` fails JSON parse | BullMQ worker fail-safe — treats parse failure as escalation |
+| `message_type = 'stop'` or `'unstop'` | Inbound handler skips AI entirely for opt-out commands |
 
-On escalation: `conversations.escalated = true`, `agent_mode_active = false`, notification pushed to location channel.
+On escalation: `conversations.escalated = true`, `agent_mode_active = false`, escalation notification pushed to location channel.
 
 ### 6.3 Human Takeover
 
-When a coordinator manually sends a message via `POST /conversations/:id/messages`, `agent_mode_active` is set to `false` immediately. The AI agent will not process subsequent inbound messages for that conversation until re-enabled.
+- **Manual send** (`POST /conversations/:id/messages`): sets `agent_mode_active = false` immediately. Subsequent inbound messages are not AI-handled.
+- **Coordinator assignment** (`PATCH /conversations/:id { assigned_to }`): once `assigned_to IS NOT NULL`, the inbound handler does not enqueue AI agent jobs regardless of `agent_mode_enabled`. Coordinator has ownership.
+- **Re-enable**: `marketing_manager` can set `agent_mode_active: true` via `PATCH /conversations/:id` to hand back to the AI agent for a specific conversation (e.g., after resolving an escalation).
+- Any coordinator can set `agent_mode_active: false` (disable) via `PATCH /conversations/:id`.
+
+### 6.4 AI Service Prompt Requirements
+
+The following prompts must be registered in the AI Service prompt registry (`src/prompts/`):
+
+| prompt_id | Purpose | Expected `response.text` format |
+|---|---|---|
+| `conversation-reply-drafts` | Smart reply options | JSON array: `[{ "body": "...", "label": "..." }]` |
+| `conversation-summary` | 3-sentence thread summary | Plain text |
+| `conversation-objection-handling` | Strategy options for objections | JSON array: `[{ "title": "...", "body": "..." }]` |
+| `conversation-agent-reply` | Autonomous agent response | JSON object: `{ "text": "...", "escalate": boolean, "reason"?: string }` |
 
 ---
 
@@ -356,7 +469,7 @@ Two distinct mechanisms:
 | Twilio delivery status | `message.delivered` EventBridge event | `conversation_messages.status`, `delivered_at` |
 | Coordinator "seen" (in-app) | `POST /conversations/:id/read` | `conversation_reads (conversation_id, user_id, last_read_message_id)` |
 
-**Unread count** = count of `conversation_messages` with `created_at > conversation_reads.read_at` for the calling user (or total message count if no read record exists).
+**Unread count** (cursor-based): count of `conversation_messages` where `created_at >` the `created_at` of `last_read_message_id`. If no `conversation_reads` row exists for the user, all messages in the conversation are unread. Cursor-based comparison avoids clock-skew issues between the API server and database.
 
 ---
 
@@ -366,7 +479,9 @@ Two distinct mechanisms:
 
 | Event | Trigger | Key Payload Fields |
 |---|---|---|
-| `message.received` | Inbound message processed and stored | `message_id`, `conversation_id`, `lead_id`, `location_id`, `body`, `message_type`, `from_number`, `practice_number`, `received_at` |
+| `message.received` | Inbound message processed and stored | `entity_type: "lead"`, `entity_id` (= lead_id), `message_id`, `conversation_id`, `lead_id`, `location_id`, `body`, `message_type`, `from_number`, `practice_number`, `received_at` |
+
+The `entity_type` / `entity_id` fields follow the Automation Engine's generic event contract, enabling rule authors to reference `entity_id` as the lead ID in automation conditions.
 
 ### Subscribed
 
@@ -431,7 +546,7 @@ conversation_notes (
 conversation_reads (
   conversation_id      uuid NOT NULL,
   user_id              uuid NOT NULL,
-  last_read_message_id uuid,
+  last_read_message_id uuid,                     -- cursor: unread = messages after this one
   read_at              timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (conversation_id, user_id)
 )
@@ -445,6 +560,7 @@ scheduled_messages (
   scheduled_for   timestamptz NOT NULL,
   status          text NOT NULL DEFAULT 'pending',  -- 'pending' | 'sent' | 'cancelled'
   created_by      uuid NOT NULL,
+  bullmq_job_id   text,                          -- stored for job.remove() on cancel
   sent_at         timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now()
 )
@@ -455,7 +571,24 @@ location_conversation_settings (
   inactivity_days      integer NOT NULL DEFAULT 30,
   agent_mode_enabled   boolean NOT NULL DEFAULT false,
   agent_max_exchanges  integer NOT NULL DEFAULT 3,
-  updated_at           timestamptz NOT NULL DEFAULT now()
+  location_phone       text,                     -- E.164; required before agent_mode_enabled=true (enforced at API layer)
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  CHECK (agent_mode_enabled = false OR location_phone IS NOT NULL)
+)
+
+-- Bulk SMS job tracking
+bulk_send_jobs (
+  id           uuid PRIMARY KEY,
+  location_id  uuid NOT NULL,
+  segment      jsonb NOT NULL,                   -- segment filter as submitted
+  body         text NOT NULL,
+  status       text NOT NULL DEFAULT 'pending',  -- 'pending' | 'processing' | 'completed' | 'failed'
+  total        integer,
+  sent         integer NOT NULL DEFAULT 0,
+  failed       integer NOT NULL DEFAULT 0,
+  created_by   uuid NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
 )
 ```
 
@@ -473,25 +606,26 @@ location_conversation_settings (
 apps/crm/conversation/
 ├── src/
 │   ├── routes/
+│   │   ├── bulk-sends.ts           # POST /bulk-sends, GET /bulk-sends/:job_id (registered first)
 │   │   ├── conversations.ts        # GET /conversations, GET/PATCH /:id, POST /:id/read
 │   │   ├── messages.ts             # GET /:id/messages, POST /:id/messages
 │   │   ├── notes.ts                # POST/DELETE /:id/notes/:note_id
 │   │   ├── scheduled.ts            # POST/GET/DELETE /:id/scheduled-messages
 │   │   ├── ai.ts                   # POST /:id/ai/drafts|summary|objection
-│   │   ├── bulk-send.ts            # POST /bulk-send, GET /bulk-send/:job_id
 │   │   └── settings.ts             # GET/PATCH /settings/locations/:id
 │   ├── services/
 │   │   ├── conversation-resolver.ts   # find-or-create logic (inactivity window)
 │   │   ├── outbound-sender.ts         # coordinator send → Messaging Service
 │   │   ├── ai-features.ts             # drafts / summary / objection → AI Service
-│   │   ├── agent-mode.ts              # escalation evaluation, disclosure footer
-│   │   └── bulk-sender.ts             # Audience Engine → Lead Service → Messaging Service
+│   │   ├── agent-mode.ts              # escalation evaluation, JSON parse, disclosure footer
+│   │   └── bulk-sender.ts             # Lead Service → Audience Engine → Messaging Service
 │   ├── repositories/
 │   │   ├── conversations.repo.ts
 │   │   ├── messages.repo.ts
 │   │   ├── notes.repo.ts
 │   │   ├── reads.repo.ts
 │   │   ├── scheduled.repo.ts
+│   │   ├── bulk-send-jobs.repo.ts
 │   │   └── settings.repo.ts
 │   ├── events/
 │   │   ├── handlers/
@@ -516,7 +650,7 @@ apps/crm/conversation/
 - Redis (BullMQ — ai-agent-reply, scheduled-send, bulk-send queues)
 - AWS EventBridge (subscribe + publish)
 - Messaging Service (`POST /messages/send`)
-- Lead Service (`GET /leads?phone=`, `GET /leads/:id`)
+- Lead Service (`GET /leads?phone=`, `GET /leads/:id`, `GET /leads?location_id=`)
 - AI Service (`POST /ai/complete`)
 - Audience Engine (`POST /audiences/evaluate`)
 - Notification Service (`POST /notifications/publish`)
@@ -530,32 +664,36 @@ apps/crm/conversation/
 Pure functions and isolated logic:
 
 - **conversation-resolver.ts:** find existing conversation within inactivity window; create new when expired; create new when none exists; correct `(lead_id, practice_number)` key matching
-- **agent-mode.ts:** escalation threshold check (exchange count); confidence threshold (below 0.7 → escalate); human takeover clears `agent_mode_active`; disclosure footer appended correctly
+- **agent-mode.ts:** escalation threshold check (exchange count); JSON parse failure → escalate; `escalate: true` in parsed response → escalate; valid non-escalating response → send; `message_type = 'stop'` → skip AI; human takeover clears `agent_mode_active`; disclosure footer appended correctly with `location_phone`
 - **outbound-sender.ts:** agent mode disabled on manual send; dedup_key generated per send
 
 ### Integration Tests (Vitest + real Postgres + real Redis)
 
 External services mocked via HTTP interceptors:
 
-- **Inbound happy path** — `inbound_message.received` → lead resolved → conversation found → message stored → `message.received` published → notification sent
+- **Inbound happy path** — `inbound_message.received` → lead resolved → conversation found → message stored → `message.received` published with `entity_type: "lead"` → notification sent
 - **Inbound new conversation** — inactivity expired → new conversation created, old conversation untouched
 - **Inbound unknown phone** — lead not found → no conversation created, no event published, warn logged
-- **Inbound agent mode** — agent enabled, unassigned → BullMQ job enqueued; coordinator assigned → no job enqueued
+- **Inbound STOP message** — `message_type: 'stop'` → stored in thread → AI agent NOT enqueued regardless of agent_mode_enabled
+- **Inbound agent mode** — agent enabled, unassigned, not escalated → BullMQ job enqueued; coordinator assigned → no job enqueued
 - **Inbound escalation** — `agent_exchange_count >= agent_max_exchanges` → escalated = true, no job enqueued, escalation notification sent
 - **Outbound send** — coordinator POST → Messaging Service called → message inserted with `status: queued`
 - **Outbound disables agent** — `agent_mode_active = true` → send → `agent_mode_active = false`
 - **Delivery update** — `message.delivered` event → `conversation_messages.status` updated to `delivered`
-- **AI agent reply** — BullMQ job → AI Service called → Messaging Service called → message inserted `is_agent: true`, `agent_exchange_count` incremented
-- **AI agent escalation** — confidence < 0.7 → Messaging Service NOT called → `escalated = true`
-- **Scheduled send** — create → BullMQ delayed job → fires at scheduled_for → Messaging Service called → status `sent`
-- **Scheduled send cancel** — cancel before fire → status `cancelled` → worker skips (idempotency guard)
-- **Read tracking** — POST /read → upserts `conversation_reads`; unread_count = 0 after read
+- **Delivery update for unknown message_id** — no rows matched → handler completes without error (silent no-op)
+- **AI agent reply** — BullMQ job → AI Service called → JSON parsed → Messaging Service called → message inserted `is_agent: true`, `agent_exchange_count` incremented
+- **AI agent escalation (escalate: true)** — AI returns `{ escalate: true }` → Messaging Service NOT called → `escalated = true`
+- **AI agent escalation (parse failure)** — AI returns non-JSON → treated as escalation → `escalated = true`
+- **Scheduled send** — create → BullMQ delayed job → fires at `scheduled_for` → Messaging Service called → status `sent`
+- **Scheduled send cancel** — cancel before fire → status `cancelled`, job removed → worker skips (idempotency guard)
+- **Read tracking** — POST /read → upserts `conversation_reads` with `last_read_message_id`; unread_count = 0 after read
+- **PATCH agent_mode_active: true** — requires `marketing_manager` role; coordinator role → 403
 
 ### Contract Tests
 
-- `message.received` event payload matches `@ortho/event-bus` schema
+- `message.received` event payload matches `@ortho/event-bus` schema; includes `entity_type: "lead"` and `entity_id`
 - Messaging Service call shape: `to`, `from_number`, `body`, `dedup_key` all present
-- AI Service call shape: `prompt_id`, `context` present and correctly structured
+- AI Service call shape for `conversation-agent-reply`: `prompt_id`, `context` present; `response.text` parseable as `{ text, escalate }` JSON
 
 ---
 
@@ -566,9 +704,17 @@ External services mocked via HTTP interceptors:
 | Message storage | Conversation Service owns its own copy | Self-contained inbox reads; can store CS-specific fields (conversation_id, read state, is_agent); aligns with SOA service autonomy principle |
 | Conversation keying | `(lead_id, practice_number)` + time-based inactivity reset | Matches real-world SMS threading — same two numbers have one thread, but old inactive threads start fresh. Inactivity window configurable per location |
 | Inbound lead resolution | Sync call to Lead Service `GET /leads?phone=` | Simple, always fresh. Hot-path latency acceptable (Lead Service has phone index); avoids maintaining a derived phone→lead cache |
-| Agent mode scope | Location-level on/off | Simpler than per-sequence-step activation; matches marketing manager mental model of "turn AI on for this location"; individual conversations can still override via `PATCH /:id` |
+| Agent mode scope | Location-level on/off | Simpler than per-sequence-step activation; matches marketing manager mental model of "turn AI on for this location" |
+| Agent mode escalation | Structured JSON response from AI Service prompt | AI Service returns `{ text, model, prompt_id, cached }` only — no confidence field. Prompt instructs Claude to return `{ text, escalate }` JSON; parse failure treated as escalation (fail-safe) |
 | Agent mode processing | BullMQ job (async) | Avoids blocking the SQS event handler; provides retry semantics; allows timeout-safe AI Service calls |
-| Scheduled send | BullMQ delayed job in Conversation Service | Keeps the concern local; no Nurturing Engine dependency for a simple one-shot timer |
-| Bulk SMS | BullMQ batch job in Conversation Service | Campaign Service is email-only; bulk SMS is a coordinator inbox feature per PRD §5.1; Audience Engine resolves the segment |
-| Human takeover | Manual send immediately disables agent mode | PRD §5.3 explicit requirement; coordinator action always wins over agent state |
+| Scheduled send cancellation | DB update + BullMQ `job.remove()` | Belt-and-suspenders: removes job from queue when possible; worker's idempotency guard handles the race if job fires simultaneously |
+| Bulk SMS entity flow | Fetch leads from Lead Service → push to Audience Engine | Audience Engine is a hybrid push model — callers always provide entity data; engine never fetches it |
+| Bulk SMS routing | Separate `/bulk-sends` prefix | Avoids Fastify route ambiguity with `/:id` parameter routes |
+| STOP/UNSTOP handling | Skip AI agent, store in thread | Opt-out commands should be visible in conversation history but must never trigger AI agent processing |
+| Human takeover | Manual send OR coordinator assignment disables agent mode | PRD §5.3 explicit requirement; both coordinator assignment and manual send represent human ownership |
 | Notification delivery | Direct `POST /notifications/publish` call | Notification Service spec decision: product services call it directly, no EventBridge for notifications |
+| `message.received` event shape | Includes `entity_type: "lead"`, `entity_id` | Automation Engine consumes generic `{ entity_type, entity_id, event_type, payload }` — these fields map to the correct Automation Engine contract |
+| Conversation re-open on inbound | Automatic when inactivity window not expired | A `closed` conversation is a UI signal only; inbound replies reopen it automatically within the window. After the window, a new conversation is created. |
+
+**Pending amendments required:**
+- **Lead Service spec** must add: `GET /leads?location_id={id}&status=active` with cursor-based pagination, returning at minimum `{ id, location_id, phone, current_stage, current_pipeline, created_at, tags }` — required by the bulk SMS worker.
