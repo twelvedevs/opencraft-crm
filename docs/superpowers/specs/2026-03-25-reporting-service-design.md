@@ -184,6 +184,8 @@ GET /reporting/metrics/channel-performance
 GET /reporting/metrics/location-comparison
     → per-location KPIs + network_average object (always computed across ALL locations,
       regardless of caller's location filter — used for benchmark comparison)
+    network_average is only returned for marketing_staff+ roles;
+    location-scoped roles (call_center_agent, call_center_manager) receive network_average: null
 
 GET /reporting/metrics/coordinator-performance
     ?coordinator_id=...   (optional)
@@ -239,7 +241,11 @@ POST  /reporting/runs/:id/retry                → re-enqueue a failed run as a 
                                                 → { run_id }  (new run_id)
 ```
 
-`/download` calls `GET /media/internal/:file_id/signed-url` on each request — never stores presigned URLs, respecting the 15-min TTL. The `/download` endpoint requires a valid CRM user JWT; all report recipients must be CRM users (v1 scope). `/retry` creates a new `report_run` row and enqueues a fresh `generate-report` job — it does not mutate the failed run row.
+**`/download` authorization:** Requires a valid CRM user JWT. The service checks that the caller either (a) is the `triggered_by` user of the run, or (b) has location access to all `location_ids` in the run's report config parameters. `marketing_manager+` (all-locations access) passes check (b) unconditionally. All report recipients must be CRM users (v1 scope).
+
+**`GET /reporting/runs?config_id=` authorization:** Before returning run history, the service verifies the caller has read access to the named `report_config_id` using the same rules as `GET /reporting/report-configs` (own config, or `marketing_manager+` for any config).
+
+**`/retry`:** Creates a new `report_run` row inheriting `format` and `recipient_emails` from the original failed run. Enqueues a fresh `generate-report` job — does not mutate the failed run row.
 
 ### 4.5 Configuration
 
@@ -286,8 +292,9 @@ On-demand and scheduled report runs share the same pipeline, implemented in `rep
    -- Link points to /reporting/runs/:id/download (the 302 endpoint) NOT to a presigned URL.
    -- Presigned URLs expire in 15 minutes; the /download endpoint fetches a fresh one on each click.
    -- All recipients must be CRM users (their JWT is required to access /download).
-8. If recipient_emails and run is for on-demand request:
+8. If run is on-demand (report_schedule_id is null):
    POST /notifications/publish { channel: 'user:{triggered_by}', ... }  (notify requesting user)
+   -- Fires regardless of whether recipient_emails are present.
 9. On any failure: update report_run: status=failed, error_message
 ```
 
@@ -387,7 +394,7 @@ Add two new fields to the `lead.stage_changed` event payload:
 1. `response_time_seconds` — seconds elapsed from `lead.created_at` to this transition; populated **only** when `stage_to = 'contacted'`, `null` otherwise
 2. `time_in_stage_seconds` — seconds spent in the previous stage; populated on every transition except the first enrollment into a pipeline
 
-`triggered_by` should also be confirmed present in the `lead.converted` payload so conversions can be attributed to coordinators in `metrics_coordinators_daily`.
+`triggered_by` must be added to the `lead.converted` event payload in the Pipeline Engine spec. It is currently present on `lead.stage_changed` but its presence on `lead.converted` is unconfirmed. The Analytics `LeadConvertedHandler` reads it to attribute conversions to coordinators in `metrics_coordinators_daily`.
 
 ### 8.2 Analytics Service Spec
 
@@ -401,6 +408,8 @@ exams_booked               int            NOT NULL DEFAULT 0   -- stage_to = 'ex
 conversions                int            NOT NULL DEFAULT 0   -- from lead.converted
 response_time_count        int            NOT NULL DEFAULT 0   -- count of 'contacted' transitions
 avg_response_time_seconds  numeric(10,2)            -- correctly maintained via count column
+time_in_stage_count        int            NOT NULL DEFAULT 0   -- count of all transitions with time_in_stage_seconds
+avg_time_in_stage_seconds  numeric(10,2)            -- correctly maintained via count column
 UNIQUE (date, location_id, coordinator_id)
 ```
 
@@ -414,17 +423,17 @@ ON CONFLICT (date, location_id, coordinator_id) DO UPDATE SET
       + EXCLUDED.avg_response_time_seconds
   ) / (metrics_coordinators_daily.response_time_count + 1)
 ```
-This update only executes when the incoming `lead.stage_changed` event has `stage_to = 'contacted'` and non-null `response_time_seconds`.
+This update only executes when the incoming `lead.stage_changed` event has `stage_to = 'contacted'` and non-null `response_time_seconds`. An analogous upsert (using `time_in_stage_count` / `avg_time_in_stage_seconds`) applies whenever `time_in_stage_seconds` is non-null (every transition except first enrollment).
 
 **Update `StageChangedHandler`** to extract `triggered_by` (as coordinator_id), `response_time_seconds`, `time_in_stage_seconds` from payload and populate `metrics_coordinators_daily`. Skip coordinator rollup if `triggered_by` is null (automated transitions).
 
-**Update `LeadConvertedHandler`** to extract `triggered_by` from payload and increment `metrics_coordinators_daily.conversions`.
+**Update `LeadConvertedHandler`** to extract `triggered_by` from payload and increment `metrics_coordinators_daily.conversions`. `triggered_by` must be added to the `lead.converted` event payload in the Pipeline Engine spec — see Section 8.1.
 
-**Add `GET /analytics/metrics/coordinators` endpoint** — same shared `period`/`granularity`/`location_id` params; additional filter: `coordinator_id`.
+**Add `GET /analytics/metrics/coordinators` endpoint** — same shared `period`/`granularity`/`location_id` params; additional filter: `coordinator_id`. Returns `stage_transitions`, `exams_booked`, `conversions`, `avg_response_time_seconds`, `avg_time_in_stage_seconds` per coordinator per period.
 
 ### 8.3 Analytics Service Spec (Auth Amendment)
 
-The Analytics Service currently accepts only Identity Service JWTs. Add support for Identity Service API key tokens (`ak_`-prefixed) in the Analytics Service's `@ortho/auth-middleware` configuration. When the `Authorization: Bearer` value begins with `ak_`, validate via `POST /identity/api-keys/validate` (VPC-internal) instead of JWT signature verification. This enables service-to-service calls from Reporting Service (and potentially other consumers) without requiring a user session.
+The Analytics Service currently accepts only Identity Service JWTs via `@ortho/auth-middleware`. The shared `@ortho/auth-middleware` package must not be modified. Instead, the Analytics Service adds a **pre-middleware Fastify plugin** in its own codebase: before passing the request to `@ortho/auth-middleware`, it inspects the `Authorization: Bearer` value — if it begins with `ak_`, it calls `POST /identity/api-keys/validate` (VPC-internal) directly and attaches a synthetic request context; if not, it passes through to the standard `@ortho/auth-middleware` JWT verification path. This enables service-to-service calls from Reporting Service (and potentially other consumers) without requiring a user session.
 
 ### 8.4 Arch Doc
 
