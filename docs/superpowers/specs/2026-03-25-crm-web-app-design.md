@@ -132,6 +132,7 @@ React Router v6 with `createBrowserRouter`. All module routes are lazy-loaded vi
       /settings/users           [perm: manage:users]
       /settings/locations       [perm: manage:locations]
       /settings/audit-log       [perm: view:audit_log]
+      /settings/password        → PasswordChangePage (all roles, no perm gate)
     /403                        → ForbiddenPage
     /404                        → NotFoundPage
 ```
@@ -143,6 +144,7 @@ call_center_agent   → /leads
 call_center_manager → /leads
 marketing_staff     → /analytics
 marketing_manager   → /leads
+super_admin         → /settings
 ```
 
 ### 4.3 Route guard pattern
@@ -170,9 +172,14 @@ Fixed left sidebar (~220px). Navigation items derived from the user's role at re
 | Role | Visible nav items |
 |---|---|
 | call_center_agent | Leads, Inbox, My Performance |
-| call_center_manager | Leads, Inbox, Analytics, CSV Import, Settings |
+| call_center_manager | Leads, Inbox, Analytics, Referrals, CSV Import, Settings |
 | marketing_staff | Analytics, Campaigns, Sequences, Audience, Referrals, Settings |
 | marketing_manager | Leads, Inbox, Analytics, Campaigns, Sequences, Automation, Audience, Templates, Referrals, Reports, CSV Import, Settings |
+| super_admin | Same as marketing_manager |
+
+`call_center_agent` accesses analytics scoped to their own data via the `/analytics/coordinators` tab, surfaced as "My Performance" in the sidebar. The `/analytics` route is accessible to this role but the API returns only own-coordinator data (enforced by the Reporting Service when `location_id` is scoped to the agent's single location and the role is `call_center_agent`).
+
+`marketing_staff` triggers bulk SMS from the Campaigns module (Campaigns → audience → Send) — they have no Inbox nav item (PRD Section 10: marketing_staff "No" for inbox access).
 
 Active route is highlighted. Sidebar is always visible on desktop; collapses to icon-only on narrow viewports.
 
@@ -188,7 +195,7 @@ When `activeLocationId` changes, `LocationContext` updates and React Query inval
 
 ### 5.3 `must_change_password` gate
 
-If `AuthContext.user.must_change_password === true`, `AppShell` renders only the `/settings/password` route. All other routes render `<Navigate to="/settings/password" />`. This matches the Identity Service's `403 password_change_required` behavior.
+If `AuthContext.user.must_change_password === true`, `AppShell` renders only the `/settings/password` route and `GET /identity/me`. All other routes render `<Navigate to="/settings/password" />`. This matches the Identity Service's `403 password_change_required` behavior, which blocks all endpoints except `PUT /identity/me/password` and `GET /identity/me`.
 
 ---
 
@@ -270,12 +277,20 @@ All data fetched from APIs is managed by React Query. Each module owns its query
 
 **Connection:**
 ```
+# Location-scoped (coordinators and managers with activeLocationId set):
 GET /notifications/stream?channels=user:{userId},location:{locationId}:*
 Authorization: Bearer <JWT>
 Last-Event-ID: <lastSeq>          // on reconnect, for replay
+
+# All Locations mode (marketing roles when isAllLocations === true):
+GET /notifications/stream?channels=user:{userId}
+Authorization: Bearer <JWT>
+Last-Event-ID: <lastSeq>
 ```
 
-When `activeLocationId` changes, the provider closes and re-opens the stream with updated channel params.
+When `activeLocationId` is `null` (All Locations mode), the `location:{locationId}:*` channel is omitted entirely — only the user-scoped channel is subscribed. Location-scoped notifications for marketing roles are delivered via the Notification Service's JWT claim validation, which grants access to all `location:*` channels when `locations[] = []` in the JWT. The client only needs the `user:{userId}` channel for personal notifications (assignments, escalations, task reminders).
+
+When `activeLocationId` changes to a specific location, the provider closes and re-opens the stream with the updated channel params. `lastSeq` (the last received monotonic sequence number) is stored in `NotificationProvider` component state — it is session-scoped and not persisted to `localStorage`.
 
 **Reconnect:** exponential back-off (1s → 2s → 4s → max 30s). After 3 failed attempts, a subtle "Real-time updates paused — reconnecting…" banner appears in the top bar.
 
@@ -295,7 +310,7 @@ When `activeLocationId` changes, the provider closes and re-opens the stream wit
 
 One typed client per backend service at `src/lib/api/`. All clients share a `apiFetch` wrapper that:
 - Injects `Authorization: Bearer <JWT>` header
-- Injects `location_id` as default query param (from `LocationContext.activeLocationId`) when present
+- Injects `location_id` as default query param only when `activeLocationId` is a non-null, non-empty string — when `isAllLocations === true` (`activeLocationId === null`), `location_id` is omitted entirely (never sent as `null` or empty string)
 - Handles 401 → calls `AuthContext.logout()`
 - Throws typed `ApiError` on non-2xx responses
 
@@ -303,6 +318,7 @@ One typed client per backend service at `src/lib/api/`. All clients share a `api
 src/lib/api/
   crm-gateway.ts     # leads, pipeline, conversations, campaigns, referrals, import, reporting
   identity.ts        # current user, password change, API keys
+  media.ts           # presigned upload URLs (used by template editor and any direct file uploads)
   # Platform services (called directly — not proxied through CRM API Gateway):
   notification.ts    # SSE URL builder + POST /notifications/:id/read
   template.ts        # POST /templates/render
@@ -413,11 +429,11 @@ Sub-navigation tabs within the section: Channel Performance (default), Funnel, L
 
 **Locations tab:** Side-by-side location comparison table, sortable by any metric. Visible to `marketing_staff+` only.
 
-**Coordinators tab:** Per-coordinator metrics — exams booked, avg response time, case conversion rate.
+**Coordinators tab:** Per-coordinator metrics — exams booked, avg response time, case conversion rate. Coordinator identity uses the `triggered_by` field on `lead.stage_changed` events (a user ID). The Reporting Service returns `triggered_by` as a user ID in the response; the frontend resolves display names via a batch `GET /identity/users?ids=...` call (or the Reporting Service may denormalize names — to be confirmed during implementation). `call_center_agent` users see only their own row in this tab.
 
 **Reports tab:** Saved report list, scheduled deliveries, run history.
 
-All analytics data sourced from Reporting Service via `ANALYTICS_API_KEY` — no direct Analytics Service calls from the frontend.
+All analytics data sourced from Reporting Service via standard JWT auth — the Reporting Service handles Analytics Service calls internally using a service-level API key (`ANALYTICS_API_KEY`). The frontend never calls Analytics Service directly and never uses `ANALYTICS_API_KEY`.
 
 ### 10.4 Campaigns module
 
@@ -479,7 +495,7 @@ Used for high-frequency coordinator actions:
 | Unit | Vitest | `ROLE_PERMISSIONS` map, `usePermission` hook, priority score display logic, `apiFetch` wrapper |
 | Component | React Testing Library | `<RequirePermission>`, `<LeadCard>`, `<QuickActions>`, `<NotificationBell>` — with mocked `AuthContext` |
 | Integration | RTL + MSW | Full page renders with mocked API responses: LeadQueuePage loads and filters, move-stage mutation fires and optimistically updates, inbox reply sends |
-| E2E | Playwright | Critical flows: login → view lead queue → move stage → send SMS; login → view inbox → reply; marketing manager → publish campaign |
+| E2E | Playwright | Critical flows: login → view lead queue → move stage → send SMS; login → view inbox → reply; marketing manager → publish campaign; login with `must_change_password=true` → blocked from all routes → change password → access restored |
 | Platform UI | Per-package | `@platform/*` packages maintain their own test suites; CRM shell only tests correct prop passing and mount/unmount |
 
 Shared test utilities from `@ortho/testing`: auth context factories for all 4 roles, location context factory, MSW handlers for all CRM Gateway endpoints, lead/conversation/campaign fixtures.
