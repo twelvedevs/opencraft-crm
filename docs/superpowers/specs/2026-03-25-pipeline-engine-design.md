@@ -275,6 +275,12 @@ Graph check is skipped when `override: true`. The Gateway enforces that only coo
 
 **Concurrency:** `transition.service.ts` reads the membership row with `SELECT ... FOR UPDATE` before validating and applying the transition. This serializes concurrent requests on the same membership row, preventing duplicate history rows or double-fired events from two simultaneous calls.
 
+**Override constraint:** `override: true` requires a non-null `triggered_by`. Pipeline Engine returns `400` if `override: true && triggered_by == null` — automated callers (Data Import Service, Automation Engine) may not bypass the transition graph.
+
+**`reason` field:** Informational only — no cross-field validation between `stage` and `reason`. The `no_show` value is conventionally used for `exam_scheduled → contacted` but is not enforced by the engine.
+
+**`404` responses:** Both `POST /memberships/:id/transition` and `POST /memberships/:id/convert` return `404` if the `:id` does not exist.
+
 ---
 
 ### `POST /pipeline/memberships/:id/convert`
@@ -300,7 +306,7 @@ Valid `channel` values (must match exactly — `400` otherwise): `google_ads` | 
 | `new_patient` | `contract_signed` | `in_treatment` | `new_patient` |
 | `in_treatment` | `treatment_complete` | `in_retention` | `active_retention` |
 
-**Response:** `201` — new membership object. Single DB transaction (with `SELECT ... FOR UPDATE` on the source membership to prevent concurrent double-conversion): source membership → `status: closed, closed_reason: converted`; new membership created; two history rows inserted. Publishes `lead.converted` post-commit. Returns `422` if the source membership's current stage does not match the required `from_stage` for the conversion.
+**Response:** `201` — new membership object. Single DB transaction (with `SELECT ... FOR UPDATE` on the source membership to prevent concurrent double-conversion): source membership → `status: closed, closed_reason: converted`; new membership created; two history rows inserted (source: `stage_from: <from_stage>, stage_to: <from_stage>, reason: 'converted'`; target: `stage_from: null, stage_to: <to_stage>, reason: 'converted'`). Post-commit, publishes **both** `lead.converted` AND `lead.stage_changed` (with `stage_from: null`, `stage_to: <to_stage>`, `reason: 'converted'`) for the new membership, so Analytics `metrics_pipeline_daily` and Automation Engine stage-based rules receive the new stage entry signal. Returns `422` if the source membership's current stage does not match the required `from_stage` for the conversion.
 
 ---
 
@@ -308,9 +314,9 @@ Valid `channel` values (must match exactly — `400` otherwise): `google_ads` | 
 
 | Method | Path | Query params | Response |
 |---|---|---|---|
-| `GET` | `/pipeline/memberships` | `lead_id`, `pipeline`, `stage`, `location_id`, `status`, `cursor`, `limit` | Paginated list (default 50). Default `status` filter: **all statuses** (active + closed + archived). Pass `status=active` to get only live memberships — this is the query Lead Service uses for cache seeding on startup. The CRM API Gateway **must** inject `location_id` from the JWT `locations[]` claim before forwarding for non-super_admin callers; Pipeline Engine does not independently re-validate location scope on list queries. |
+| `GET` | `/pipeline/memberships` | `lead_id`, `pipeline`, `stage`, `location_id`, `status`, `cursor`, `limit` | Paginated list (default 50). Default `status` filter: **all statuses** (active + closed + archived). Pass `status=active` to get only live memberships — this is the query Lead Service uses for cache seeding on startup. The CRM API Gateway **must** inject `location_id` from the JWT `locations[]` claim before forwarding for non-super_admin callers; Pipeline Engine does not independently re-validate location scope on list queries. Cursor: opaque base64-encoded `{ id, created_at }` of the last row; sort order is `created_at ASC, id ASC`. |
 | `GET` | `/pipeline/memberships/:id` | — | Single membership. `404` if not found. |
-| `GET` | `/pipeline/memberships/:id/history` | — | Array of history rows, `transitioned_at ASC` |
+| `GET` | `/pipeline/memberships/:id/history` | — | Array of history rows, `transitioned_at ASC`. `404` if membership not found. |
 
 **Error shape** (consistent with other services): `{ "error": "<message>" }`
 
@@ -373,7 +379,7 @@ Published by `/convert` endpoint after atomic pipeline conversion commits.
 }
 ```
 
-**Subscribers:** Analytics Service (`metrics_conversions_daily`; uses `location_id` + `channel`), Automation Engine (welcome-to-treatment rules), Lead Service (updates `current_pipeline` / `current_stage` cache + locks attribution — **no `lead.stage_changed` is published for the new pipeline enrollment on conversion; Lead Service derives its cache update solely from this event**).
+**Subscribers:** Analytics Service (`metrics_conversions_daily`; uses `location_id` + `channel`), Automation Engine (welcome-to-treatment rules), Lead Service (locks attribution). Note: `/convert` also publishes a `lead.stage_changed` (with `stage_from: null`, `reason: 'converted'`) for the new pipeline enrollment — Lead Service updates `current_pipeline` / `current_stage` from that event, not from `lead.converted`.
 
 ### `lead.stage_timeout`
 
@@ -456,7 +462,8 @@ Published by the timeout polling job when a `lost` membership's 30-day re-engage
 - **Per-row transactions:** A failure on one lead does not affect others. Failures are logged to Datadog; the row is retried on the next run 15 minutes later.
 - **Batch cap of 100:** Sufficient for 34 locations at realistic lead volumes. Remainder caught in the next run (or processed concurrently by another instance).
 - **Post-commit publish:** EventBridge publish failure after commit is logged to Datadog and does not roll back the DB state. Accepted risk: downstream caches (Lead Service) may diverge until the next corrective action. Mitigation: Lead Service can reseed its cache for a specific lead by calling `GET /pipeline/memberships?lead_id=...&status=active` directly. Persistent publish failures alert on-call via Datadog.
-- **Archival audit trail:** When a `lost` membership is archived, no `pipeline_stage_history` row is inserted (archival is not a stage transition). The archival is recorded by `closed_reason = 'archived'` and `closed_at` on the membership row, and by the `lead.archived` event. This is the authoritative audit record.
+- **Archival audit trail:** When a `lost` membership is archived, no `pipeline_stage_history` row is inserted (archival is not a stage transition). The archival is recorded by `closed_reason = 'archived'` and `closed_at` on the membership row, and by the `lead.archived` event. `GET /memberships/:id/history` returns only stage transitions; callers building a complete lead timeline must also inspect the membership's `closed_reason` and `closed_at` to show the terminal archival state. `timeout_at` is set to `NULL` on the membership row during archival.
+
 - **`new_lead` 2-hour window:** No `timeout_at` is set for `new_lead`. The UI reads `entered_stage_at` and displays a visual warning after 2 hours — no automated transition.
 
 ---
