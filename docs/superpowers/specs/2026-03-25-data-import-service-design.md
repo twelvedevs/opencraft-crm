@@ -78,39 +78,44 @@ CRM API Gateway (coordinator/manager upload request)
 ### 3.1 active_patients execution
 
 For each matched row:
-1. Fetch lead's current active New Patient pipeline membership via `GET /leads/:id`
-2. Write `before_snapshot` with `type: "conversion"`, `pre_import_membership_id`, `pre_import_pipeline: "new_patient"`, `pre_import_stage: <current stage>`, `post_import_membership_id: null` → set row `status = executing`
-3. **Stage guard:** if `current_stage == "contract_signed"`, skip step 3 and go directly to step 4 (lead is already at the required pre-conversion stage)
-4. `POST /pipeline/memberships/:id/transition` — `{ stage: "contract_signed", override: true, triggered_by, reason: "import" }`
-5. `POST /pipeline/memberships/:id/convert` — `{ to_pipeline: "in_treatment", to_stage: "new_patient", triggered_by, reason: "converted", channel: "import" }`
-6. Write `post_import_membership_id` to snapshot → set row `status = executed`
+1. `GET /pipeline/memberships?lead_id={id}&pipeline=new_patient&status=active` (Pipeline Engine) — fetch the lead's active New Patient membership
+2. If no active membership returned: mark row `failed` with `error_message: "no_active_membership"`, continue to next row
+3. Write `before_snapshot` with `type: "conversion"`, `pre_import_membership_id`, `pre_import_pipeline: "new_patient"`, `pre_import_stage: <membership.stage>`, `post_import_membership_id: null` → set row `status = executing`
+4. If `membership.stage == "contract_signed"`, skip step 5 and go directly to step 6 (lead is already at the required pre-conversion stage)
+5. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "contract_signed", override: true, triggered_by, reason: "import" }`
+6. `POST /pipeline/memberships/:membership_id/convert` — `{ to_pipeline: "in_treatment", to_stage: "new_patient", triggered_by, reason: "converted", channel: "import" }`
+7. Write `post_import_membership_id` to snapshot → set row `status = executed`
 
 ### 3.2 completed_patients execution
 
 For each matched row:
-1. Fetch lead's current active In Treatment membership via `GET /leads/:id`
-2. Write `before_snapshot` with `type: "conversion"`, `pre_import_membership_id`, `pre_import_pipeline: "in_treatment"`, `pre_import_stage: <current stage>`, `post_import_membership_id: null` → set row `status = executing`
-3. **Stage guard:** if `current_stage == "treatment_complete"`, skip step 3 and go directly to step 4
-4. `POST /pipeline/memberships/:id/transition` — `{ stage: "treatment_complete", override: true, triggered_by, reason: "import" }`
-5. `POST /pipeline/memberships/:id/convert` — `{ to_pipeline: "in_retention", to_stage: "active_retention", triggered_by, reason: "converted", channel: "import" }`
-6. Write `post_import_membership_id` → set row `status = executed`
+1. `GET /pipeline/memberships?lead_id={id}&pipeline=in_treatment&status=active` (Pipeline Engine) — fetch the lead's active In Treatment membership
+2. If no active membership returned: mark row `failed` with `error_message: "no_active_membership"`, continue to next row
+3. Write `before_snapshot` with `type: "conversion"`, `pre_import_membership_id`, `pre_import_pipeline: "in_treatment"`, `pre_import_stage: <membership.stage>`, `post_import_membership_id: null` → set row `status = executing`
+4. If `membership.stage == "treatment_complete"`, skip step 5 and go directly to step 6
+5. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "treatment_complete", override: true, triggered_by, reason: "import" }`
+6. `POST /pipeline/memberships/:membership_id/convert` — `{ to_pipeline: "in_retention", to_stage: "active_retention", triggered_by, reason: "converted", channel: "import" }`
+7. Write `post_import_membership_id` → set row `status = executed`
 
 ### 3.3 scheduled_appointments execution
 
 For each matched row:
-1. Fetch lead's current active New Patient membership via `GET /leads/:id`
-2. Write `before_snapshot` with `type: "transition"`, `membership_id`, `pipeline: "new_patient"`, `stage: <current stage before transition>`, `appointment_id: null` → set row `status = executing`
-3. `POST /pipeline/memberships/:id/transition` — `{ stage: "exam_scheduled", override: true, triggered_by, reason: "import" }`
-4. `POST /leads/:id/appointments` on Lead Service — `{ appointment_type: "exam", scheduled_at, status: "scheduled", created_by: triggered_by }`
-5. Write `appointment_id` into snapshot → set row `status = executed`
+1. `GET /pipeline/memberships?lead_id={id}&pipeline=new_patient&status=active` (Pipeline Engine) — fetch the lead's active New Patient membership
+2. If no active membership returned: mark row `failed` with `error_message: "no_active_membership"`, continue to next row
+3. Write `before_snapshot` with `type: "transition"`, `membership_id`, `pipeline: "new_patient"`, `stage: <membership.stage>`, `appointment_id: null` → set row `status = executing`
+4. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "exam_scheduled", override: true, triggered_by, reason: "import" }`
+5. `POST /leads/:id/appointments` on Lead Service — `{ appointment_type: "exam", scheduled_at, status: "scheduled", created_by: triggered_by }`
+6. Write `appointment_id` into snapshot → set row `status = executed`
 
 ### 3.4 no_shows execution
 
 For each matched row:
-1. Fetch lead's current active New Patient membership via `GET /leads/:id` (must be at `exam_scheduled` — if not, mark row `failed` with `error_message: "unexpected_stage"` and continue)
-2. Write `before_snapshot` with `type: "transition"`, `membership_id`, `pipeline: "new_patient"`, `stage: "exam_scheduled"`, `appointment_id: null` → set row `status = executing`
-3. `POST /pipeline/memberships/:id/transition` — `{ stage: "contacted", override: true, triggered_by, reason: "no_show" }`
-4. Set row `status = executed`
+1. `GET /pipeline/memberships?lead_id={id}&pipeline=new_patient&status=active` (Pipeline Engine) — fetch the lead's active New Patient membership
+2. If no active membership returned: mark row `failed` with `error_message: "no_active_membership"`, continue to next row
+3. If `membership.stage != "exam_scheduled"`: mark row `failed` with `error_message: "unexpected_stage"`, continue to next row
+4. Write `before_snapshot` with `type: "transition"`, `membership_id`, `pipeline: "new_patient"`, `stage: "exam_scheduled"`, `appointment_id: null` → set row `status = executing`
+5. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "contacted", override: true, triggered_by, reason: "no_show" }`
+6. Set row `status = executed`
 
 No appointment record update — appointment ID is not available in Ortho2 no-show exports. The `lead.stage_changed` event (reason: `no_show`) is sufficient for Automation Engine to trigger the re-engagement sequence.
 
@@ -215,7 +220,7 @@ All endpoints require a valid JWT via `@ortho/auth-middleware`. RBAC: `call_cent
 | `GET /imports/:id/rows` | Preview rows | Paginated. Query params: `status` filter (`matched\|unmatched\|ambiguous\|failed`), `limit`, `cursor`. |
 | `POST /imports/:id/confirm` | Execute | Body: `{ column_mapping }`. Validates `status = preview_ready`. Saves mapping globally. Enqueues `execute` job. Returns `202`. `409` if wrong status. |
 | `POST /imports/:id/cancel` | Cancel | Valid only when `status = preview_ready`. Sets `status = cancelled`. No pipeline changes have been made. |
-| `POST /imports/:id/undo` | Undo | Validates `status = completed` and `now() < undo_deadline`. Enqueues `undo` job. Returns `202`. `422 { "error": "undo_window_expired" }` if past deadline. `409` if wrong status. |
+| `POST /imports/:id/undo` | Undo | Atomically sets `status = 'undoing'` with `UPDATE imports SET status = 'undoing' WHERE id = $1 AND status = 'completed' AND undo_deadline > now()` — returns `0 rows updated` as `422 { "error": "undo_window_expired" }` if deadline passed, `409` if status was not `completed`. Enqueues `undo` job on success. Returns `202`. |
 
 ### Import log
 
@@ -246,7 +251,7 @@ Job configuration: `attempts: 1` — no automatic retry (partial pipeline state 
 1. Read CSV from S3
 2. Load saved global `column_mappings` for `import_type`; merge with auto-detected Ortho2 headers (auto-detection runs first, saved mapping overrides)
 3. Parse all rows into structured objects
-4. **Batch prefetch:** extract all mobile phone numbers and emails from the CSV; call `GET /leads?phones[]={...}&location_id={id}` and `GET /leads?emails[]={...}&location_id={id}` to build local `Map<phone, lead>` and `Map<email, lead>` for O(1) Tier 1–2 resolution
+4. **Batch prefetch:** extract all mobile phone numbers and emails from the CSV; call `GET /leads?phones[]={...}&location_id={id}` and `GET /leads?emails[]={...}&location_id={id}` to build local `Map<phone, lead[]>` and `Map<email, lead[]>` for O(1) Tier 1–2 resolution (array values correctly capture the multi-match ambiguous case)
 5. For each row: run 5-tier match logic (Section 7)
 6. Insert one `import_rows` row per CSV row
 7. Update `imports`: `row_count`, `matched_count`, `unmatched_count`, `ambiguous_count`, `detected_headers`, `status = preview_ready`
@@ -257,12 +262,13 @@ On job-level failure: set `imports.status = failed`, `error_message`. Coordinato
 
 Process `import_rows WHERE status = 'matched'` in `row_number ASC` order (sequential).
 
-For each row:
-1. Fetch lead's active pipeline membership via `GET /leads/:id`
-2. Write `before_snapshot` + set row `status = executing` (atomic DB update — see Section 3 for per-type snapshot shape)
-3. Execute Pipeline Engine (and Lead Service) calls per import type (Section 3)
-4. On success: write `post_import_membership_id` if conversion, set row `status = executed`
-5. On failure: set row `status = failed`, `error_message`. Continue to next row.
+For each row (full detail in Section 3 per import type):
+1. `GET /pipeline/memberships?lead_id={id}&pipeline={expected}&status=active` (Pipeline Engine) — fetch active membership
+2. If missing or wrong stage: mark row `failed`, continue
+3. Write `before_snapshot` + set row `status = executing` (atomic DB update)
+4. Execute Pipeline Engine (and Lead Service) calls
+5. On success: write `post_import_membership_id` if conversion, set row `status = executed`
+6. On failure: set row `status = failed`, `error_message`. Continue to next row.
 
 After all rows: update `imports` with `executed_count`, `failed_count`, `status = completed`, `completed_at`, `undo_deadline = completed_at + interval '2 hours'`.
 
@@ -287,19 +293,19 @@ After all rows: set `imports.status = undone`, `undone_at = now()`.
 All lookups scoped to `location_id` from the import. Tiers run in order; stop at first tier returning exactly one lead.
 
 **Tier 1 — Mobile phone (exact E.164)**
-Normalize CSV mobile phone to E.164 → local `Map<phone, lead>` from batch prefetch.
+Normalize CSV mobile phone to E.164 → look up in local `Map<phone, lead[]>` from batch prefetch.
 - 1 result → `matched`, `match_tier: 1`
 - 2+ results → `ambiguous`, `candidate_ids` populated
 - 0 results → Tier 2
 
 **Tier 2 — Email (exact, case-insensitive)**
-Normalize email → local `Map<email, lead>` from batch prefetch.
+Normalize email → look up in local `Map<email, lead[]>` from batch prefetch.
 - 1 result → `matched`, `match_tier: 2`
 - 2+ results → `ambiguous`
 - 0 results → Tier 3
 
 **Tier 3 — First name + last name + home phone**
-`GET /leads?q={first} {last}&location_id={id}` → filter results in-process for exact E.164 home phone match against `leads.phone`. **Cache the name search result in-process for Tier 4 reuse** (keyed on the normalized `{first} {last}` string) — if Tier 3 fails, Tier 4 reuses the same result set without issuing a second API call.
+`GET /leads?q={first} {last}&location_id={id}` → filter results in-process for exact E.164 home phone match against `leads.phone`. **Cache the name search result in-process for Tier 4 reuse** (scoped to the current row's resolution only — discarded after Tier 4; not shared across rows) — if Tier 3 fails, Tier 4 reuses the same result set without issuing a second API call.
 - 1 result → `matched`, `match_tier: 3`
 - 2+ results → `ambiguous`
 - 0 results → Tier 4
@@ -331,7 +337,7 @@ Row `status = unmatched`. Shown in preview. No CRM action taken. Coordinator not
 }
 ```
 
-**Undo:** `POST /pipeline/memberships/:membership_id/transition` with `{ stage: snapshot.stage, override: true, triggered_by: import.uploaded_by, reason: "import" }`.
+**Undo:** `POST /pipeline/memberships/:membership_id/transition` with `{ stage: snapshot.stage, override: true, triggered_by: import.uploaded_by, reason: "import_undo" }`.
 
 Undo transitions use `override: true` and do **not** verify the lead's current stage matches the post-import stage — undo is applied unconditionally within the 2-hour window. If a coordinator has since advanced the lead manually, the undo will forcibly revert them to the pre-import stage.
 
@@ -366,8 +372,8 @@ Written in two steps (see Section 3.1 / 3.2 for the full execution sequence):
 Rows stuck in `executing` (crashed between the two writes) are skipped by undo and logged to Datadog — coordinator handles manually.
 
 **Undo of a conversion:**
-1. `POST /pipeline/memberships/:post_import_membership_id/close` — closes the newly-created membership (e.g., in_treatment). Body: `{ triggered_by: import.uploaded_by, reason: "import_undo" }`. This endpoint does not publish a `lead.stage_changed` event (internal cleanup).
-2. `POST /pipeline/memberships` — re-enrolls lead in `pre_import_pipeline` at `pre_import_stage`. Body: `{ lead_id, location_id, pipeline: snapshot.pre_import_pipeline, stage: snapshot.pre_import_stage, triggered_by, reason: "import" }`.
+1. `POST /pipeline/memberships/:post_import_membership_id/close` — closes the newly-created membership (e.g., in_treatment), setting `status = 'closed'` and `closed_reason = 'import_undo'`. Body: `{ triggered_by: import.uploaded_by, reason: "import_undo" }`. This endpoint does not publish a `lead.stage_changed` event (internal cleanup). Setting `status = 'closed'` (not `'archived'`) is required so the `UNIQUE (lead_id, pipeline) WHERE status = 'active'` constraint allows re-enrollment in the next step.
+2. `POST /pipeline/memberships` — re-enrolls lead in `pre_import_pipeline` at `pre_import_stage`. Body: `{ lead_id, location_id: import.location_id, pipeline: snapshot.pre_import_pipeline, stage: snapshot.pre_import_stage, triggered_by, reason: "import_undo" }`. `location_id` is taken from `imports.location_id` (not stored in the snapshot).
 
 The original closed membership from before the import is not restored. A fresh enrollment is created. The complete transition history remains in `pipeline_stage_history` for audit.
 
@@ -407,6 +413,8 @@ ON CONFLICT (import_type) DO UPDATE
 On subsequent uploads of the same import type: auto-detection runs first; saved mapping overrides matching entries; remaining unmapped headers shown to coordinator for manual assignment.
 
 `imports.column_mapping` stores the coordinator's **confirmed** mapping (submitted at `POST /imports/:id/confirm` time) as the authoritative snapshot for that import. The parse phase runs earlier using the auto-detected + globally-saved mapping, but the coordinator's confirmed mapping supersedes this and is what gets recorded on the import row. This is correct: the coordinator explicitly reviews and confirms the mapping before execution, so the confirmed mapping is the one that matters for audit and re-run purposes.
+
+**`POST /imports/:id/confirm` does not re-run match logic.** It executes the existing matched `import_rows` as-is. If the coordinator corrects a column mapping at confirm time in a way that would materially affect match quality (e.g., the phone column was misidentified during parse), they must cancel the import and re-upload to get a fresh parse with the corrected mapping applied.
 
 ---
 
@@ -516,7 +524,7 @@ Pipeline Engine and Lead Service mocked via HTTP interceptors:
 
 ## 14. Pending Amendments to Other Specs
 
-1. **Pipeline Engine spec** — Add `POST /pipeline/memberships/:id/close` endpoint. Body: `{ triggered_by, reason: "import_undo" }`. Closes an active membership without pipeline conversion. Returns `200` membership. `409` if already closed/archived. Publishes no event. Also add `"import_undo"` to the `pipeline_stage_history.reason` column enum (current values: `manual | timeout | no_show | converted | import`; add `import_undo`).
+1. **Pipeline Engine spec** — Add `POST /pipeline/memberships/:id/close` endpoint. Body: `{ triggered_by, reason: "import_undo" }`. Sets `status = 'closed'` (not `'archived'`) and `closed_reason = 'import_undo'` on the membership row. Returns `200` membership. `409` if already closed/archived. Publishes no event. Also amend two enums: (a) add `"import_undo"` to `pipeline_stage_history.reason` CHECK constraint (current values: `manual | timeout | no_show | converted | import`); (b) add `"import_undo"` to `pipeline_memberships.closed_reason` CHECK constraint (current values: `converted | archived | manual | import`).
 
 2. **Lead Service spec** — Add `date_of_birth date nullable` column to `leads` table (required for Tier 4 match logic).
 
