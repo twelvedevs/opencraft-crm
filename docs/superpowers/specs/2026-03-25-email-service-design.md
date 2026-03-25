@@ -138,14 +138,17 @@ Flow:
 1. Resolve sending domain by `location_id` — fail fast with `422` if not configured or `is_verified = false`
 2. Check `job_ref` uniqueness — return existing job with current status if already present
 3. Insert `email_campaign_jobs` row (status: `pending`)
-4. Run spam check on one rendered sample recipient:
+4. Render one sample recipient via Template Service for spam check:
+   - Template Service 4xx (e.g. template not found): update job status → `failed`, return `422 { "error": "template_render_failed", "job_id": "..." }`. No recipients inserted, no BullMQ jobs enqueued.
+   - Template Service 5xx / timeout: update job status → `failed`, return `503 { "error": "template_service_unavailable", "job_id": "..." }`. Caller may retry with a new `job_ref`.
+5. Run spam check on the rendered sample:
    - If score exceeds threshold: update job status → `spam_check_failed`, store `spam_score` + `spam_issues`, return `422`. No recipients inserted, no BullMQ jobs enqueued.
    - If passes: store `spam_score` + `spam_issues` on job row, continue.
-5. Bulk-insert `email_campaign_recipients` (all status: `pending`), update `total_recipients` on job row
-6. Update job status → `processing`, set `started_at`
-7. Enqueue BullMQ campaign-recipient jobs (one per recipient) with delay if `scheduled_for` is in the future
-8. Campaign Recipient Worker per recipient: render template via Template Service → call SendGrid → update recipient row status → atomically increment `sent_count` on parent job using `UPDATE ... SET sent_count = sent_count + 1 WHERE id = ?`. On permanent failure: increment `failed_count` instead.
-9. After each increment: check job completion atomically (see Section 6)
+6. Bulk-insert `email_campaign_recipients` (all status: `pending`), update `total_recipients` on job row
+7. Update job status → `processing`, set `started_at`
+8. Enqueue BullMQ campaign-recipient jobs (one per recipient) with delay if `scheduled_for` is in the future
+9. Campaign Recipient Worker per recipient: render template via Template Service → call SendGrid → update recipient row status → atomically increment `sent_count` on parent job using `UPDATE ... SET sent_count = sent_count + 1 WHERE id = ?`. On permanent failure: increment `failed_count` instead.
+10. After each increment: check job completion atomically (see Section 6)
 
 **`scheduled_for` in the past:** If `scheduled_for` is a timestamp in the past, it is treated as immediate — BullMQ enqueues with zero delay. No `422` is returned.
 
@@ -428,7 +431,26 @@ Only the worker that receives a row back proceeds to publish `email.campaign_com
 
 ### Webhook Idempotency
 
-SendGrid delivers webhooks at-least-once. Status updates use `ON CONFLICT DO NOTHING` — a duplicate `delivered` event for an already-delivered recipient is a no-op. Click events are always inserted (multiple clicks tracked individually in `email_recipient_clicks`).
+SendGrid delivers webhooks at-least-once. Status updates use a **forward-only WHERE guard**: each UPDATE only advances the recipient to a higher-stage status, preventing a late duplicate from overwriting a more advanced state.
+
+```sql
+-- delivered: only advances from 'sent'
+UPDATE email_campaign_recipients
+SET status = 'delivered', delivered_at = $ts
+WHERE id = ? AND status = 'sent'
+
+-- opened: only advances from sent/delivered; preserve first opened_at
+UPDATE email_campaign_recipients
+SET status = 'opened', opened_at = COALESCE(opened_at, $ts)
+WHERE id = ? AND status IN ('sent', 'delivered')
+
+-- clicked: only advances from sent/delivered/opened; preserve first clicked_at
+UPDATE email_campaign_recipients
+SET status = 'clicked', clicked_at = COALESCE(clicked_at, $ts)
+WHERE id = ? AND status IN ('sent', 'delivered', 'opened')
+```
+
+A duplicate webhook that matches no rows (status already advanced past the guard) is a no-op — no error, no double-write. The same forward-only pattern applies to `email_sends` rows. Click events are always inserted (multiple clicks tracked individually in `email_recipient_clicks`).
 
 ---
 
@@ -504,7 +526,7 @@ apps/platform/email/
 - **Webhook: `open` for campaign recipient** — updates `opened_at`, publishes `email.opened`
 - **Webhook: `open` for transactional send** — status unchanged, no `opened_at` column written, `email.opened` published (no campaign_job_id in payload)
 - **Webhook: `click` for campaign recipient** — inserts `email_recipient_clicks` row, updates `clicked_at` on first click only; second click inserts second row, does not update `clicked_at`
-- **Webhook: `click` for transactional send** — status updated, no `email_recipient_clicks` row inserted
+- **Webhook: `click` for transactional send** — status unchanged, no `email_recipient_clicks` row inserted, `email.clicked` published
 - **Webhook idempotency** — duplicate `delivered` event is a no-op (no duplicate EventBridge publish)
 - **Webhook: unknown event type** — logged, ignored, returns `200`
 
