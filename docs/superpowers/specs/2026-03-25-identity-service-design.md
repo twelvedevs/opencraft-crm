@@ -107,9 +107,11 @@ The Identity Service is a **platform-layer service** (`apps/platform/identity`) 
 - `location:{id}` — middleware checks that `id` is in the JWT `locations` array, or that the role is `marketing_staff` / `marketing_manager` / `super_admin`
 - `user:{id}` — middleware checks that `id` matches `sub`
 
-**`must_change_password`:** Set to `true` on account creation. Frontend intercepts this claim and gates all navigation behind a password-change screen. Cleared on successful `PUT /identity/me/password`.
+**`must_change_password`:** Set to `true` on account creation. The frontend intercepts this claim and gates all navigation behind the password-change screen. Server-side, `@ortho/auth-middleware` also enforces this: any JWT with `must_change_password: true` is rejected with `403 { "error": "password_change_required" }` on all endpoints **except** `PUT /identity/me/password` and `GET /identity/me`. This prevents bypassing the frontend gate via direct API calls. Cleared on successful `PUT /identity/me/password`.
 
-**Signing algorithm:** RS256. Identity Service generates an RSA-2048 key pair at startup; private key loaded from `IDENTITY_PRIVATE_KEY` env var. Public key served at JWKS endpoint. Key rotation is a deploy-time operation.
+**Signing algorithm:** RS256, RSA-2048. The private key is loaded from `IDENTITY_PRIVATE_KEY` env var. Each key pair carries a `kid` (key ID) that is embedded in the JWT header and included in the JWKS response. `@ortho/auth-middleware` selects the matching key from its JWKS cache using `kid`.
+
+**Key rotation procedure:** (1) Generate a new key pair and add it to `IDENTITY_JWKS_KEYS` env var alongside the existing key. (2) Deploy — JWKS now serves both keys; all services pick up the new key on their next JWKS refresh. (3) New JWTs are signed with the new `kid`; old JWTs (signed with the old `kid`) continue to verify correctly for up to their 15-minute TTL. (4) After 15 minutes, remove the old key from `IDENTITY_JWKS_KEYS` and redeploy. At no point are valid tokens rejected.
 
 ---
 
@@ -122,13 +124,18 @@ id                   uuid         PRIMARY KEY DEFAULT gen_random_uuid()
 provider_user_id     varchar      UNIQUE NOT NULL  -- auth provider internal ID
 email                varchar      UNIQUE NOT NULL
 name                 varchar      NOT NULL
-role                 varchar      NOT NULL          -- role enum
-status               varchar      NOT NULL DEFAULT 'active'  -- active | inactive
+role                 varchar      NOT NULL
+                     CHECK (role IN ('call_center_agent','call_center_manager',
+                                     'marketing_staff','marketing_manager','super_admin'))
+status               varchar      NOT NULL DEFAULT 'active'
+                     CHECK (status IN ('active','inactive'))
 force_password_reset boolean      NOT NULL DEFAULT true
 created_by           uuid         REFERENCES users(id) NULLABLE  -- null for bootstrap super_admin
 created_at           timestamptz  NOT NULL DEFAULT now()
 updated_at           timestamptz  NOT NULL DEFAULT now()
 ```
+
+When EHR roles are added, extend the `CHECK` constraint via migration. A `CHECK` constraint is used rather than a Postgres `ENUM` type because it is simpler to extend with `ALTER TABLE`.
 
 ### `user_locations`
 
@@ -151,7 +158,11 @@ revoked_at   timestamptz  NULLABLE
 created_at   timestamptz  NOT NULL DEFAULT now()
 ```
 
-Rotation on use: each `POST /identity/refresh` revokes the presented token and issues a new one. Expired and revoked tokens older than 7 days are pruned by a daily BullMQ job.
+Rotation on use: each `POST /identity/refresh` revokes the presented token and issues a new one.
+
+**Replay detection:** If `POST /identity/refresh` is called with a token whose `revoked_at IS NOT NULL`, this signals possible token theft. All refresh tokens for the associated `user_id` are immediately revoked and a `401 { "error": "session_invalidated" }` is returned. The user must log in again from scratch.
+
+**Cleanup:** A daily BullMQ job prunes rows where `expires_at < now() OR (revoked_at IS NOT NULL AND revoked_at < now() - interval '7 days')`. Both expired and old revoked tokens are removed.
 
 ### `api_keys`
 
@@ -176,22 +187,22 @@ Raw key returned once on creation, never stored. Key format: `ak_<32 random byte
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/identity/session` | None | Exchange provider token → enriched JWT + refresh token |
-| `POST` | `/identity/refresh` | None | Exchange refresh token → new JWT + new refresh token (rotation) |
-| `DELETE` | `/identity/session` | JWT | Logout — revoke current refresh token |
+| `POST` | `/identity/session` | None | Exchange provider token → enriched JWT + refresh token. Rate-limited at the load balancer (max 10 req/min per IP). |
+| `POST` | `/identity/refresh` | None | Exchange refresh token → new JWT + new refresh token (rotation). Body: `{ "refresh_token": "<raw>" }`. Rate-limited at load balancer. |
+| `DELETE` | `/identity/session` | JWT | Logout — body: `{ "refresh_token": "<raw>" }`. Revokes only the presented token (single-device logout). |
 | `GET` | `/identity/.well-known/jwks.json` | None | Public key set for JWT verification |
-| `GET` | `/identity/me` | JWT | Own profile (name, email, role, locations) |
-| `PUT` | `/identity/me/password` | JWT | Change own password; clears `force_password_reset` |
+| `GET` | `/identity/me` | JWT | Own profile — returns `{ id, email, name, role, locations, force_password_reset, status }` |
+| `PUT` | `/identity/me/password` | JWT | Body: `{ "current_password": "...", "new_password": "..." }`. `current_password` verified via auth provider before update. On forced-reset (`must_change_password: true`) the `current_password` field is optional (the user never set it). Clears `force_password_reset` on success. |
 
 ### User Management — `marketing_manager` + `super_admin` only
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/identity/users` | Create user with initial password; `force_password_reset: true` |
-| `GET` | `/identity/users` | List users; filterable by `role`, `status` |
+| `GET` | `/identity/users` | List users; filterable by `role`, `status`; cursor-paginated (default page size: 50) |
 | `GET` | `/identity/users/:id` | Get user |
-| `PUT` | `/identity/users/:id` | Update name, role, location assignments, or status |
-| `PUT` | `/identity/users/:id/password` | Admin password reset |
+| `PUT` | `/identity/users/:id` | Update name, role, location assignments, or status. When `status` is set to `inactive`: all active refresh tokens for that user are bulk-revoked (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = :id AND revoked_at IS NULL`) and `AuthProvider.deactivateUser()` is called. Outstanding JWTs remain valid for up to 15 minutes — accepted consequence of the stateless JWT model. |
+| `PUT` | `/identity/users/:id/password` | Admin password reset. Automatically sets `force_password_reset = true`. No notification is sent — the admin communicates the new password out-of-band. |
 
 ### API Key Management — `marketing_manager` + `super_admin` only
 
@@ -200,7 +211,7 @@ Raw key returned once on creation, never stored. Key format: `ak_<32 random byte
 | `POST` | `/identity/api-keys` | Generate key; returns raw key once |
 | `GET` | `/identity/api-keys` | List keys (name, permissions, last_used_at, status) |
 | `DELETE` | `/identity/api-keys/:id` | Revoke key |
-| `POST` | `/identity/api-keys/validate` | Internal endpoint: validate an `ak_` key; returns permissions or 401. Called by CRM API Gateway; response cached 60s at gateway. |
+| `POST` | `/identity/api-keys/validate` | **Internal VPC-only** — not exposed on the public ALB. Requires a service-to-service JWT in the `Authorization: Bearer` header (a regular enriched JWT issued to a service account with role `super_admin`). Validates an `ak_` key passed in the request body; returns `{ "permissions": [...] }` or `401`. CRM API Gateway caches valid responses for 60s. Updates `last_used_at`. |
 
 ### Response shapes
 
@@ -221,7 +232,8 @@ Raw key returned once on creation, never stored. Key format: `ak_<32 random byte
   "name": "Jane Smith",
   "role": "call_center_agent",
   "locations": ["loc-uuid"],
-  "status": "active"
+  "status": "active",
+  "force_password_reset": true
 }
 ```
 
@@ -281,10 +293,18 @@ Fastify plugin consumed by all services. Exposes:
 
 ```
 src/
-├── plugin.ts             # verifies JWT via JWKS, attaches user context to request
-├── permissions.ts        # static ROLE_PERMISSIONS map (from PRD permission table)
-├── require-role.ts       # preHandler: enforce minimum role
-└── require-location.ts   # preHandler: enforce location claim contains :id
+├── plugin.ts              # verifies JWT via JWKS (caches keys, selects by kid),
+│                          # attaches user context to request;
+│                          # rejects must_change_password: true with 403 on all routes
+│                          # except PUT /identity/me/password and GET /identity/me
+├── permissions.ts         # static ROLE_PERMISSIONS map (from PRD permission table)
+├── require-permission.ts  # preHandler: checks ROLE_PERMISSIONS[role].includes(permission)
+│                          # → 403 if not found. Primary enforcement mechanism for
+│                          # fine-grained permissions (e.g. 'leads:write', 'bulk_sms:send')
+├── require-role.ts        # preHandler: enforce minimum role level
+│                          # (used for admin-only endpoints where role itself is the gate)
+└── require-location.ts    # preHandler: enforce location claim contains :id,
+                           # or role is marketing_staff / marketing_manager / super_admin
 ```
 
 ---
@@ -323,7 +343,12 @@ Identity Service publishes no EventBridge events. User creation and role changes
 
 ## 9. Key Constraints
 
-- **Multi-location native:** All 34 locations represented as UUIDs in `user_locations`. Location IDs are owned by the CRM product layer (Lead Service / CRM API Gateway configuration) and referenced here as opaque UUIDs.
-- **EHR SSO:** When the EHR launches, it joins the same Identity Service deployment. EHR staff roles will be added to the role enum; the `AuthProvider` tenant is shared, enabling single sign-on across both products.
+- **Multi-location native:** All 34 locations represented as UUIDs in `user_locations`. Location IDs are owned by the CRM product layer and referenced here as opaque UUIDs. **Identity Service does not validate location IDs** — it stores whatever UUIDs are passed by the caller. The product layer is responsible for passing correct IDs. Invalid location UUIDs in `user_locations` result in empty or incorrect `locations[]` claims in JWTs; this is a caller error, not an Identity Service error.
+
+- **API keys are not location-scoped.** A key with `leads:read` permission can read leads across all locations. Scoping is by permission string only.
+
+- **EHR SSO:** When the EHR launches, it joins the same Identity Service deployment. EHR staff roles are added by extending the `CHECK` constraint via migration and bumping `@ortho/auth-middleware` (new role → permissions mapping). The `AuthProvider` tenant is shared, enabling single sign-on across both products.
+
 - **No PHI at launch:** User records contain staff PII only (name, email). No patient data is stored in `platform_identity`.
-- **Bootstrap:** A seed script creates the first `super_admin` user directly via the auth provider and Identity Service DB. `created_by` is nullable for this record only.
+
+- **Bootstrap:** A standalone seed script at `apps/platform/identity/scripts/seed-super-admin.ts` creates the first `super_admin`. It reads `SEED_EMAIL` and `SEED_PASSWORD` from env vars, calls `AuthProvider.createUser()`, then inserts the `users` row directly into the DB with `force_password_reset = true` and `created_by = NULL`. The raw password is never stored. After first login, the super_admin must change their password before accessing any other endpoint (enforced server-side by `@ortho/auth-middleware`).
