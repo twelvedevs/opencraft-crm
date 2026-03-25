@@ -36,8 +36,9 @@ Meta / Google Ads
       │
       ├─── Webhook push ──► POST /integrations/webhooks/:platform
       │                          │ verify signature
-      │                          │ enqueue process-lead-webhook job
-      │                          └──► BullMQ ──► parseLeadWebhook()
+      │                          │ parseLeadWebhook() [sync, pure, in route handler]
+      │                          │ enqueue one process-lead-webhook job per LeadEvent
+      │                          └──► BullMQ ──► resolve location_id from mappings
       │                                              │
       │                                              └──► EventBridge: ad_lead.received
       │                                                        │
@@ -83,9 +84,10 @@ interface Connector {
 - Lead forms: webhook push to `POST /integrations/webhooks/google_ads`. Signature verification via shared secret configured in Google Ads lead form settings.
 
 **Meta (`facebook_ads`):**
-- OAuth 2.0 with long-lived user access token (60-day expiry). No `refresh-token` job needed — token exchange on expiry is handled at next poll failure.
+- OAuth 2.0 with long-lived user access token (60-day expiry). No `refresh-token` job registered for Meta accounts.
 - Spend data: Marketing API `/act_{account_id}/insights` — `spend`, `impressions`, `clicks`, `campaign_id`, `campaign_name` per day.
 - Lead Ads: webhook push to `POST /integrations/webhooks/facebook_ads`. Signature verification via `X-Hub-Signature-256` (HMAC-SHA256 of raw body using app secret). Meta webhook subscription verification challenge handled at `GET /integrations/webhooks/meta/verify`.
+- Token expiry: long-lived tokens have a 60-day expiry. There is no automatic refresh path — when a poll fails with an auth error, `status` is set to `'error'` and recovery requires manual reconnect via the UI.
 
 ---
 
@@ -129,7 +131,11 @@ location_id   text  NOT NULL    -- opaque; provided by the CRM shell via the UI 
 UNIQUE (account_id, campaign_id)
 ```
 
+**One-to-one constraint:** each campaign maps to exactly one `location_id`. This is intentional — campaigns spanning multiple locations must be split into separate campaigns at the ad platform level for accurate per-location attribution. The `<CampaignLocationMapper>` UI enforces this by providing a single location selector per campaign.
+
 **Unmapped campaigns:** campaigns with no mapping entry are polled but **not published** in `ad_spend.synced`. Their spend data is silently dropped until a location mapping is configured. The `<CampaignLocationMapper>` UI surfaces all campaigns for an account (including unmapped ones) so operators can configure mappings. Once mapped, spend appears in the next poll cycle.
+
+**Re-mapping:** changing a campaign's `location_id` takes effect from the next poll cycle forward. Historical spend already published to Analytics under the old `location_id` is not retroactively re-attributed — the Analytics rollup table retains the original attribution. This is a known limitation: operators should configure mappings correctly before campaigns accumulate significant history.
 
 ---
 
@@ -186,8 +192,8 @@ Integration Hub uses four job types. BullMQ is already in the stack (Automation 
 2. Call `connector.fetchSpend(account, today)` and `connector.fetchSpend(account, yesterday)` — yesterday included to capture delayed reporting from platforms
 3. Look up `campaign_location_mappings` for this account
 4. Group records by `location_id`; drop unmapped campaigns (no mapping entry)
-5. Publish one `ad_spend.synced` event per `(location_id, date)` to EventBridge — `location_id` is top-level in the envelope, records contain only campaign-level fields
-5. Update `last_polled_at = now()` and `status = 'active'`
+5. Publish one `ad_spend.synced` event per `(platform, location_id, date)` to EventBridge — `platform` (from `account.platform`) and `location_id` are top-level envelope fields alongside `synced_date`; `records[]` contains only campaign-level fields
+6. Update `last_polled_at = now()` and `status = 'active'`
 
 **On failure:** Set `status = 'error'`, write error message to `last_error`, trigger Datadog alert.
 
