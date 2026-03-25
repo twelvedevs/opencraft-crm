@@ -140,7 +140,7 @@ campaign_name text                      -- display hint only; see note below
 impressions   int            NOT NULL DEFAULT 0
 clicks        int            NOT NULL DEFAULT 0
 spend         numeric(12,2)  NOT NULL DEFAULT 0
-UNIQUE (date, platform, campaign_id)
+UNIQUE (date, platform, location_id, campaign_id)
 ```
 
 **`campaign_name` is a display hint.** The upsert overwrites the full row on each sync, so if a campaign is renamed in the ad platform, older rows retain the old name and newer rows have the new name. Reporting Service queries must always group by `campaign_id` — never by `campaign_name` — to produce correct aggregations.
@@ -164,6 +164,12 @@ UNIQUE (date, campaign_id, location_id)
 ## 4. Event Handlers
 
 Nine typed handlers. Each follows the same contract: extract dimensions from the event payload → write one row to `analytics_events` → update the relevant rollup table — all in a single DB transaction.
+
+All events follow the standard envelope defined in `@ortho/types`. The dimension fields extracted per event are:
+
+- `lead.created` payload must carry: `location_id`, `channel` (first-touch attribution channel, e.g. `google_ads`, `facebook_ads`, `referral`, `walk_in`)
+- `lead.stage_changed` payload must carry: `location_id`, `pipeline` (e.g. `new_patient`), `stage_to` (the stage being entered, e.g. `exam_scheduled`)
+- `lead.converted` payload must carry: `location_id`, `channel` (first-touch attribution channel from the lead record)
 
 | Event | Handler | Rollup Updated | Key Dimensions Extracted |
 |---|---|---|---|
@@ -313,7 +319,7 @@ For all counter-increment handlers (`lead.created`, `lead.stage_changed`, `lead.
 1. Creates the partition for the next calendar month
 2. Drops the partition from 25 months ago (retaining exactly 24 months of data)
 
-Example: when the job runs on 2026-04-01, it creates the `2026-05` partition and drops the `2024-03` partition, retaining the 24 months from 2024-04 through 2026-03.
+Example: when the job runs on 2026-04-01, it creates the `2026-05` partition and drops the `2024-03` partition. This retains 24 complete prior months (2024-04 through 2026-03) plus the active current-month partition (2026-04) that is still being written to.
 
 Dropping an old partition is a metadata operation — no row-by-row deletion, no table lock on the live table.
 
