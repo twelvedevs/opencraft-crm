@@ -54,12 +54,14 @@ Automation Engine / Pipeline Engine
   Service
 ```
 
-Also subscribes to EventBridge (`opt_out.received` via SQS) to automatically unenroll opted-out entities.
+Also subscribes to EventBridge (`opt_out.received` via a **dedicated SQS queue** — one queue per service, standard EventBridge fan-out) to automatically unenroll opted-out entities.
 
 **Key architectural decisions:**
 
 - **BullMQ delayed jobs for scheduling** — each step is enqueued with `delay = scheduled_at - now()`. No cron polling loop. Naturally handles delays from minutes to weeks.
-- **Step worker checks enrollment status before executing** — if the enrollment was unenrolled between job creation and job pickup, the worker marks the step `cancelled` and exits cleanly. This is the race-condition guard.
+- **`job_id` stored on each step row** — after BullMQ enqueues a job, the returned `job_id` is written back to `sequence_step_executions.job_id`. This allows the safety-net poller to distinguish "never enqueued" steps (job_id IS NULL) from "enqueued but delayed" steps, preventing spurious re-enqueuing.
+- **Step worker uses optimistic lock on status transition** — `UPDATE sequence_step_executions SET status = 'running' WHERE id = ? AND status = 'pending' RETURNING id`. If no row is returned, another worker already claimed the step; exit cleanly.
+- **Active hours deferral updates `scheduled_at` and `job_id`** — when a step is deferred, the worker updates `scheduled_at` to the new execution time and stores the new `job_id` before re-enqueueing. This keeps the safety-net poller accurate.
 - **Sequence DSL mirrors the Automation Engine's versioning model** — `sequence_definitions` group table + `sequence_versions` history table, same active/draft/disabled lifecycle.
 - **Context snapshot at enrollment time** — the `context` object passed at `POST /sequences/enroll` is stored on the enrollment row and used for all step executions. The Nurturing Engine never re-fetches entity data mid-sequence.
 - **Sequences are linear** — no branch nodes. Conditional routing between sequences is the Automation Engine's responsibility (it decides which sequence to enroll the entity in based on event conditions).
@@ -136,9 +138,11 @@ Sequences are stored as versioned JSON in the `platform_nurturing` schema. The e
 }
 ```
 
+> **Note on A/B tracking:** The `tracked_event` and `tracked_condition` fields are entirely generic — the Nurturing Engine records a conversion when any event matching the condition arrives for the enrolled entity. The example values (`lead.stage_changed`, `exam_scheduled`) are Ortho CRM-specific, but the engine itself has no knowledge of what these values mean. Any product deploying the Nurturing Engine supplies its own event type and condition.
+
 ### 3.2 DSL Rules
 
-**Delays are always from enrollment time, not from the previous step.** In the example above, step-1 fires at `enrolled_at + 24h` and step-2 fires at `enrolled_at + 72h`. If step-1 is delayed by active hours, step-2 is unaffected — both `scheduled_at` values are computed once at enrollment time.
+**Delays are always from enrollment time, not from the previous step.** In the example above, step-1 fires at `enrolled_at + 24h` and step-2 fires at `enrolled_at + 72h`. These are the initial `scheduled_at` values. If step-1 is deferred by active hours, step-2's `scheduled_at` is unaffected — it remains `enrolled_at + 72h`. If step-1 itself is deferred, the step worker updates that step's own `scheduled_at` to the actual execution time; step-2 is never touched.
 
 **`active_hours` is sequence-level.** It applies only to `send_message` and `send_email` action types. `emit_event` and `call_ai` execute immediately regardless of active hours. The `timezone_field` is a dot-notation path resolved against the enrollment `context` object.
 
@@ -163,10 +167,10 @@ A value matching neither form is used as a literal string.
 |---|---|---|
 | `send_message` | SMS/MMS via Messaging Service (`POST /messages/send`) | Yes |
 | `send_email` | Email via Email Service (`POST /emails/send`) | Yes |
-| `call_ai` | Generate AI draft via AI Service (`POST /ai/complete`). Output stored in `step_executions.output`. When `auto_send: false` (default), draft surfaces to coordinator via step output endpoint. | No |
+| `call_ai` | Generate AI draft via AI Service (`POST /ai/complete`). Output stored in `step_executions.output`. When `auto_send: false` (default), the step completes and the Nurturing Engine publishes `nurturing.step_output_ready` carrying `enrollment_id`, `step_id`, `entity_type`, `entity_id`. The **Conversation Service** subscribes (via its own dedicated SQS queue), then pushes a real-time alert to the coordinator's browser via the Notification Service WebSocket. The coordinator UI then polls `GET /sequences/:id/enrollments/:eid/steps/:sid/output` to retrieve the draft. When `auto_send: true` (requires explicit manager config), the worker chains immediately into a `send_message` call using the AI output as the message body. | No |
 | `emit_event` | Publish event to EventBridge. Primary mechanism for product-layer side effects without importing product types. | No |
 
-No `branch` node, no `enroll_sequence` node, no `call_webhook` node (reserved for Automation Engine).
+No `branch` node (branching belongs in the Automation Engine), no `enroll_sequence` node (no recursive enrollment), no `call_webhook` node (reserved for Automation Engine).
 
 ### 3.5 Versioning
 
@@ -174,7 +178,7 @@ Same model as the Automation Engine:
 - `sequence_definitions` is a group (name + status + pointer to `active_version`).
 - All versioned definitions live in `sequence_versions`.
 - Editing a sequence inserts a new version row and increments `current_version`; `active_version` stays unchanged until a manager explicitly activates.
-- The Enrollment Manager snapshots the `steps` array from the active version at enrollment time (via the version row reference on the enrollment). In-progress step executions always use the params from the version active at enrollment — not the live version.
+- The Enrollment Manager records the active version number at enrollment time (`sequence_version` column). Step workers load step params from `sequence_versions` by `(sequence_id, sequence_version)` — not from the live active version. In-progress step executions always use the params from the version active at enrollment.
 
 ---
 
@@ -228,7 +232,8 @@ sequence_step_executions (
   enrollment_id  uuid REFERENCES sequence_enrollments NOT NULL,
   step_id        text NOT NULL,                     -- references step.id in version JSON
   step_index     integer NOT NULL,
-  scheduled_at   timestamptz NOT NULL,              -- enrolled_at + step.delay
+  scheduled_at   timestamptz NOT NULL,              -- enrolled_at + step.delay; updated on active hours deferral
+  job_id         text,                              -- BullMQ job ID; NULL until enqueued; updated on deferral
   status         text NOT NULL DEFAULT 'pending',   -- pending|running|completed|failed|cancelled
   attempt        integer NOT NULL DEFAULT 0,
   output         jsonb,
@@ -240,17 +245,23 @@ sequence_step_executions (
 
 **Indexes:**
 ```sql
+-- sequence_enrollments
 CREATE INDEX ON sequence_enrollments (entity_id, status);
-CREATE INDEX ON sequence_enrollments (sequence_id, entity_id);
+CREATE INDEX ON sequence_enrollments (sequence_id, entity_type, entity_id, status);
+
+-- sequence_step_executions
 CREATE INDEX ON sequence_step_executions (enrollment_id, status);
-CREATE INDEX ON sequence_step_executions (scheduled_at) WHERE status = 'pending';
+CREATE INDEX ON sequence_step_executions (enrollment_id, step_id);
+CREATE INDEX ON sequence_step_executions (scheduled_at, status) WHERE status = 'pending';
 ```
 
-The last index supports the safety-net polling query.
+**`sequence_step_executions` rows are pre-inserted at enrollment time** — all steps are written upfront with `scheduled_at` computed from `enrolled_at + delay`. This gives a complete audit trail immediately and lets unenrollment cancel all pending steps in a single `UPDATE` without re-parsing the sequence definition.
 
-**`sequence_step_executions` rows are pre-inserted at enrollment time** — all steps are written upfront with `scheduled_at` computed from `enrolled_at + delay`. This gives a complete audit trail immediately and lets unenrollment cancel all pending steps in a single `UPDATE` without needing to re-parse the sequence definition.
+**`job_id` on `sequence_step_executions`** — written after BullMQ enqueues the job. The safety-net poller uses `job_id IS NULL` (combined with `scheduled_at < now() - 1 minute`) to identify steps that were persisted to DB but never enqueued (crash between DB commit and BullMQ enqueue). Steps with a future `scheduled_at` and `job_id IS NULL` are also re-enqueued by a startup scan (see Section 5.5).
 
 **`dedup_key` on `sequence_enrollments` is caller-supplied.** For the no-response use case, the Automation Engine passes `"{{entity_id}}-{{payload.stage_entered_at}}-contacted-no-response"` — encoding both entity ID and stage entry timestamp. A lead re-entering the Contacted stage after Lost gets a fresh enrollment (different `stage_entered_at`); duplicate event deliveries are rejected.
+
+**`dedup_key` idempotency applies regardless of prior enrollment status.** If a row with the given `dedup_key` already exists — whether `active`, `completed`, or `unenrolled` — the enroll call returns `200 OK` and makes no changes. Re-enrollment after a prior completed or unenrolled cycle requires a semantically distinct `dedup_key`. For the no-response use case, `stage_entered_at` serves this purpose — a lead re-entering Contacted always produces a new timestamp and therefore a new key.
 
 ---
 
@@ -258,15 +269,16 @@ The last index supports the safety-net polling query.
 
 ### 5.1 Enrollment
 
-`POST /sequences/enroll` receives `sequence_id`, `entity_type`, `entity_id`, `context`, `dedup_key`.
+`POST /sequences/enroll` receives `{ sequence_id, entity_type, entity_id, context, dedup_key }`.
 
 1. Check `dedup_key` uniqueness — if already exists, return `200 OK` (idempotent, no changes).
 2. Load `sequence_definitions` where `status = 'active'`, join to `active_version` row in `sequence_versions`.
 3. Assign A/B variant if `ab_test.enabled = true` — weighted random pick stored on enrollment row.
-4. `INSERT sequence_enrollments` (status: `active`), storing `sequence_version`, context snapshot, and variant.
-5. Walk the `steps` array — for each step, `INSERT sequence_step_executions` with `scheduled_at = enrolled_at + step.delay`. All steps pre-inserted in a single transaction with the enrollment insert.
-6. For each step, enqueue a BullMQ delayed job with `delay = scheduled_at - now()`, carrying `enrollment_id` + `step_id`.
-7. Return `201` with `enrollment_id`.
+4. In a single DB transaction:
+   - `INSERT sequence_enrollments` (status: `active`), storing `sequence_version`, context snapshot, and variant.
+   - For each step: `INSERT sequence_step_executions` with `scheduled_at = enrolled_at + step.delay`, `job_id = NULL`.
+5. After transaction commits: for each step, enqueue a BullMQ delayed job, then `UPDATE sequence_step_executions SET job_id = ? WHERE id = ?`. If the process crashes between commit and BullMQ enqueue, steps remain with `job_id = NULL` and are recovered by startup scan or safety-net poller (Section 5.5).
+6. Return `201` with `enrollment_id`.
 
 ### 5.2 Step Execution (Happy Path)
 
@@ -279,11 +291,11 @@ Step Worker loads enrollment row
   ├─ enrollment.status ≠ 'active'?
   │     → mark step 'cancelled', ACK job, stop
   │
-  ├─ step_execution.status ≠ 'pending'?
-  │     → already ran or cancelled, ACK job, stop
-  │
   ▼
-Mark step 'running', record started_at
+Optimistic lock: UPDATE step_executions SET status='running', started_at=now()
+                 WHERE id=? AND status='pending' RETURNING id
+  │
+  ├─ No row returned → step already claimed by another worker, ACK job, stop
   │
   ▼
 Load step definition from sequence_versions (by enrollment.sequence_version + step_id)
@@ -300,12 +312,17 @@ Apply A/B variant overrides to params (if enrollment.ab_variant = 'B' and step h
 Active hours check (send_message / send_email only)
   ├─ Inside window → proceed
   └─ Outside window → compute ms until next window open (≤ 24h)
-                       BullMQ delay(ms), NACK job, stop
+                       UPDATE step_executions SET scheduled_at=<new_time>, status='pending', job_id=NULL
+                       Enqueue new BullMQ delayed job
+                       UPDATE step_executions SET job_id=<new_job_id>
+                       ACK original job, stop
   │
   ▼
 Execute action (HTTP call to platform service)
   │
   ├─ Success → mark step 'completed', store output if applicable
+  │             if action type is 'call_ai' and auto_send=false:
+  │               publish nurturing.step_output_ready { enrollment_id, step_id, entity_type, entity_id }
   │             if last step → mark enrollment 'completed'
   │                            publish nurturing.enrollment_completed
   │
@@ -317,37 +334,45 @@ Execute action (HTTP call to platform service)
 
 ### 5.3 Unenrollment
 
-`POST /sequences/unenroll` receives `sequence_id`, `entity_id`.
+`POST /sequences/unenroll` receives `{ sequence_id, entity_type, entity_id }`.
+
+The endpoint matches by `(sequence_id, entity_type, entity_id, status = 'active')` — callers do not need to know the `enrollment_id`. Including `entity_type` in the match prevents a collision between different entity types that happen to share the same `entity_id` string.
 
 1. Find `sequence_enrollments` where `sequence_id + entity_id + status = 'active'`. If none, return `200` (idempotent no-op).
 2. In a single transaction: set enrollment `status = 'unenrolled'`; `UPDATE sequence_step_executions SET status = 'cancelled' WHERE enrollment_id = ? AND status = 'pending'`.
-3. Best-effort BullMQ job removal for cancelled steps (`job.remove()` — succeeds if the job hasn't been picked up yet). Jobs already in a worker proceed to the step worker's first guard check (enrollment status ≠ `active` → exit cleanly).
+3. Best-effort BullMQ job removal for cancelled steps using stored `job_id` values (`job.remove()` — succeeds if the job hasn't been picked up yet). Jobs already in a worker proceed to the optimistic lock check (which fails since status is now `cancelled`) and exit cleanly.
 4. Publish `nurturing.enrollment_unenrolled` to EventBridge.
 5. Return `200`.
 
 ### 5.4 Opt-Out Handler
 
-EventBridge → SQS → Nurturing Engine consumer receives `opt_out.received`:
+EventBridge → dedicated SQS queue → Nurturing Engine consumer receives `opt_out.received`:
 
 1. Extract `entity_id` from event payload.
-2. `SELECT` all active enrollments for `entity_id`.
+2. `SELECT` all active enrollments for `entity_id` (across all sequences).
 3. For each enrollment: run unenrollment flow (Section 5.3).
 4. Publish `nurturing.all_sequences_cancelled` to EventBridge (Lead Service subscribes → sets opt-out flag on lead record).
 
-### 5.5 Safety-Net Polling
+### 5.5 Safety-Net Recovery
 
-A lightweight scheduled task (ECS Scheduled Task, every 5 minutes) queries:
+**Startup scan** — on service startup, scan for steps with `job_id IS NULL AND status = 'pending'`. These had their DB rows committed but BullMQ jobs never enqueued (crash between step 5 and 6 in Section 5.1). Re-enqueue each, then update `job_id`.
+
+**Polling cron** (every 5 minutes, separate ECS Scheduled Task) — finds steps whose BullMQ jobs were lost after initial enqueue:
 
 ```sql
 SELECT * FROM sequence_step_executions
-WHERE status = 'pending' AND scheduled_at < now() - interval '1 minute'
+WHERE status = 'pending'
+  AND scheduled_at < now() - interval '1 minute'
+  AND job_id IS NOT NULL   -- was enqueued, but job disappeared (Redis failure)
 ```
 
-Steps found here had their BullMQ jobs lost (Redis failure, deployment gap). The poller re-enqueues them. The step worker's idempotency guard (`status ≠ 'pending'` check) prevents double execution if the original job reappears.
+Re-enqueue each. The optimistic lock (`WHERE status = 'pending'`) prevents double execution if the original job reappears after Redis recovery. Maximum recovery latency is 6 minutes (5-minute poll interval + 1-minute grace period). This is acceptable for customer-facing SMS follow-ups; tune the poll interval if a tighter SLA is needed.
 
 ---
 
 ## 6. API Surface
+
+The Nurturing Engine exposes a REST API consumed by: the Automation Engine (enroll/unenroll), the `@platform/sequence-ui` component (sequence CRUD, enrollment log), and the Reporting Service (analytics queries).
 
 ```
 # Sequence management
@@ -358,20 +383,20 @@ PUT    /sequences/:id                     — save draft (new version row, bumps
 POST   /sequences/:id/activate            — activate current_version (marketing_manager only)
 POST   /sequences/:id/disable             — disable (marketing_manager only)
 
-# Enrollment operations
-POST   /sequences/enroll                  — enroll entity (idempotent on dedup_key)
-POST   /sequences/unenroll                — unenroll entity from one sequence (idempotent)
+# Enrollment operations (service-to-service and UI)
+POST   /sequences/enroll                  — body: { sequence_id, entity_type, entity_id, context, dedup_key }
+POST   /sequences/unenroll                — body: { sequence_id, entity_type, entity_id }
 GET    /sequences/:id/enrollments         — list enrollments (status, variant, enrolled_at)
 GET    /sequences/:id/enrollments/:eid    — detail with all step statuses + outputs
 
-# Step output (for call_ai steps)
+# Step output (for call_ai steps — coordinator review)
 GET    /sequences/:id/enrollments/:eid/steps/:sid/output  — retrieve AI draft or step result
 
 # Analytics
 GET    /sequences/:id/stats               — completion rate, unenrollment rate, A/B conversion rates
 ```
 
-**Auth:** Identity Service JWT. Activate/disable require `marketing_manager` role. Draft create/edit allowed for `marketing_staff`. Enroll/unenroll use service-to-service JWT (Automation Engine).
+**Auth:** Identity Service JWT. Activate/disable require `marketing_manager` role. Draft create/edit allowed for `marketing_staff`. Enroll/unenroll use a service JWT (Automation Engine, not a user token).
 
 **Pagination:** all list endpoints accept `limit` + `cursor` (keyset on `created_at`).
 
@@ -386,16 +411,16 @@ Exported from `packages/@platform/sequence-ui`. Calls the Nurturing Engine API d
 **Sequence List** — table: name, trigger label (informational, set by product config), step count, A/B status, current version, status badge (Draft / Active / Disabled).
 
 **Sequence Builder:**
-- Step list — vertical ordered list. Each step shows delay, action type, and template. Drag to reorder. Add/remove steps.
+- Step list — vertical ordered list. Each step shows delay, action type, template. Drag to reorder. Add/remove steps.
 - Step editor panel — delay input (value + unit: minutes / hours / days), action type selector, template picker (calls Template Service), A/B variant toggle with traffic split slider and conversion event config.
 - Active hours config — start/end time inputs + timezone field selector.
 - Save Draft / Activate buttons. Activate requires `marketing_manager` role — button hidden for `marketing_staff`.
 
 **Enrollment Log** — table: entity ID, enrolled at, variant, status, per-step status badges (matching Automation Engine execution log style). Expandable row shows step detail, output, attempt count, errors. Filterable by status and date range.
 
-**A/B Results panel** — shown when `ab_test.enabled = true`: variant A vs B enrollment count, completion rate, and conversion rate (entities that triggered the tracked event). Auto-declares a winner when statistical significance is reached (p < 0.05, minimum 100 enrollments per variant).
+**A/B Results panel** — shown when `ab_test.enabled = true`: variant A vs B enrollment count, completion rate, and conversion rate. Auto-declares a winner when statistical significance is reached (p < 0.05, minimum 100 enrollments per variant).
 
-### Rule States
+### Sequence States
 
 | State | Description |
 |---|---|
@@ -409,11 +434,11 @@ Only Marketing Managers can activate or disable sequences. Marketing Staff can c
 
 ## 8. Integration: No-Response Follow-up Use Case
 
-This section documents the specific Automation Engine rules and new domain events that implement the Contacted stage feature: "If no response in 24hrs: auto SMS follow-up 1. If no response in 72hrs: auto SMS follow-up 2."
+This section documents the Automation Engine rules and new domain events that implement the Contacted stage feature: "If no response in 24hrs: auto SMS follow-up 1. If no response in 72hrs: auto SMS follow-up 2."
 
 ### 8.1 New Domain Events
 
-**`lead.outbound_sent`** — published by Conversation Service for each outbound coordinator message.
+**`lead.outbound_sent`** — published by Conversation Service for each outbound coordinator message. `is_first_in_stage` is computed by the Conversation Service by checking whether any prior outbound message exists for this `entity_id` since `stage_entered_at` (lightweight read against the conversation log).
 
 ```json
 {
@@ -434,9 +459,7 @@ This section documents the specific Automation Engine rules and new domain event
 }
 ```
 
-`is_first_in_stage` is computed by the Conversation Service: it checks whether any prior outbound message exists for this `entity_id` since `stage_entered_at`. This is a lightweight read against the conversation log.
-
-**`lead.activity_logged`** — published by Lead Service when a coordinator manually logs a call, note, or any non-message activity.
+**`lead.activity_logged`** — published by Lead Service when a coordinator explicitly logs a call disposition or manual note. Does **not** fire on automated system events (field updates, CSV import rows, stage changes). The distinction is: if a human coordinator takes a deliberate action to record contact with the lead, this event fires.
 
 ```json
 {
@@ -452,29 +475,32 @@ This section documents the specific Automation Engine rules and new domain event
 }
 ```
 
-### 8.2 New Automation Engine Action: `unenroll_sequence`
+### 8.2 Automation Engine Amendment: `unenroll_sequence` Action
 
-Calls `POST /sequences/unenroll` on the Nurturing Engine. Executes immediately, ignores `active_hours`. Idempotent — safe to call even when no active enrollment exists.
+The no-response follow-up feature requires a new action type in the Automation Engine: `unenroll_sequence`. **This requires amending the Automation Engine spec** (`docs/superpowers/specs/2026-03-24-automation-engine-design.md`) to add:
+- `unenroll_sequence` to the action types table (Section 6)
+- `unenroll-sequence.worker.ts` to the action workers directory (Section 8)
+- A contract test for `POST /sequences/unenroll` outbound call shape (Section 9)
+
+The action calls `POST /sequences/unenroll` on the Nurturing Engine. Executes immediately, ignores `active_hours`. Idempotent — safe to call even when no active enrollment exists.
 
 ```json
 {
   "type": "unenroll_sequence",
   "params": {
     "sequence_id": "<uuid-of-contacted-no-response-sequence>",
-    "entity_id_field": "payload.entity_id",
+    "entity_type": "payload.entity_type",
+    "entity_id": "payload.entity_id",
     "dedup_key": "{{event_id}}-unenroll"
   }
 }
 ```
 
-Added to `apps/platform/automation/src/services/action-workers/unenroll-sequence.worker.ts`.
-
 ### 8.3 Automation Engine Rules
 
 **Rule 1 — Enroll on first outbound contact**
 
-Trigger: `lead.outbound_sent` with `is_first_in_stage = true` and `stage = contacted`.
-The enrollment `dedup_key` encodes entity ID and stage entry timestamp — a lead re-entering Contacted after Lost gets a fresh enrollment; duplicate event deliveries are rejected.
+Trigger: `lead.outbound_sent` with `is_first_in_stage = true` and `stage = contacted`. The enrollment `dedup_key` encodes entity ID and stage entry timestamp so re-entry to Contacted (after Lost) gets a fresh enrollment; duplicate event deliveries are rejected.
 
 ```json
 {
@@ -502,7 +528,7 @@ The enrollment `dedup_key` encodes entity ID and stage entry timestamp — a lea
 
 **Rule 2 — Cancel on inbound SMS**
 
-No stage condition needed — `unenroll_sequence` is idempotent; if the entity is not enrolled in this sequence (e.g. a different stage), the call is a no-op.
+No stage condition needed — `unenroll_sequence` is idempotent; if the entity is not currently enrolled in this sequence, the call is a no-op.
 
 ```json
 {
@@ -512,6 +538,7 @@ No stage condition needed — `unenroll_sequence` is idempotent; if the entity i
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
+      "entity_type_field": "payload.entity_type",
       "entity_id_field": "payload.entity_id",
       "dedup_key": "{{event_id}}-unenroll"
     }
@@ -521,14 +548,20 @@ No stage condition needed — `unenroll_sequence` is idempotent; if the entity i
 
 **Rule 3 — Cancel on activity logged**
 
+Scoped to the contacted stage to avoid premature unenrollment triggered by activity in other stages.
+
 ```json
 {
   "name": "No-Response Follow-up — Cancel on Activity",
   "trigger": { "event_type": "lead.activity_logged" },
+  "condition": {
+    "field": "payload.stage", "op": "eq", "value": "contacted"
+  },
   "action_tree": {
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
+      "entity_type_field": "payload.entity_type",
       "entity_id_field": "payload.entity_id",
       "dedup_key": "{{event_id}}-unenroll"
     }
@@ -549,6 +582,7 @@ No stage condition needed — `unenroll_sequence` is idempotent; if the entity i
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
+      "entity_type_field": "payload.entity_type",
       "entity_id_field": "payload.entity_id",
       "dedup_key": "{{event_id}}-unenroll"
     }
@@ -576,6 +610,7 @@ Marketing managers enable this per their preference via `@platform/automation-ui
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
+      "entity_type_field": "payload.entity_type",
       "entity_id_field": "payload.entity_id",
       "dedup_key": "{{event_id}}-unenroll"
     }
@@ -600,14 +635,15 @@ apps/platform/nurturing/
 │   │   ├── step-worker.ts            # BullMQ worker: guard checks → active hours → execute
 │   │   ├── action-executor.ts        # dispatches to action-specific handlers
 │   │   ├── ab-assigner.ts            # weighted random variant assignment
-│   │   ├── safety-net-poller.ts      # every 5min: re-enqueue stuck pending steps
+│   │   ├── safety-net-poller.ts      # every 5min: re-enqueue orphaned pending steps
+│   │   ├── startup-scanner.ts        # on startup: re-enqueue steps with job_id IS NULL
 │   │   └── action-handlers/
 │   │       ├── send-message.ts
 │   │       ├── send-email.ts
 │   │       ├── call-ai.ts
 │   │       └── emit-event.ts
 │   ├── consumers/
-│   │   └── opt-out.consumer.ts       # SQS consumer for opt_out.received
+│   │   └── opt-out.consumer.ts       # SQS consumer for opt_out.received (dedicated queue)
 │   ├── repositories/
 │   │   ├── sequence-definitions.repo.ts
 │   │   ├── sequence-versions.repo.ts
@@ -623,9 +659,11 @@ apps/platform/nurturing/
 └── tsconfig.json
 ```
 
-**Shared code:** `field-interpolator` and `active-hours` logic is identical to the Automation Engine. Both are extracted to a new `@ortho/interpolator` internal package and imported by both services.
+**Shared code:** `field-interpolator` and `active-hours` logic is extracted to `@ortho/interpolator` internal package and imported by both the Nurturing Engine and the Automation Engine to prevent divergence.
 
-**Scaling:** The step worker runs as a separate ECS task definition from the REST API — same Docker image, different entry points. This allows the worker to scale independently under high enrollment volume.
+**Scaling:** The step worker runs as a separate ECS task definition from the REST API — same Docker image, different entry points (`index.ts` for the REST API, `worker.ts` for the BullMQ worker). This allows the worker to scale independently under high enrollment volume.
+
+**Opt-out SQS queue:** The Nurturing Engine has its own dedicated SQS queue subscribed to `opt_out.received` from EventBridge. It does not share a queue with the Automation Engine or any other subscriber. Standard EventBridge fan-out — each subscriber gets an independent copy of the event.
 
 **Runtime dependencies:**
 
@@ -633,7 +671,7 @@ apps/platform/nurturing/
 |---|---|
 | PostgreSQL (`platform_nurturing` schema) | Sequence definitions, enrollments, step executions |
 | Redis / ElastiCache | BullMQ delayed job queue |
-| AWS SQS | EventBridge subscription for `opt_out.received` |
+| AWS SQS (dedicated queue) | EventBridge subscription for `opt_out.received` |
 | Messaging Service | `send_message` action handler |
 | Email Service | `send_email` action handler |
 | AI Service | `call_ai` action handler |
@@ -646,6 +684,7 @@ apps/platform/nurturing/
 | `nurturing.enrollment_completed` | All steps completed | Analytics |
 | `nurturing.enrollment_unenrolled` | Explicit unenroll call | Analytics |
 | `nurturing.step_failed` | Step hits max retries | Analytics, Datadog alert |
+| `nurturing.step_output_ready` | `call_ai` step completes with `auto_send: false` | Conversation Service — receives event, pushes real-time alert to coordinator browser via Notification Service WebSocket; coordinator UI then polls `GET .../steps/:sid/output` |
 | `nurturing.all_sequences_cancelled` | Opt-out received | Lead Service |
 
 ---
@@ -655,24 +694,27 @@ apps/platform/nurturing/
 ### Unit Tests (Vitest, no external dependencies)
 
 - **`@ortho/interpolator` — field interpolator** — dot-notation resolution, template strings, missing fields, nested objects (shared with Automation Engine; tested once in shared package)
-- **`@ortho/interpolator` — active hours** — window boundary cases, DST edge cases, delay always ≤ 24h, time-of-day-only constraint (shared; tested once)
+- **`@ortho/interpolator` — active hours** — window boundary cases, DST edge cases, delay always ≤ 24h, time-of-day-only constraint
 - **`ab-assigner`** — 50/50 split converges within margin over 10,000 samples; 0/100 always assigns to the configured variant
 - **`enrollment-manager`** — correct `scheduled_at` per step delay, correct step pre-insertion count, dedup rejection path
-- **`unenrollment`** — marks all pending steps `cancelled`, leaves non-pending steps untouched
+- **`unenrollment`** — marks all pending steps `cancelled`, leaves non-pending steps untouched; idempotent on missing enrollment
 
 ### Integration Tests (Vitest + real Postgres + real Redis, platform service calls mocked via HTTP interceptor)
 
-- Enroll → all steps pre-inserted with correct `scheduled_at` → BullMQ jobs enqueued with correct delays
+- Enroll → all steps pre-inserted with correct `scheduled_at` and `job_id = NULL` initially → `job_id` updated after BullMQ enqueue
 - Step fires → inside active hours window → `send_message` called with correct params and `dedup_key`
-- Step fires → outside active hours window → job re-enqueued with correct delay, no send
+- Step fires → outside active hours window → `scheduled_at` updated to deferred time, `job_id` updated, no send; step fires correctly at deferred time
 - All steps complete → enrollment status `completed`, `nurturing.enrollment_completed` published
-- Unenroll mid-sequence → pending steps `cancelled`; step worker guard check exits cleanly for in-flight job
+- Unenroll mid-sequence → pending steps `cancelled`; optimistic lock causes in-flight step worker to exit cleanly
 - Duplicate enroll with same `dedup_key` → idempotent, single enrollment row, `200 OK`
-- `opt_out.received` → all active enrollments for entity unenrolled, `nurturing.all_sequences_cancelled` published
-- A/B: variant assigned at enrollment, correct variant override params used at step execution
-- `call_ai` step → output stored in `step_executions.output`, retrievable via `GET .../output`
-- Safety-net poller → stuck pending step re-enqueued, executes correctly, no duplicate send (dedup_key guard on Messaging Service)
-- Step max retries → step `failed`, enrollment `failed`, `nurturing.step_failed` event published
+- `opt_out.received` → all active enrollments for entity unenrolled across all sequences
+- A/B: variant assigned at enrollment, correct variant override params applied at step execution
+- `call_ai` step with `auto_send: false` → output stored in `step_executions.output`, `nurturing.step_output_ready` published, retrievable via `GET .../output`
+- `call_ai` step with `auto_send: true` → synthetic `send_message` called with AI output as body
+- Safety-net poller → step with `job_id IS NOT NULL` and overdue `scheduled_at` re-enqueued; executes correctly; no duplicate send (Messaging Service dedup_key guard)
+- Startup scanner → step with `job_id IS NULL` re-enqueued on startup
+- Step max retries → step `failed`, enrollment `failed`, `nurturing.step_failed` published
+- Optimistic lock race: two workers pick up same step simultaneously → only first proceeds, second exits cleanly
 
 ### Contract Tests
 
@@ -690,12 +732,17 @@ apps/platform/nurturing/
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Scheduling mechanism | BullMQ delayed jobs | Handles any delay duration natively; no polling loop; already used by Automation Engine |
-| Delay anchor | Enrollment time (not previous step) | Predictable, deterministic scheduling; active hours delay on one step doesn't shift subsequent steps |
-| Sequences are linear | No branch nodes | Conditional routing belongs in the Automation Engine (event-reactive); sequences are execution, not logic |
-| Cancellation mechanism | Explicit unenroll + step worker guard check | Unenroll updates DB atomically; guard check handles the narrow race window between job pickup and unenroll |
-| Context snapshot at enrollment | Yes | Nurturing Engine never calls product services to re-fetch data; platform/product isolation preserved |
-| A/B variant assignment | At enrollment time, uniform across all steps | Consistent experience per entity; simplest result attribution |
-| `dedup_key` on enrollment | Caller-supplied | Caller (Automation Engine) has the semantic knowledge to construct meaningful keys (entity + stage entry timestamp) |
-| Shared interpolator + active-hours | `@ortho/interpolator` package | Identical logic in two services; extracted to prevent divergence |
-| `unenroll_sequence` Automation Engine action | New action type | Keeps cancellation logic in the configurable rule layer, not hardcoded in Nurturing Engine or product services |
+| Scheduling mechanism | BullMQ delayed jobs | Handles any delay duration natively; no polling loop; matches Automation Engine infrastructure |
+| Delay anchor | Enrollment time | Predictable, deterministic scheduling; active hours deferral on one step does not shift other steps |
+| `job_id` on step rows | Yes | Enables startup scan to recover never-enqueued steps; enables safety-net poller to distinguish orphaned vs. legitimately delayed steps |
+| Optimistic lock on status | `UPDATE ... WHERE status='pending' RETURNING id` | Prevents double execution when two workers race on the same step |
+| Active hours deferral | Updates `scheduled_at` + `job_id` in step row | Keeps safety-net poller accurate; prevents false-positive re-enqueuing of legitimately deferred steps |
+| Sequences are linear | No branch nodes | Branching belongs in Automation Engine; sequences are execution, not routing logic |
+| Cancellation mechanism | Explicit unenroll + optimistic lock guard | Atomic DB update; race-condition handled by optimistic lock, not by duplicate check |
+| Context snapshot at enrollment | Yes | Nurturing Engine never calls product services; platform/product isolation preserved |
+| A/B variant assignment | At enrollment time, uniform across all steps | Consistent per-entity experience; simple conversion attribution |
+| `dedup_key` on enrollment | Caller-supplied | Caller (Automation Engine) has semantic knowledge to construct meaningful keys (entity + stage entry timestamp) |
+| Shared interpolator + active-hours | `@ortho/interpolator` package | Prevents logic divergence between Automation Engine and Nurturing Engine |
+| `unenroll_sequence` action | New Automation Engine action type (requires Automation Engine spec amendment) | Keeps cancellation configurable via marketing manager rules, not hardcoded |
+| `call_ai` output surfacing | `nurturing.step_output_ready` → Conversation Service → Notification Service WebSocket → coordinator browser polls output endpoint | Decouples Nurturing Engine from product UI; platform never calls product services directly |
+| Opt-out SQS queue | Dedicated per service | Standard EventBridge fan-out; each subscriber gets independent copy; no queue sharing between services |
