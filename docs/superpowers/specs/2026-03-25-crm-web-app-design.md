@@ -429,7 +429,7 @@ Sub-navigation tabs within the section: Channel Performance (default), Funnel, L
 
 **Locations tab:** Side-by-side location comparison table, sortable by any metric. Visible to `marketing_staff+` only.
 
-**Coordinators tab:** Per-coordinator metrics — exams booked, avg response time, case conversion rate. Coordinator identity uses the `triggered_by` field on `lead.stage_changed` events (a user ID). The Reporting Service denormalizes coordinator display names in its response by calling `GET /identity/users/:id` during report generation — the frontend receives `coordinator_name` alongside the metrics and never calls Identity Service directly for this purpose. `call_center_agent` users see only their own row: the Reporting Service enforces this by overwriting the `coordinator_id` filter with the agent's JWT `sub`, not merely via location scoping.
+**Coordinators tab:** Per-coordinator metrics — exams booked, avg response time, case conversion rate. Coordinator identity uses the `triggered_by` field on `lead.stage_changed` events (a user ID). The Reporting Service returns `coordinator_id` (the `triggered_by` UUID) in its response — display name resolution is the frontend's responsibility. The frontend collects the unique coordinator IDs from the response and calls `GET /identity/users/:id` in parallel (using `Promise.all`) with the user's own JWT to resolve display names. This endpoint is accessible to roles that can view coordinator metrics (`call_center_manager+`, `marketing_staff+`). `call_center_agent` users see only their own row: the Reporting Service enforces this by overwriting the `coordinator_id` filter with the agent's JWT `sub`, not merely via location scoping.
 
 **Reports tab:** Saved report list, scheduled deliveries, run history.
 
