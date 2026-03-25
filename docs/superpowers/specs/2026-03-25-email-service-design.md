@@ -18,7 +18,7 @@ The Email Service is a **platform-layer service** (`apps/platform/email`) respon
 - Expose a spam score check endpoint (used by Campaign builder UI and as an automatic gate on bulk sends)
 
 **Out of scope:**
-- Template storage and rendering for transactional sends — callers (Automation Engine, Nurturing Engine) must call `POST /templates/render` on the Template Service themselves and pass the rendered HTML to `POST /emails/send`. The Email Service has no Template Service dependency for single sends.
+- Template storage and rendering for transactional sends — callers (Automation Engine, Nurturing Engine) must call `POST /templates/render` on the Template Service themselves and pass the rendered HTML to `POST /emails/send`. The Email Service does not accept `template_id` on `POST /emails/send`. **Note:** the Automation Engine spec's `send_email` action params (`template_id` + `context`) reflect the Automation Engine worker's responsibility to call Template Service before calling this endpoint — the Automation Engine spec must be updated to document this two-step flow.
 - Active hours enforcement (callers handle timing before calling this service)
 - Unsubscribe list storage (Email Service publishes `email.unsubscribed`; Lead Service owns opt-out state)
 - SendGrid Marketing Campaigns API (all bulk delivery is managed directly via `/v3/mail/send`)
@@ -226,13 +226,14 @@ email_sends (
   id                   uuid PRIMARY KEY,
   dedup_key            text UNIQUE,
   location_id          text NOT NULL,
+  domain_id            uuid REFERENCES email_sending_domains,
   entity_type          text,                -- optional correlation field from caller
   entity_id            text,                -- optional correlation field from caller
   to_email             text NOT NULL,
   subject              text NOT NULL,
   sendgrid_message_id  text,
   status               text NOT NULL DEFAULT 'queued',
-    -- queued | sent | delivered | bounced | failed
+    -- queued | sent | delivered | bounced | unsubscribed | failed
   attempt              integer NOT NULL DEFAULT 0,
   error                text,
   created_at           timestamptz NOT NULL DEFAULT now(),
@@ -292,8 +293,10 @@ email_recipient_clicks (
 -- Indexes
 CREATE INDEX ON email_sends (sendgrid_message_id);
 CREATE INDEX ON email_sends (status);
+CREATE INDEX ON email_sends (domain_id, created_at);      -- domain deletion check + domain-level reporting
 CREATE INDEX ON email_campaign_jobs (status);
 CREATE INDEX ON email_campaign_jobs (location_id);
+CREATE INDEX ON email_campaign_jobs (domain_id, created_at);   -- domain deletion check
 CREATE INDEX ON email_campaign_recipients (job_id, status);
 CREATE INDEX ON email_campaign_recipients (sendgrid_message_id);
 CREATE INDEX ON email_recipient_clicks (recipient_id);
@@ -302,11 +305,13 @@ CREATE INDEX ON email_recipient_clicks (recipient_id);
 **Notes:**
 - `email_sends.sendgrid_message_id` indexed for fast webhook correlation
 - `email_sends (status)` supports monitoring queries (e.g. find all `queued` sends on restart)
+- `email_sends (domain_id, created_at)` and `email_campaign_jobs (domain_id, created_at)` support the domain deletion 30-day check across both tables
 - `email_campaign_jobs (status)` supports crash-recovery startup scan (find all `processing` jobs with orphaned `pending` recipients)
 - `email_campaign_jobs (location_id)` supports admin/reporting queries by location
 - `email_campaign_recipients (job_id, status)` supports progress polling, status-filtered queries, and crash-recovery re-enqueue scan
 - `email_campaign_recipients.context` is a snapshot at insert time — never updated after insert
 - `email_sends.delivered_at` and `bounced_at` track delivery/bounce timestamps for transactional emails. Open and click events for transactional sends publish EventBridge events only — no status change, no timestamp written. Click tracking table (`email_recipient_clicks`) is campaign-only
+- `email_sends.domain_id` is set at insert time from the resolved sending domain. Used for domain deletion check and traceability after domain config changes
 - No hard deletes — all rows serve as audit log
 
 ---
@@ -336,9 +341,9 @@ SendGrid POST /webhooks/sendgrid
            unsubscribe → status = 'unsubscribed'
          All updates use ON CONFLICT DO NOTHING for idempotency
       3. For click events on campaign recipients: insert email_recipient_clicks row (always — multiple clicks tracked)
-      4. For bounce/spamreport events on campaign recipients: atomically increment failed_count on parent job
-         (sent_count is incremented by the Campaign Recipient Worker only — never by the webhook handler)
-      5. Publish EventBridge event
+      4. Publish EventBridge event
+
+Note: `sent_count` and `failed_count` on `email_campaign_jobs` are incremented exclusively by the Campaign Recipient Worker (tracking SendGrid acceptance/rejection). The webhook handler does NOT touch these counters. Post-delivery bounces and spam reports update the recipient row status only — they are engagement/suppression data, not delivery failure data. This keeps the completion sum (`sent_count + failed_count = total_recipients`) stable after the campaign completes.
   → Return 200 (always — SendGrid retries on non-2xx)
 ```
 
@@ -356,7 +361,7 @@ All events use the standard `@ortho/event-bus` envelope: `{ event_id, event_type
 | `email.delivered` | SendGrid confirms delivery to inbox | `email_id`, `to_email`, `location_id`, `entity_type?`, `entity_id?`, `campaign_job_id?` |
 | `email.opened` | Campaign recipient opens email (pixel) | `email_id`, `to_email`, `location_id`, `entity_type?`, `entity_id?`, `campaign_job_id?` |
 | `email.clicked` | Recipient clicks a tracked link | `email_id`, `to_email`, `url`, `location_id`, `entity_type?`, `entity_id?`, `campaign_job_id?` |
-| `email.bounced` | Hard bounce | `email_id`, `to_email`, `location_id`, `bounce_type: hard\|soft`, `campaign_job_id?` |
+| `email.bounced` | Hard bounce (SendGrid `bounce` event) | `email_id`, `to_email`, `location_id`, `bounce_type: "hard"`, `campaign_job_id?` |
 | `email.unsubscribed` | Recipient clicks unsubscribe | `to_email`, `location_id` |
 | `email.spam_reported` | Recipient marks as spam | `to_email`, `location_id` |
 | `email.failed` | Max retries exceeded (transactional) | `email_id`, `to_email`, `location_id`, `entity_type?`, `entity_id?`, `dedup_key`, `error` |
@@ -373,9 +378,9 @@ All events use the standard `@ortho/event-bus` envelope: `{ event_id, event_type
 
 | SendGrid Event | Classification | Email Service Action |
 |---|---|---|
-| `bounce` | Hard (permanent) | Status → `bounced`, `bounced_at` set, publish `email.bounced { bounce_type: "hard" }` |
-| `deferred` | Soft (temporary) | No status change — SendGrid retries automatically |
-| `spamreport` | Spam | Campaign recipient: status → `spam_reported`, `failed_count` incremented, publish `email.spam_reported`. Transactional send: status → `bounced`, `bounced_at` set, publish `email.spam_reported` |
+| `bounce` | Hard (permanent) | Status → `bounced`, `bounced_at` set, publish `email.bounced { bounce_type: "hard" }`. Does not affect job `failed_count` — post-delivery bounce is engagement data, not a delivery failure. |
+| `deferred` | Soft (temporary) | No status change, no event published — SendGrid retries automatically |
+| `spamreport` | Spam | Campaign recipient: status → `spam_reported`, publish `email.spam_reported`. Transactional send: status → `bounced`, `bounced_at` set, publish `email.spam_reported`. Neither increments job `failed_count`. |
 
 Hard bounces are not retried. SendGrid automatically suppresses the address; future sends to that address are rejected by SendGrid with a 400.
 
@@ -497,7 +502,7 @@ apps/platform/email/
 - **Webhook: `delivered` for transactional send** — updates `delivered_at` on `email_sends`, publishes `email.delivered`
 - **Webhook: `bounce`** — updates status → `bounced`, publishes `email.bounced { bounce_type: "hard" }`
 - **Webhook: `open` for campaign recipient** — updates `opened_at`, publishes `email.opened`
-- **Webhook: `open` for transactional send** — status updated, no `opened_at` column written, `email.opened` published (no campaign_job_id in payload)
+- **Webhook: `open` for transactional send** — status unchanged, no `opened_at` column written, `email.opened` published (no campaign_job_id in payload)
 - **Webhook: `click` for campaign recipient** — inserts `email_recipient_clicks` row, updates `clicked_at` on first click only; second click inserts second row, does not update `clicked_at`
 - **Webhook: `click` for transactional send** — status updated, no `email_recipient_clicks` row inserted
 - **Webhook idempotency** — duplicate `delivered` event is a no-op (no duplicate EventBridge publish)
@@ -532,7 +537,7 @@ apps/platform/email/
 | Active hours | Not enforced by Email Service | Callers (Campaign Service `scheduled_for`, Automation/Nurturing Engine) handle timing. Email Service is a delivery primitive. |
 | Bounce handling | Hard bounce → status `bounced` + EventBridge event. Soft bounce deferred to SendGrid retry. | Hard bounces are permanent — Lead Service notified via event. Soft bounces resolve at the delivery layer. |
 | BullMQ retry | 5s → 30s → 2m → 10m, per send/per recipient | Per-recipient retry prevents one bad address from blocking a campaign. Consistent with Automation Engine retry pattern. |
-| `sent_count` concurrency | Atomic SQL `UPDATE ... SET sent_count = sent_count + 1` — incremented by worker only, never by webhook handler | Prevents double-counting: `delivered` webhook does not touch `sent_count`. Completion detection uses compare-and-swap on `status = 'processing'` guard. |
+| `sent_count`/`failed_count` scoping | Both counters incremented by Campaign Recipient Worker only (SendGrid acceptance/rejection). Webhook handler never touches them. | Keeps the completion sum (`sent_count + failed_count = total_recipients`) stable after the campaign completes — post-delivery bounces don't reopen completion logic. Prevents double-counting from duplicate webhooks. |
 | Open/click tracking scope | Campaign recipients: full tracking. Transactional sends: EventBridge event published only, no status update, no click table | Engagement analytics are a campaign feature. Transactional callers can subscribe to EventBridge events directly if needed. |
 | Spam report status | `spam_reported` as distinct status on `email_campaign_recipients`; `bounced` on `email_sends` | Keeps suppression reasons distinguishable in per-recipient queries. Transactional sends have fewer status values (no `spam_reported`). |
 | Job cancellation | Only in `pending` or `spam_check_failed` states | Avoids race with in-flight workers updating counts on a cancelled job. Once `processing` begins, the job runs to completion. |
