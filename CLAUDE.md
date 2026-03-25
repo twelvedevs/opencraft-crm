@@ -17,6 +17,7 @@ This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-
   - `2026-03-25-notification-service-design.md` — Draft
   - `2026-03-25-template-service-design.md` — Draft
   - `2026-03-25-audience-engine-design.md` — Draft
+  - `2026-03-25-ai-service-design.md` — Draft
 
 ## Architecture
 
@@ -77,6 +78,10 @@ Transport: SSE (not WebSocket) — strictly server-to-client. Product services c
 ### Audience Engine — Key API Decisions
 
 Callers submit entity data (hybrid push model) — engine never calls product APIs. Named segments (versioned, draft/active/disabled) + inline one-offs. `POST /audiences/segments/:id/evaluate` (batch, caller-generated `snapshot_id`) → entity-ID-only snapshot, 48h TTL. `POST /audiences/evaluate` (inline, `snapshot: false` returns IDs directly; `snapshot: true` stores snapshot). `POST /audiences/segments/:id/check` (single entity, synchronous, no snapshot). Snapshot cleanup: per-snapshot BullMQ delayed job + hourly safety-net sweep. Membership check cache: full resolved segment keyed by `segment_id`, 30s TTL. Shared `@platform/filter-engine` package (pure functions, zero deps) used by both Automation Engine and Audience Engine — Automation Engine migration replaces `condition-evaluator.ts` with thin wrapper passing event object as entity. Extended temporal operators: `within_last`, `not_within_last`, `before`, `after`, `date_range` (Audience Engine only). `@platform/audience-ui`: `<SegmentBuilder fields onSelect onFetchEntities? />` + `<AudiencePreview segmentId />`.
+
+### AI Service — Key API Decisions
+
+Thin Claude API gateway — no stateful agent behavior (AI Agent autonomous mode lives in Conversation Service). Single endpoint: `POST /ai/complete` with `{ prompt_id, context, model? }` → `{ text, model, prompt_id, cached }`. Sync only (no streaming). Static prompts as TypeScript files in `src/prompts/` — changes require deploy. Model routing: `"haiku"` → `claude-haiku-4-5-20251001`, `"sonnet"` → `claude-sonnet-4-6`; prompt sets default, caller can override; invalid model string → 400. Response cache: L1 in-memory LRU 500 entries / 60s TTL + L2 Postgres `ai_completions` 5min TTL, keyed on SHA256(prompt_id + model + canonicalized context). `ai_completions` is a response cache only — not an audit log. LLM observability via Arize Phoenix (OpenInference SDK instrumentation; `ARIZE_PHOENIX_ENDPOINT` env var). No Redis, no BullMQ, no events published. Error shape: `{ "error": "<message>" }` — 503 for all Claude API errors (5xx, 429, 529). **Pending:** Arch doc Section 2.1 lists "streaming" and "usage metering" for AI Service — both are out of scope; arch doc needs amendment.
 
 ### Messaging Service — Key API Decisions
 
