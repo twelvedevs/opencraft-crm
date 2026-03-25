@@ -14,13 +14,14 @@ This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-
   - `2026-03-24-automation-engine-design.md` — **Approved**
   - `2026-03-25-nurturing-engine-design.md` — Draft
   - `2026-03-25-messaging-service-design.md` — Draft
+  - `2026-03-25-notification-service-design.md` — Draft
 
 ## Architecture
 
 Two-layer SOA with 21 independently deployable services in a Turborepo monorepo:
 
 **Platform Layer (12 services)** — domain-agnostic, reusable across future products:
-Messaging (Twilio), Email (SendGrid), Notification (WebSocket), Template, Nurturing Engine (drip sequences), Automation Engine (event-driven workflows), Audience Engine (segment evaluation), AI (Claude API gateway), Analytics, Integration Hub (Google Ads + Meta), Identity (auth/RBAC), Media (S3/CloudFront)
+Messaging (Twilio), Email (SendGrid), Notification (SSE + Redis pub/sub), Template, Nurturing Engine (drip sequences), Automation Engine (event-driven workflows), Audience Engine (segment evaluation), AI (Claude API gateway), Analytics, Integration Hub (Google Ads + Meta), Identity (auth/RBAC), Media (S3/CloudFront)
 
 **Product Layer — Ortho CRM (8 services)** — consume platform via REST + events:
 Lead Service (core entity), Pipeline Engine (state machine), Conversation Service (SMS inbox), Campaign Service (email broadcasts), Referral Service, Reporting Service, Data Import Service (Ortho2 CSV), CRM API Gateway
@@ -62,6 +63,10 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 
 **Sync — REST** for queries and immediate commands (e.g. `POST /templates/render`, `POST /messages/send`, `POST /ai/complete`).
 
+### Notification Service — Key API Decisions
+
+Transport: SSE (not WebSocket) — strictly server-to-client. Product services call `POST /notifications/publish` directly (no EventBridge). Redis pub/sub (`PSUBSCRIBE notif:*`) handles cross-instance fan-out. Channels are arbitrary strings; channel access control enforced via JWT claims (`location:{id}:*` checks location claims, `user:{id}:*` checks JWT subject). Persistence: 7-day TTL, one row per publish, per-user read state in `notification_reads`. `Last-Event-ID` replay uses monotonic `seq bigint` (Postgres sequence), not UUID. `read-all` publishes single bulk Redis message → `event: read-all` SSE type. `POST /notifications/:id/read` returns `404` for expired/missing notifications.
+
 ### Messaging Service — Key API Decisions
 
 `POST /messages/send` accepts `template` (string) + `context`, or pre-rendered `body`. Callers embed the template string inline — the Messaging Service does not store templates by ID. Duplicate `dedup_key` returns `200` with the original `message_id` (not `409`). Events published: `inbound_message.received` (includes `message_type`: `normal`|`stop`|`unstop`), `message.delivered`, `message.failed`, `opt_out.received`, `opt_out.removed`.
@@ -86,7 +91,7 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 | AI | Claude Sonnet 4.6 (complex tasks) / Haiku 4.5 (high-volume) |
 | Ads APIs | Google Ads API, Meta Marketing API |
 | Event bus | AWS EventBridge |
-| Job queue | BullMQ (Redis) — used by Automation Engine and Nurturing Engine for action dispatch and delayed step scheduling |
+| Job queue | BullMQ (Redis) — used by Automation Engine and Nurturing Engine for action dispatch and delayed step scheduling; Notification Service for TTL cleanup |
 | Infra | AWS us-east-1 (ECS Fargate, RDS, S3, CloudFront) |
 | Monitoring | Datadog (APM, structured logs) |
 | Monorepo | Turborepo |
