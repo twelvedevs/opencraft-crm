@@ -48,7 +48,14 @@ Automation Engine / Nurturing Engine / Campaign Service
 │                                        │
 │  Repository  (platform_templates DB)   │
 └────────────────────────────────────────┘
+        │
+        ▼  rendered body (body_text / body_html)
+Messaging Service / Email Service
 ```
+
+**Call chain for SMS sending:** Automation Engine `send_message` worker and Nurturing Engine step worker both call `POST /templates/render` first, receive the rendered `body_text`, then call `POST /messages/send` on the Messaging Service with the pre-rendered `body` field. The Messaging Service never calls the Template Service. The `template_id` field in Automation Engine and Nurturing Engine action params refers to a Template Service template ID — workers resolve it here before calling downstream services.
+
+> **Note:** The Automation Engine spec (Section 6, `send_message` action) and Nurturing Engine spec currently describe passing `template_id` directly to the Messaging Service. Those specs require amendments to reflect this call chain.
 
 **No events published.** The Template Service is purely request/response — it makes no calls to other services and publishes no EventBridge events.
 
@@ -110,17 +117,26 @@ template_versions (
 ### 4.1 Template CRUD
 
 ```
-POST   /templates              — create template (name, channel)
+POST   /templates              — create template (name, channel) → 201 { id, name, channel, status: "draft", current_version: 1 }
 GET    /templates              — list all (name, channel, status, current_version, active_version)
-GET    /templates/:id          — get group row + active version content
+GET    /templates/:id          — get group row + current_version content (draft); includes active_version content separately if one exists
 PATCH  /templates/:id          — update draft content (name, body_text, subject, body_html, body_unlayer)
 POST   /templates/:id/activate — promote current_version → active_version; status → active
 POST   /templates/:id/disable  — set status = disabled
+POST   /templates/:id/enable   — re-enable a disabled template; status → active (requires active_version to exist)
 ```
 
+**PATCH versioning behavior:**
+- If `active_version IS NULL` (template never activated): update the `current_version` row in-place — no new version row created.
+- If `current_version = active_version` (no pending draft): create a new `template_versions` row at `current_version + 1`, update `templates.current_version`. The new row is the draft; `active_version` is unchanged.
+- If `current_version > active_version` (draft already exists): update the existing `current_version` row in-place.
+
+**GET /templates/:id response:** Returns the group row plus the `current_version` content (the draft being edited). Also includes a separate `active_content` field (or null) with the `active_version` content if one exists. This allows the UI to load draft content into the editor while displaying what is currently live.
+
 **Activation rules:**
-- `POST /templates/:id/activate` only available to Marketing Managers (enforced via Identity Service JWT RBAC)
-- Marketing Staff can `PATCH` (edit drafts) but cannot activate or disable
+- `POST /templates/:id/activate` and `POST /templates/:id/disable` and `POST /templates/:id/enable` are only available to Marketing Managers (enforced via Identity Service JWT RBAC)
+- Marketing Staff can `PATCH` (edit drafts) but cannot activate, disable, or enable
+- `POST /templates/:id/enable` returns `400` if template has no `active_version` (nothing to re-enable)
 
 ### 4.2 Render
 
@@ -181,7 +197,7 @@ POST /templates/render
 ```
 
 **Merge tag resolution rules:**
-- Syntax: `{{key}}` — consistent with the Messaging Service inline renderer
+- Syntax: `{{key}}` — same syntax as the Messaging Service inline renderer, ensuring one pattern across all channels
 - Dot-notation paths supported: `{{lead.first_name}}`, `{{location.name}}`
 - Unknown key (not present in context) → replaced with empty string; warning logged to Datadog
 - Context is the raw object supplied by the caller — Template Service never fetches additional data
@@ -210,7 +226,8 @@ Embeds Unlayer (`react-email-editor`):
 - Subject line input above the canvas — plain text, supports `{{merge_tag}}` syntax
 - Plain-text fallback field below the canvas — auto-stripped from HTML on first export, manually editable
 - **Activate** button (Marketing Manager only) — calls `POST /templates/:id/activate`
-- **Disable** button (Marketing Manager only) — calls `POST /templates/:id/disable`
+- **Disable** button (Marketing Manager only, shown when status = active) — calls `POST /templates/:id/disable`
+- **Enable** button (Marketing Manager only, shown when status = disabled) — calls `POST /templates/:id/enable`
 
 **SMS Editor**
 Simple textarea:
@@ -218,7 +235,8 @@ Simple textarea:
 - Character count and SMS segment count (160 chars = 1 segment, displayed live)
 - Merge tag helper: clickable list of common tags inserts `{{tag}}` at cursor position
 - **Activate** button (Marketing Manager only)
-- **Disable** button (Marketing Manager only)
+- **Disable** button (Marketing Manager only, shown when status = active)
+- **Enable** button (Marketing Manager only, shown when status = disabled)
 
 ### Role Enforcement
 
@@ -228,6 +246,7 @@ Simple textarea:
 | Edit draft content | ✓ | ✓ |
 | Activate template | — | ✓ |
 | Disable template | — | ✓ |
+| Enable (re-enable) template | — | ✓ |
 
 ---
 
@@ -284,9 +303,15 @@ Pure function coverage — no external dependencies:
 - `POST /templates/render` — template status is `disabled` → 404
 - `PATCH /templates/:id` → `POST /templates/:id/activate` → render returns new content
 - Edit draft while active version exists → render still returns old active content until activation
+- Activate → render immediately after → still returns old content (cache TTL not yet expired); render after 30s → returns new content
 - SMS render: response contains only `body_text`, no `subject` or `body_html`
 - Email render: response contains `subject`, `body_html`, and `body_text`
 - Activate increments `active_version` to match `current_version`
+- `PATCH` on never-activated template → updates version row in-place, `current_version` unchanged
+- `PATCH` on active template (no pending draft) → creates new version row, `current_version` increments, `active_version` unchanged
+- `POST /templates/:id/disable` → subsequent render returns 404
+- `POST /templates/:id/enable` → subsequent render returns content again
+- `POST /templates/:id/enable` on template with no `active_version` → 400
 
 ### Contract Tests
 
