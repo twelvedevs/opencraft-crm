@@ -400,6 +400,7 @@ Add two new fields to the `lead.stage_changed` event payload:
 
 **Add `metrics_coordinators_daily` rollup table:**
 ```sql
+id                         uuid           PRIMARY KEY DEFAULT gen_random_uuid()
 date                       date           NOT NULL
 location_id                text           NOT NULL
 coordinator_id             text           NOT NULL   -- sourced from triggered_by on lead.stage_changed
@@ -407,23 +408,26 @@ stage_transitions          int            NOT NULL DEFAULT 0
 exams_booked               int            NOT NULL DEFAULT 0   -- stage_to = 'exam_scheduled'
 conversions                int            NOT NULL DEFAULT 0   -- from lead.converted
 response_time_count        int            NOT NULL DEFAULT 0   -- count of 'contacted' transitions
-avg_response_time_seconds  numeric(10,2)            -- correctly maintained via count column
-time_in_stage_count        int            NOT NULL DEFAULT 0   -- count of all transitions with time_in_stage_seconds
-avg_time_in_stage_seconds  numeric(10,2)            -- correctly maintained via count column
+avg_response_time_seconds  numeric(10,2)            -- maintained via response_time_count
+time_in_stage_count        int            NOT NULL DEFAULT 0   -- count of transitions with time_in_stage_seconds
+avg_time_in_stage_seconds  numeric(10,2)            -- maintained via time_in_stage_count
 UNIQUE (date, location_id, coordinator_id)
 ```
 
-The `avg_response_time_seconds` upsert uses `response_time_count` to maintain a correct incremental mean:
+The handler inserts the raw `response_time_seconds` scalar from the event payload as the initial `avg_response_time_seconds` value (a singleton average equals the raw value). The `ON CONFLICT` upsert then uses `EXCLUDED.avg_response_time_seconds` — which is that raw scalar — to correctly update the running mean:
+
 ```sql
+-- INSERT (new row) sends: avg_response_time_seconds = event.response_time_seconds
 ON CONFLICT (date, location_id, coordinator_id) DO UPDATE SET
   response_time_count = metrics_coordinators_daily.response_time_count + 1,
   avg_response_time_seconds = (
     COALESCE(metrics_coordinators_daily.avg_response_time_seconds, 0)
       * metrics_coordinators_daily.response_time_count
-      + EXCLUDED.avg_response_time_seconds
+      + EXCLUDED.avg_response_time_seconds   -- raw scalar from this event
   ) / (metrics_coordinators_daily.response_time_count + 1)
 ```
-This update only executes when the incoming `lead.stage_changed` event has `stage_to = 'contacted'` and non-null `response_time_seconds`. An analogous upsert (using `time_in_stage_count` / `avg_time_in_stage_seconds`) applies whenever `time_in_stage_seconds` is non-null (every transition except first enrollment).
+
+This update only executes when the incoming `lead.stage_changed` event has `stage_to = 'contacted'` and non-null `response_time_seconds`. The identical pattern applies to `time_in_stage_count` / `avg_time_in_stage_seconds` using the raw `time_in_stage_seconds` scalar whenever non-null (every transition except first enrollment).
 
 **Update `StageChangedHandler`** to extract `triggered_by` (as coordinator_id), `response_time_seconds`, `time_in_stage_seconds` from payload and populate `metrics_coordinators_daily`. Skip coordinator rollup if `triggered_by` is null (automated transitions).
 
