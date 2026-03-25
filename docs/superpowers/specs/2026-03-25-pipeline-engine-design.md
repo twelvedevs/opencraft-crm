@@ -1,0 +1,497 @@
+# Pipeline Engine — Design Spec
+
+**Date:** 2026-03-25
+**Status:** Draft
+**Scope:** Product-layer Pipeline Engine — state machine for 3 pipelines / 13 stages, stage transition validation, timeout enforcement, event publishing
+
+---
+
+## 1. Overview
+
+The Pipeline Engine is a **product-layer service** (`apps/crm/pipeline`) that owns the canonical pipeline state for every lead in the CRM. It manages a hardcoded state machine across three pipelines and 13 stages, validates transitions, enforces time limits via a polling job, and publishes domain events that drive downstream automation.
+
+**Core responsibilities:**
+- Store pipeline membership state in `crm_pipeline` schema (source of truth)
+- Validate stage transitions against a hardcoded transition graph
+- Allow coordinator override of the graph with an `override` flag
+- Enforce stage time limits via a node-cron polling job (every 15 min)
+- Publish `lead.stage_changed`, `lead.converted`, and `lead.stage_timeout` to EventBridge
+- Support atomic pipeline conversion (e.g. New Patient → In Treatment)
+
+**Out of scope:**
+- Sending messages or executing automation actions — Pipeline Engine only emits events; Automation Engine acts
+- Subscribing to EventBridge events — all transitions come in via REST through the CRM API Gateway
+- Storing lead identity data (name, phone, attribution) — owned by Lead Service
+- Redis or BullMQ — timeout enforcement uses node-cron polling, no queue infrastructure needed
+
+---
+
+## 2. Architecture
+
+```
+CRM API Gateway (all callers: coordinators, Data Import Service, Automation Engine)
+        │
+        ▼ REST (all transitions)
+┌──────────────────────────────────────────────────────┐
+│               Pipeline Engine                         │
+│           apps/crm/pipeline                           │
+│                                                       │
+│  routes/           services/           jobs/          │
+│  memberships  →  state-machine.ts  ←  timeout-poll   │
+│  transitions  →  transition.service    (node-cron     │
+│  conversions  →  convert.service        every 15min)  │
+│  history                                              │
+│                                                       │
+│  repositories/          events/                       │
+│  membership.repo    →   publisher.ts                  │
+│  stage-history.repo                                   │
+└──────────────────────────────────────────────────────┘
+        │                         │
+        ▼ writes                  ▼ publishes (post-commit)
+  crm_pipeline schema       AWS EventBridge
+  pipeline_memberships       lead.stage_changed
+  pipeline_stage_history     lead.converted
+                             lead.stage_timeout
+                                  │
+                    ┌─────────────┼──────────────┐
+                    ▼             ▼               ▼
+              Lead Service  Automation Engine  Analytics
+              (cache sync)  (trigger rules)   (metrics)
+```
+
+**Key properties:**
+- No Redis or BullMQ — timeout enforcement uses `node-cron`; no queue infrastructure needed
+- No EventBridge subscriptions — Pipeline Engine is REST-only inbound
+- Source of truth in `crm_pipeline`; Lead Service cache updated asynchronously via `lead.stage_changed`
+- Every stage change is a single DB transaction (UPDATE membership + INSERT history), then post-commit event publish
+
+**Golden rule compliance:** Pipeline Engine never calls Messaging Service, AI Service, or any platform service directly. All side effects are driven by Automation Engine reacting to published events.
+
+---
+
+## 3. State Machine
+
+Pipelines and stages are hardcoded in `src/services/state-machine.ts` as TypeScript constants. No DB-configurable stages — the three pipelines are fixed by the product domain. Stage changes require a deploy.
+
+### 3.1 New Patient Pipeline (7 stages)
+
+| Stage | Timeout | Timeout Stage | Notes |
+|---|---|---|---|
+| `new_lead` | None (UI warning at 2h) | — | `entered_stage_at` shown in UI; no auto-transition |
+| `contacted` | 5 days | `lost` | |
+| `exam_scheduled` | None | — | No-show handled by coordinator action |
+| `exam_completed` | 7 days | `lost` | |
+| `tx_presented` | 14 days | `lost` | |
+| `contract_signed` | None | — | Terminal — triggers `/convert` to In Treatment |
+| `lost` | 30 days | archived | After 30d: `status = archived`, no new stage |
+
+**Valid automated transitions (strict graph):**
+
+| From | To |
+|---|---|
+| `new_lead` | `contacted`, `lost` |
+| `contacted` | `exam_scheduled`, `lost` |
+| `exam_scheduled` | `exam_completed`, `contacted` (no-show) |
+| `exam_completed` | `tx_presented`, `lost` |
+| `tx_presented` | `contract_signed`, `lost` |
+| `lost` | `contacted` (re-engagement) |
+
+Coordinator-initiated requests may include `override: true` to bypass the graph and move to any stage within the same pipeline. RBAC enforcement (only `call_center_agent`, `call_center_manager`, `marketing_manager` may set `override: true`) is performed by the CRM API Gateway before forwarding.
+
+### 3.2 In Treatment Pipeline (3 stages)
+
+| Stage | Timeout | Notes |
+|---|---|---|
+| `new_patient` | None | Entry stage on conversion from New Patient |
+| `in_treatment` | None | Duration varies per patient |
+| `treatment_complete` | None | Terminal — triggers `/convert` to In Retention |
+
+**Valid automated transitions:** `new_patient → in_treatment → treatment_complete`
+
+Entry: created by `/convert` when New Patient lead reaches `contract_signed`. Exit: `treatment_complete` triggers `/convert` to In Retention (via CSV import or future EHR event).
+
+### 3.3 In Retention Pipeline (3 stages)
+
+| Stage | Timeout | Timeout Stage | Notes |
+|---|---|---|---|
+| `active_retention` | None | — | Entry stage on conversion from In Treatment |
+| `recall_due` | Variable | `long_term_follow` | Caller provides `timeout_at` (absolute datetime — the recall appointment date) |
+| `long_term_follow` | None | — | Can loop back to `active_retention` |
+
+**Valid automated transitions:** `active_retention → recall_due → long_term_follow → active_retention`
+
+Entry: created by `/convert` when In Treatment lead reaches `treatment_complete`.
+
+### 3.4 State Machine TypeScript Shape
+
+```typescript
+interface StageConfig {
+  pipeline: 'new_patient' | 'in_treatment' | 'in_retention'
+  timeoutDays: number | null   // null = no timeout; poller skips
+  timeoutStage: string | null  // null = archive (for lost) or no timeout
+  allowedTransitions: string[] // valid next stages for automated calls
+}
+
+const STAGES: Record<string, StageConfig> = {
+  new_lead:           { pipeline: 'new_patient',   timeoutDays: null, timeoutStage: null,              allowedTransitions: ['contacted', 'lost'] },
+  contacted:          { pipeline: 'new_patient',   timeoutDays: 5,    timeoutStage: 'lost',            allowedTransitions: ['exam_scheduled', 'lost'] },
+  exam_scheduled:     { pipeline: 'new_patient',   timeoutDays: null, timeoutStage: null,              allowedTransitions: ['exam_completed', 'contacted'] },
+  exam_completed:     { pipeline: 'new_patient',   timeoutDays: 7,    timeoutStage: 'lost',            allowedTransitions: ['tx_presented', 'lost'] },
+  tx_presented:       { pipeline: 'new_patient',   timeoutDays: 14,   timeoutStage: 'lost',            allowedTransitions: ['contract_signed', 'lost'] },
+  contract_signed:    { pipeline: 'new_patient',   timeoutDays: null, timeoutStage: null,              allowedTransitions: [] },
+  lost:               { pipeline: 'new_patient',   timeoutDays: 30,   timeoutStage: null,              allowedTransitions: ['contacted'] },
+  new_patient:        { pipeline: 'in_treatment',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['in_treatment'] },
+  in_treatment:       { pipeline: 'in_treatment',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['treatment_complete'] },
+  treatment_complete: { pipeline: 'in_treatment',  timeoutDays: null, timeoutStage: null,              allowedTransitions: [] },
+  active_retention:   { pipeline: 'in_retention',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['recall_due'] },
+  recall_due:         { pipeline: 'in_retention',  timeoutDays: null, timeoutStage: 'long_term_follow', allowedTransitions: ['long_term_follow'] },
+  long_term_follow:   { pipeline: 'in_retention',  timeoutDays: null, timeoutStage: null,              allowedTransitions: ['active_retention'] },
+}
+```
+
+`recall_due` has `timeoutDays: null` because its timeout is a variable recall date — the caller passes `timeout_at` explicitly when transitioning to this stage. The poller uses the stored `timeout_at` value directly.
+
+`lost` has `timeoutStage: null` — when `lost` times out after 30 days, the poller sets `status = 'archived'` on the membership rather than transitioning to another stage.
+
+---
+
+## 4. Database Schema — `crm_pipeline`
+
+### `pipeline_memberships`
+
+One row per pipeline enrollment per lead. Updated in-place as the lead advances through stages. At most one `status = 'active'` row per `(lead_id, pipeline)`.
+
+```sql
+id                        uuid         PRIMARY KEY DEFAULT gen_random_uuid()
+lead_id                   uuid         NOT NULL             -- opaque ref, no FK across schemas
+location_id               uuid         NOT NULL             -- for scoped queries + event payloads
+pipeline                  varchar      NOT NULL             -- new_patient|in_treatment|in_retention
+stage                     varchar      NOT NULL             -- current stage
+status                    varchar      NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('active', 'closed', 'archived'))
+entered_stage_at          timestamptz  NOT NULL DEFAULT now()  -- reset on each transition
+timeout_at                timestamptz  NULL                 -- NULL = no timeout; set at transition time
+previous_stage            varchar      NULL                 -- stage before current (UI convenience)
+last_transition_override  boolean      NOT NULL DEFAULT false
+closed_at                 timestamptz  NULL
+closed_reason             varchar      NULL
+                          CHECK (closed_reason IN ('converted', 'timed_out', 'archived', 'manual'))
+created_at                timestamptz  NOT NULL DEFAULT now()
+updated_at                timestamptz  NOT NULL DEFAULT now()
+```
+
+**Indexes:**
+```sql
+UNIQUE (lead_id, pipeline) WHERE status = 'active'    -- one active enrollment per lead+pipeline
+INDEX (pipeline, stage, status, timeout_at)            -- timeout polling scan
+INDEX (location_id, pipeline, stage, status)           -- lead queue queries
+INDEX (lead_id)                                        -- lookup by lead
+```
+
+### `pipeline_stage_history`
+
+Immutable log. One row per stage transition. Never updated or deleted.
+
+```sql
+id               uuid         PRIMARY KEY DEFAULT gen_random_uuid()
+membership_id    uuid         NOT NULL REFERENCES pipeline_memberships(id)
+lead_id          uuid         NOT NULL    -- denormalized to avoid join
+pipeline         varchar      NOT NULL    -- denormalized
+stage_from       varchar      NULL        -- NULL on initial enrollment
+stage_to         varchar      NOT NULL
+override         boolean      NOT NULL DEFAULT false
+triggered_by     uuid         NULL        -- user_id; NULL for automated transitions
+reason           varchar      NULL        -- manual|timeout|no_show|converted|import
+transitioned_at  timestamptz  NOT NULL DEFAULT now()
+```
+
+**Indexes:**
+```sql
+INDEX (membership_id)
+INDEX (lead_id, transitioned_at DESC)    -- full lead timeline across all pipelines
+```
+
+### Atomic write pattern
+
+Every stage change is a single DB transaction:
+1. `UPDATE pipeline_memberships` — set `stage`, `entered_stage_at`, `timeout_at`, `previous_stage`, `last_transition_override`, `updated_at`
+2. `INSERT pipeline_stage_history` — log the transition
+3. COMMIT → then publish event to EventBridge (post-commit, fire-and-forget)
+
+If EventBridge publish fails after commit, the DB state stands. The stage change is not rolled back.
+
+---
+
+## 5. API
+
+All endpoints are called by the CRM API Gateway. RBAC is enforced at the Gateway — Pipeline Engine trusts the forwarded `triggered_by` and `override` fields.
+
+### `POST /pipeline/memberships`
+Enroll a lead in a pipeline at an initial stage.
+
+**Request:**
+```json
+{
+  "lead_id":    "uuid",
+  "location_id": "uuid",
+  "pipeline":   "new_patient",
+  "stage":      "new_lead",
+  "timeout_at": "2026-03-26T..."   // optional override
+}
+```
+
+**Response:** `201` membership object. `409` if an active membership already exists for `(lead_id, pipeline)`.
+
+---
+
+### `POST /pipeline/memberships/:id/transition`
+Move a lead to a new stage within the same pipeline.
+
+**Request:**
+```json
+{
+  "stage":        "contacted",
+  "override":     false,
+  "triggered_by": "user-uuid",   // null for automated transitions
+  "reason":       "manual",      // manual|timeout|no_show|import
+  "timeout_at":   "..."          // required when transitioning to recall_due
+}
+```
+
+**Responses:**
+- `200` — updated membership object
+- `422` — invalid transition: `{ "error": "invalid_transition", "from": "new_lead", "to": "tx_presented", "allowed": ["contacted", "lost"] }`
+- `409` — membership is not `active`
+
+Graph check is skipped when `override: true`. The Gateway enforces that only coordinator roles may set `override: true`.
+
+---
+
+### `POST /pipeline/memberships/:id/convert`
+Atomically close the source membership and open a new one in the target pipeline.
+
+**Request:**
+```json
+{
+  "to_pipeline":  "in_treatment",
+  "to_stage":     "new_patient",
+  "triggered_by": "user-uuid",
+  "reason":       "converted",
+  "channel":      "google"        // attribution channel — included in lead.converted payload
+}
+```
+
+**Response:** `201` — new membership object. Single DB transaction: source membership → `status: closed, closed_reason: converted`; new membership created; two history rows inserted. Publishes `lead.converted` post-commit.
+
+---
+
+### Query endpoints
+
+| Method | Path | Query params | Response |
+|---|---|---|---|
+| `GET` | `/pipeline/memberships` | `lead_id`, `pipeline`, `stage`, `location_id`, `status`, `cursor`, `limit` | Paginated list (default 50) |
+| `GET` | `/pipeline/memberships/:id` | — | Single membership. `404` if not found. |
+| `GET` | `/pipeline/memberships/:id/history` | — | Array of history rows, `transitioned_at ASC` |
+
+**Error shape** (consistent with other services): `{ "error": "<message>" }`
+
+---
+
+## 6. Events Published
+
+All events are published to EventBridge post-commit. Format follows `@ortho/event-bus` schema.
+
+### `lead.stage_changed`
+
+Published on every stage transition, including initial enrollment (`stage_from: null`).
+
+```json
+{
+  "event_id":    "uuid",
+  "event_type":  "lead.stage_changed",
+  "entity_type": "lead",
+  "entity_id":   "<lead_id>",
+  "payload": {
+    "membership_id":   "uuid",
+    "lead_id":         "uuid",
+    "location_id":     "uuid",
+    "pipeline":        "new_patient",
+    "stage_from":      "new_lead",
+    "stage_to":        "contacted",
+    "override":        false,
+    "triggered_by":    "user-uuid",
+    "reason":          "manual",
+    "timeout_at":      "...",
+    "transitioned_at": "..."
+  }
+}
+```
+
+**Subscribers:** Lead Service (cache sync), Automation Engine (rule evaluation), Analytics Service (pipeline metrics).
+
+### `lead.converted`
+
+Published by `/convert` endpoint after atomic pipeline conversion commits.
+
+```json
+{
+  "event_id":    "uuid",
+  "event_type":  "lead.converted",
+  "entity_type": "lead",
+  "entity_id":   "<lead_id>",
+  "payload": {
+    "lead_id":           "uuid",
+    "location_id":       "uuid",
+    "from_pipeline":     "new_patient",
+    "from_stage":        "contract_signed",
+    "to_pipeline":       "in_treatment",
+    "to_stage":          "new_patient",
+    "new_membership_id": "uuid",
+    "channel":           "google",
+    "triggered_by":      "user-uuid",
+    "converted_at":      "..."
+  }
+}
+```
+
+**Subscribers:** Analytics Service (`metrics_conversions_daily`; uses `location_id` + `channel`), Automation Engine (welcome-to-treatment rules), Lead Service (cache update + attribution lock).
+
+### `lead.stage_timeout`
+
+Published by the timeout polling job after the auto-transition commits. The same transition also publishes `lead.stage_changed` (with `reason: "timeout"`). Automation Engine can react to either — `lead.stage_timeout` provides additional context (which stage timed out, by how much).
+
+```json
+{
+  "event_id":    "uuid",
+  "event_type":  "lead.stage_timeout",
+  "entity_type": "lead",
+  "entity_id":   "<lead_id>",
+  "payload": {
+    "membership_id":       "uuid",
+    "lead_id":             "uuid",
+    "location_id":         "uuid",
+    "pipeline":            "new_patient",
+    "timed_out_stage":     "contacted",
+    "new_stage":           "lost",
+    "timed_out_at":        "...",
+    "exceeded_by_seconds": 3600
+  }
+}
+```
+
+**Subscribers:** Automation Engine (re-engagement SMS, coordinator alerts, task creation).
+
+---
+
+## 7. Timeout Polling Job
+
+`src/jobs/timeout-poll.job.ts` — `node-cron` scheduled every 15 minutes inside the Pipeline Engine process. No Redis or BullMQ required.
+
+### Execution flow
+
+1. **Guard:** skip run if a previous run is still in progress (in-process flag)
+2. **Query** up to 100 overdue active memberships:
+   ```sql
+   SELECT * FROM pipeline_memberships
+   WHERE status = 'active'
+     AND timeout_at IS NOT NULL
+     AND timeout_at < NOW()
+   ORDER BY timeout_at ASC
+   LIMIT 100
+   FOR UPDATE SKIP LOCKED
+   ```
+3. **For each overdue row** (individual transaction per row):
+   - Look up `timeoutStage` from hardcoded `STAGES` config
+   - If `timeoutStage` is a stage name: run atomic write (UPDATE membership + INSERT history, `reason: 'timeout'`), then publish `lead.stage_changed` + `lead.stage_timeout`
+   - If `timeoutStage` is `null` (i.e. `lost` timing out after 30 days): UPDATE membership `status = 'archived'`, INSERT history row, no events published
+4. **Log** summary: N leads processed, any per-row failures
+
+### Design properties
+
+- **Idempotency:** `FOR UPDATE SKIP LOCKED` prevents two concurrent runs from processing the same row. Once updated, `timeout_at` is reset to the new stage's value (or `NULL`), so the row won't reappear in future scans.
+- **Per-row transactions:** A failure on one lead does not affect others. Failures are logged to Datadog; the row is retried on the next run 15 minutes later.
+- **Batch cap of 100:** Sufficient for 34 locations at realistic lead volumes. Remainder caught in the next run.
+- **Post-commit publish:** EventBridge publish failure after commit is logged but does not roll back the DB state.
+- **`new_lead` 2-hour window:** No `timeout_at` is set for `new_lead`. The UI reads `entered_stage_at` and displays a visual warning after 2 hours — no automated transition.
+
+---
+
+## 8. Service Layout
+
+```
+apps/crm/pipeline/
+├── src/
+│   ├── routes/
+│   │   ├── memberships.ts       # POST /memberships, GET /memberships, GET /memberships/:id
+│   │   ├── transitions.ts       # POST /memberships/:id/transition
+│   │   ├── conversions.ts       # POST /memberships/:id/convert
+│   │   └── history.ts           # GET /memberships/:id/history
+│   ├── services/
+│   │   ├── state-machine.ts     # pure — STAGES constant, isValidTransition(), computeTimeoutAt(), getTimeoutStage()
+│   │   ├── transition.service.ts  # validate + apply transition (calls state-machine, repo, publisher)
+│   │   └── convert.service.ts     # atomic pipeline conversion
+│   ├── repositories/
+│   │   ├── membership.repo.ts
+│   │   └── stage-history.repo.ts
+│   ├── jobs/
+│   │   └── timeout-poll.job.ts  # node-cron, every 15 min
+│   ├── events/
+│   │   └── publisher.ts         # EventBridge publish (lead.stage_changed, lead.converted, lead.stage_timeout)
+│   └── index.ts
+├── migrations/
+├── test/
+├── Dockerfile
+├── package.json
+└── tsconfig.json
+```
+
+**Runtime dependencies:**
+- PostgreSQL (shared RDS cluster, `crm_pipeline` schema)
+- AWS EventBridge (publish only)
+- No Redis · No BullMQ · No SQS subscription
+
+---
+
+## 9. Testing Strategy
+
+### Unit Tests (Vitest)
+
+Pure function coverage with no external dependencies (`state-machine.ts`):
+- `isValidTransition(from, to, pipeline)` — all allowed pairs pass; all invalid pairs return false; override flag bypasses check
+- `computeTimeoutAt(stage, enteredAt)` — correct absolute datetime for fixed-duration stages; `null` for no-timeout stages; `recall_due` returns `null` (caller-provided)
+- `getTimeoutStage(stage)` — correct target stage per stage; `null` for `lost` (archive behavior)
+
+### Integration Tests (Vitest + real Postgres)
+
+EventBridge publish mocked via HTTP interceptor:
+- Enroll — happy path, correct `timeout_at` computed; `409` on duplicate active enrollment
+- Valid transition — membership updated, history row inserted, `lead.stage_changed` published
+- Invalid transition — `422` with `allowed[]` array; no DB write, no event
+- Override transition — accepted regardless of graph; `last_transition_override: true` on membership
+- Convert — source closed (`closed_reason: converted`), target created, two history rows, `lead.converted` published; idempotent (second call → `409`)
+- Timeout poll — overdue row auto-transitioned; `lead.stage_changed` + `lead.stage_timeout` both published
+- Timeout poll — `lost` 30-day expiry → `status = archived`, no transition event
+- Timeout poll — `SKIP LOCKED` prevents double-processing in concurrent runs
+- `recall_due` transition — requires `timeout_at` in request body; `400` if missing
+
+### Contract Tests
+
+Verify published event payloads against `@ortho/event-bus` schema:
+- `lead.stage_changed` — all required fields present: `location_id`, `pipeline`, `stage_to`, `reason`
+- `lead.converted` — `location_id` + `channel` present (required by Analytics Service)
+- `lead.stage_timeout` — `timed_out_stage` + `new_stage` present
+
+---
+
+## 10. Key Design Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Stage config | Hardcoded TypeScript | 3 fixed pipelines — no misconfiguration risk, no admin UI needed, changes tracked in git |
+| Cache sync | Event-driven (EventBridge) | No coupling between Pipeline Engine and Lead Service; consistent with platform patterns |
+| Timeout enforcement | node-cron polling (15 min) | No Redis/BullMQ needed; 15-min latency is acceptable for stage timeouts measured in days |
+| Transition triggers | REST only via CRM API Gateway | Single RBAC choke point; no EventBridge subscription complexity |
+| Coordinator override | `override: true` flag | Automation stays strict; humans retain flexibility for edge cases |
+| Pipeline conversion | Atomic `/convert` endpoint | Single transaction — no window where a lead is enrolled in zero pipelines |
+| `new_lead` 2-hour window | UI warning only (no auto-transition) | Auto-moving a fresh lead to Lost after 2h is too aggressive; coordinators need the flexibility |
+| Post-commit events | Fire-and-forget after DB commit | DB state is always authoritative; EventBridge failure does not roll back committed transitions |
