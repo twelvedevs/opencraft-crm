@@ -21,7 +21,6 @@ The Notification Service (`apps/platform/notification`) is a **platform-layer re
 - Push notifications (future)
 - Email or SMS notifications (Email Service, Messaging Service)
 - Notification routing logic — product services decide which channel to publish to
-- Channel access control — any authenticated user may subscribe to any channel; the CRM frontend subscribes only to authorized channels
 
 ---
 
@@ -107,9 +106,12 @@ Request body:
 - `channel` — required. Target channel string.
 - `title` — required. Short notification title.
 - `body` — optional. Longer description text.
-- `payload` — optional. Arbitrary JSON passed through to the browser client (e.g. IDs for deep-linking).
+- `payload` — optional. Arbitrary JSON passed through to the browser client (e.g. IDs for deep-linking). Max 4KB.
 
-Response: `201 { "notification_id": "uuid" }`
+Responses:
+- `201` — `{ "notification_id": "uuid" }` — accepted and persisted.
+- `400` — missing required fields (`channel`, `title`), or `payload` exceeds 4KB.
+- `401` / `403` — missing or invalid service-to-service JWT.
 
 ### 4.2 SSE Stream
 
@@ -123,24 +125,33 @@ User JWT in `Authorization: Bearer <token>` header. Establishes an SSE connectio
 
 **On connect:**
 1. Validate JWT → extract `user_id`
-2. Check `Last-Event-ID` header — if present, replay notifications from DB newer than that ID for the requested channels before resuming live stream
-3. Register connection in the SSE Manager's in-memory map for each channel
-4. On disconnect, remove from map
+2. Validate channel access — for each channel in `channels`:
+   - `location:{location_id}:*` — verify `location_id` is present in the JWT's location claims. Return `403` and close the connection if any channel fails.
+   - `user:{user_id}:*` — verify `user_id` matches the JWT subject. Return `403` if mismatched.
+   - `global:*` — open to any authenticated user.
+3. Check `Last-Event-ID` header — if present, `Last-Event-ID` is a `seq` value (bigint). Query DB for notifications with `seq > $last_event_id` in the requested channels and replay before resuming live stream.
+4. Register connection in the SSE Manager's in-memory map for each channel
+5. On disconnect, remove from map
 
 **Event types streamed:**
 
 New notification:
 ```
-id: <notification_id>
+id: <seq>
 event: notification
-data: {"notification_id":"uuid","channel":"location:X:inbound_sms","title":"...","body":"...","payload":{...},"created_at":"..."}
+data: {"notification_id":"uuid","seq":42,"channel":"location:X:inbound_sms","title":"...","body":"...","payload":{...},"created_at":"..."}
 ```
 
-Cross-tab read sync (when this user marks a notification read in another tab):
+Single read sync (when this user marks one notification read in another tab):
 ```
-id: read:<notification_id>
 event: read
 data: {"notification_id":"uuid"}
+```
+
+Bulk read sync (when this user marks all notifications read in another tab):
+```
+event: read-all
+data: {"notification_ids":["uuid","uuid"]}
 ```
 
 Keepalive (every 30s to prevent proxy timeouts):
@@ -148,10 +159,12 @@ Keepalive (every 30s to prevent proxy timeouts):
 : keepalive
 ```
 
+**`id` field:** The SSE event ID is the `seq` value (bigint), not the UUID. This enables correct `Last-Event-ID` replay — `WHERE seq > $last_event_id` is unambiguous. Read-sync events do not carry an `id` field (they are not replayable).
+
 ### 4.3 Notification History
 
 ```
-GET /notifications?channels=loc:X:inbound_sms,loc:X:escalation&unread=true&limit=50&before=<cursor>
+GET /notifications?channels=location:X:inbound_sms,location:X:escalation&unread=true&limit=50&before=<cursor>
 ```
 
 Returns paginated notification history for the specified channels. `read` field per item reflects read state for the authenticated user (LEFT JOIN on `notification_reads`). Cursor-based pagination using `created_at` + `id`.
@@ -184,12 +197,19 @@ Inserts a `notification_reads` row for the authenticated user. Publishes `{ noti
 
 Idempotent — calling twice has no error (unique constraint on `(user_id, notification_id)`, upsert).
 
+Responses:
+- `200 {}` — read recorded.
+- `404` — notification does not exist or has expired (the `notifications` FK would reject the insert — return `404` to the client rather than a `500`).
+
 ```
 POST /notifications/read-all
 Body: { "channels": ["location:X:inbound_sms", "location:X:escalation"] }
 ```
 
-Bulk-inserts `notification_reads` rows for all unread notifications in the specified channels for the authenticated user. Same Redis read-sync publish.
+Bulk-inserts `notification_reads` rows for all unread notifications in the specified channels for the authenticated user. Publishes a **single** Redis message `{ notification_ids: ["uuid", ...] }` to `notif:user:{user_id}:reads` (not one per notification). All other open SSE connections for this user receive a single `event: read-all` push with the full list of IDs.
+
+Responses:
+- `200 { "marked": <count> }` — count of newly marked-read notifications (0 if all were already read).
 
 ---
 
@@ -198,27 +218,32 @@ Bulk-inserts `notification_reads` rows for all unread notifications in the speci
 ```
 POST /notifications/publish received by any ECS instance
   → validate request
-  → INSERT into notifications (id, channel, title, body, payload, expires_at = now()+7d)
-  → Redis PUBLISH "notif:channel:{channel}" { notification_id, channel, title, body, payload, created_at }
+  → INSERT into notifications (id, seq, channel, title, body, payload, expires_at = now()+7d)
+  → Redis PUBLISH "notif:channel:{channel}" { notification_id, seq, channel, title, body, payload, created_at }
   → return 201 { notification_id }
 
 All ECS instances (including publisher):
-  → receive Redis message on "notif:channel:{channel}"
-  → look up channel in SSE Manager's in-memory map
-  → for each matching SseConnection: write SSE event
-  → connections not subscribed to that channel: no-op
+  → SSE Manager receives Redis message via PSUBSCRIBE "notif:*"
+  → inspect Redis channel name:
+      matches "notif:channel:*" → look up channel in in-memory map
+                                  → write "event: notification" SSE to each matching connection
+      matches "notif:user:*:reads" → find all SseConnections for user_id (extracted from channel name)
+                                     → write "event: read" or "event: read-all" SSE to each
+                                       (excluding the originating connection via connection ID)
+  → connections not matching: no-op
 ```
 
 **Read sync flow:**
 ```
 POST /notifications/:id/read
-  → INSERT notification_reads (user_id, notification_id)
+  → INSERT notification_reads (user_id, notification_id)   -- upsert on conflict
   → Redis PUBLISH "notif:user:{user_id}:reads" { notification_id }
+  → return 200 {}
 
-All ECS instances:
-  → receive Redis message on "notif:user:{user_id}:reads"
-  → find all SseConnections for user_id
-  → write "event: read" SSE event to each (excluding the connection that triggered it)
+POST /notifications/read-all
+  → bulk INSERT notification_reads for all unread in channels
+  → Redis PUBLISH "notif:user:{user_id}:reads" { notification_ids: [...] }   -- single message
+  → return 200 { marked: <count> }
 ```
 
 ---
@@ -229,6 +254,7 @@ All ECS instances:
 -- One row per published notification
 notifications (
   id          uuid PRIMARY KEY,
+  seq         bigint NOT NULL UNIQUE DEFAULT nextval('notifications_seq'),  -- monotonic SSE event ID for Last-Event-ID replay
   channel     text NOT NULL,
   title       text NOT NULL,
   body        text,
@@ -248,6 +274,7 @@ notification_reads (
 
 **Indexes:**
 - `notifications(channel, created_at DESC)` — history query per channel
+- `notifications(channel, seq)` — `Last-Event-ID` replay query (`WHERE channel IN (...) AND seq > $last`)
 - `notifications(expires_at)` — TTL cleanup job scan
 - `notification_reads(notification_id)` — supports cascade delete performance
 
@@ -312,8 +339,10 @@ Pure logic with no external dependencies:
 
 - Publish → SSE client subscribed to matching channel receives `event: notification` with correct payload
 - Publish to channel X → SSE client subscribed to channel Y receives nothing
-- Mark read → `notification_reads` row inserted; second SSE connection for same user receives `event: read`; calling mark-read twice is idempotent (no error)
-- `POST /read-all` → all unread notifications for specified channels marked read; read-sync published for each
+- Mark read → `notification_reads` row inserted; second SSE connection for same user receives `event: read`; calling mark-read twice is idempotent (returns `200`, no duplicate DB row)
+- Mark read on expired/non-existent notification → `404`
+- `POST /read-all` → all unread notifications for specified channels marked read; single `event: read-all` pushed to other connections with full `notification_ids` array; response includes correct `marked` count
+- Subscribe to unauthorized channel (wrong `location_id` in JWT) → `403`, connection closed
 - `GET /notifications` — returns history with correct `read: true/false` per item; `unread=true` filter works; pagination cursor advances correctly
 - Reconnect with `Last-Event-ID` → missed notifications replayed from DB before live stream resumes; no duplicate delivery of already-seen notifications
 - Expired notification not returned in `GET /notifications` history
@@ -322,8 +351,9 @@ Pure logic with no external dependencies:
 ### Contract Tests
 
 - `POST /notifications/publish` — verify callers send the expected payload shape (channel, title, body, payload)
-- SSE `event: notification` format — channel, notification_id, title, body, payload, created_at fields match what CRM frontend expects
+- SSE `event: notification` format — notification_id, seq, channel, title, body, payload, created_at fields match what CRM frontend expects
 - SSE `event: read` format — notification_id field present
+- SSE `event: read-all` format — notification_ids array present
 
 ---
 
@@ -334,8 +364,8 @@ Pure logic with no external dependencies:
 | Transport | SSE over WebSocket | Notifications are server-to-client only. SSE is simpler — no upgrade handshake, works through standard LBs, browser auto-reconnects. No bidirectional communication needed. |
 | Cross-instance fan-out | Redis pub/sub (PSUBSCRIBE `notif:*`) | Each instance holds its own in-memory SSE connections. Redis broadcasts publishes to all instances. No sticky sessions — ECS can autoscale freely. |
 | Delivery model | Product services POST directly (`POST /notifications/publish`) | Service stays domain-agnostic. Product-layer callers own routing logic (which event → which channel). No EventBridge subscription or rule DSL needed. |
-| Channel access control | None — any authenticated user may subscribe | Access control lives in the CRM frontend (only subscribes to authorized channels). Adding Identity Service validation per subscription would add latency and coupling with no meaningful security gain in an internal VPC. |
+| Channel access control | JWT claim validation on subscribe | For `location:{id}:*` channels, validate `location_id` is in the JWT's location claims. For `user:{id}:*` channels, validate `user_id` matches JWT subject. `global:*` open to any authenticated user. No Identity Service call needed — claims are embedded in the JWT. |
 | Notification storage | One row per publish, read state in separate table | Avoids fan-out-on-write to unknown recipients. `GET /notifications` LEFT JOINs reads per user at query time. Simpler writes, acceptable read cost at expected notification volumes. |
-| Missed notification replay | `Last-Event-ID` header + DB query on reconnect | Browser `EventSource` sends `Last-Event-ID` automatically on reconnect. Service queries DB for notifications newer than that ID and replays before resuming live stream. No separate replay queue needed. |
+| Missed notification replay | `Last-Event-ID` (seq bigint) + DB query on reconnect | SSE event ID is a monotonic `seq` bigint (Postgres sequence), not a UUID. `WHERE seq > $last_event_id` is unambiguous under concurrent publishes. Browser `EventSource` sends `Last-Event-ID` automatically on reconnect. No separate replay queue needed. |
 | TTL | 7 days, enforced via `expires_at` + daily BullMQ cleanup | Bounds storage. Redis already in stack for pub/sub, so BullMQ adds no new infrastructure. |
 | Cross-tab read sync | Redis publish to `notif:user:{user_id}:reads` | When a user reads a notification in one tab, the SSE manager pushes `event: read` to all their other open connections. Badge updates without polling. |
