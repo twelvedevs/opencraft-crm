@@ -167,7 +167,7 @@ Keepalive (every 30s to prevent proxy timeouts):
 GET /notifications?channels=location:X:inbound_sms,location:X:escalation&unread=true&limit=50&before=<cursor>
 ```
 
-Returns paginated notification history for the specified channels. `read` field per item reflects read state for the authenticated user (LEFT JOIN on `notification_reads`). Cursor-based pagination using `created_at` + `id`.
+Returns paginated notification history for the specified channels, applying the same channel access control as `GET /notifications/stream` — `403` if any requested channel is not authorized for the authenticated user. `read` field per item reflects read state for the authenticated user (LEFT JOIN on `notification_reads`). Cursor-based pagination using `(created_at DESC, id DESC)` for deterministic tie-breaking.
 
 Response:
 ```json
@@ -210,6 +210,7 @@ Bulk-inserts `notification_reads` rows for all unread notifications in the speci
 
 Responses:
 - `200 { "marked": <count> }` — count of newly marked-read notifications (0 if all were already read).
+- `403` — any channel in the request body is not authorized for this user.
 
 ---
 
@@ -273,7 +274,7 @@ notification_reads (
 ```
 
 **Indexes:**
-- `notifications(channel, created_at DESC)` — history query per channel
+- `notifications(channel, created_at DESC, id DESC)` — history query per channel with deterministic cursor tie-breaking
 - `notifications(channel, seq)` — `Last-Event-ID` replay query (`WHERE channel IN (...) AND seq > $last`)
 - `notifications(expires_at)` — TTL cleanup job scan
 - `notification_reads(notification_id)` — supports cascade delete performance
