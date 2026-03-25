@@ -129,7 +129,7 @@ location_id   text  NOT NULL    -- opaque; provided by the CRM shell via the UI 
 UNIQUE (account_id, campaign_id)
 ```
 
-**Unmapped campaigns:** campaigns with no mapping entry are still polled and published in `ad_spend.synced` with `location_id: null`. The Reporting Service decides how to handle unmapped spend (e.g., attribute to a catch-all bucket or surface as a configuration warning).
+**Unmapped campaigns:** campaigns with no mapping entry are polled but **not published** in `ad_spend.synced`. Their spend data is silently dropped until a location mapping is configured. The `<CampaignLocationMapper>` UI surfaces all campaigns for an account (including unmapped ones) so operators can configure mappings. Once mapped, spend appears in the next poll cycle.
 
 ---
 
@@ -169,7 +169,7 @@ All endpoints except webhooks require a valid Identity Service JWT.
 
 Signature verification happens before any processing. Invalid signature → `403`, no job enqueued.
 
-After verification, the route handler calls `connector.parseLeadWebhook(payload)` → receives `LeadEvent[]` (Meta delivers batched payloads; Google delivers single leads). One `process-lead-webhook` BullMQ job is enqueued per `LeadEvent`. Returns `200` immediately after enqueue.
+After verification, the route handler calls `connector.parseLeadWebhook(payload)` synchronously — this is a pure, I/O-free parsing function. It receives `LeadEvent[]` (Meta delivers batched payloads; Google delivers single leads). One `process-lead-webhook` BullMQ job is enqueued per `LeadEvent`, keyed by `{platform}:{external_lead_id}`. If `parseLeadWebhook` throws (malformed payload), the error is logged and `200` is still returned — Google and Meta will not retry on `200`, so returning a non-200 would cause infinite retries on unrecoverable malformed data. The raw body is logged at `warn` level for debugging.
 
 ---
 
@@ -185,16 +185,17 @@ Integration Hub uses four job types. BullMQ is already in the stack (Automation 
 1. Load account + decrypted tokens from `integration_accounts`
 2. Call `connector.fetchSpend(account, today)` and `connector.fetchSpend(account, yesterday)` — yesterday included to capture delayed reporting from platforms
 3. Look up `campaign_location_mappings` for this account
-4. Publish one `ad_spend.synced` event per date to EventBridge
+4. Group records by `location_id`; drop unmapped campaigns (no mapping entry)
+5. Publish one `ad_spend.synced` event per `(location_id, date)` to EventBridge — `location_id` is top-level in the envelope, records contain only campaign-level fields
 5. Update `last_polled_at = now()` and `status = 'active'`
 
 **On failure:** Set `status = 'error'`, write error message to `last_error`, trigger Datadog alert.
 
 ### 5.2 `refresh-token`
 
-**Schedule:** Repeatable, per Google Ads account only. Scheduled to run 30 minutes before `token_expires_at`. Rescheduled after each successful refresh.
+**Type:** Delayed one-off job (not a repeatable job). BullMQ `delay` is calculated as `ms until token_expires_at - 30 minutes`. Registered when an account is connected and after each successful refresh. Removed when an account is disconnected (using BullMQ's job ID `refresh-token:{account_id}` to locate and remove it).
 
-**Execution:** Call `connector.refreshTokens(account)` → write new `access_token`, `refresh_token`, `token_expires_at`. On failure: set `status = 'error'`, trigger Datadog alert — polling will fail until reconnected.
+**Execution:** Call `connector.refreshTokens(account)` → write new `access_token`, `refresh_token`, `token_expires_at` → enqueue the next `refresh-token` delayed job using the new `token_expires_at`. On failure: set `status = 'error'`, trigger Datadog alert — polling will fail until the account is manually reconnected.
 
 Not registered for Meta accounts (long-lived tokens have a 60-day expiry). When a Meta poll fails with an auth error (401/token-invalid), `status` is set to `'error'` and polling halts. Recovery requires manual reconnect via the UI — there is no automatic token refresh path for Meta.
 
@@ -213,7 +214,7 @@ Not registered for Meta accounts (long-lived tokens have a 60-day expiry). When 
 
 **Type:** One-off. Created by `POST /integrations/accounts/:id/backfill`.
 
-**Execution:** Iterate requested date range in 7-day chunks. For each chunk, call `connector.fetchSpendRange(account, from, to)` → publish `ad_spend.synced` per chunk. Chunking stays within platform API rate limits. Progress visible via BullMQ job state (`active`, `completed`, `failed`).
+**Execution:** Iterate requested date range in 7-day chunks to stay within platform API rate limits. For each chunk, call `connector.fetchSpendRange(account, from, to)`. After each chunk, apply the same grouping logic as `poll-ad-spend`: group records by `location_id`, drop unmapped campaigns, publish one `ad_spend.synced` event per `(location_id, date)`. Events from backfill are identical in structure to events from polling — Analytics Service handler is unchanged. Progress visible via `GET /integrations/accounts/:id/backfill/:job_id`.
 
 ---
 
@@ -221,29 +222,20 @@ Not registered for Meta accounts (long-lived tokens have a 60-day expiry). When 
 
 ### 6.1 `ad_spend.synced`
 
-Published by `poll-ad-spend` and `backfill-ad-spend`. Analytics Service `AdSpendSyncedHandler` upserts each record — re-syncs are idempotent.
+Published by `poll-ad-spend` and `backfill-ad-spend`. One event per `(platform, location_id, date)`. Analytics Service `AdSpendSyncedHandler` reads `platform`, `location_id`, and `synced_date` from the envelope and upserts each record — re-syncs are idempotent.
 
 ```json
 {
   "platform": "google_ads",
-  "account_id": "<integration_accounts.id>",
+  "location_id": "loc_42",
   "synced_date": "2026-03-25",
   "records": [
     {
       "campaign_id": "123456",
       "campaign_name": "Spring Promo — Braces",
-      "location_id": "loc_42",
       "spend": 142.50,
       "impressions": 5000,
       "clicks": 230
-    },
-    {
-      "campaign_id": "789012",
-      "campaign_name": "Invisalign — Q1",
-      "location_id": null,
-      "spend": 88.00,
-      "impressions": 3100,
-      "clicks": 145
     }
   ]
 }
@@ -305,7 +297,7 @@ Date range picker (`from` / `to`, max 24 months lookback). "Run Historical Sync"
 
 | Dependency | Type | Notes |
 |---|---|---|
-| Analytics Service | EventBridge consumer (`ad_spend.synced`) | Payload: `platform`, `account_id`, `synced_date`, `records[]` with `campaign_id`, `campaign_name`, `location_id`, `spend`, `impressions`, `clicks`. `location_id` is **per-record** (campaigns in one account can map to different locations; unmapped campaigns carry `location_id: null`). **Pending:** Analytics spec CLAUDE.md summary lists `location_id` as a top-level field — requires amendment to reflect per-record placement. |
+| Analytics Service | EventBridge consumer (`ad_spend.synced`) | Payload: `platform`, `location_id`, `synced_date` (top-level envelope) + `records[]` with `campaign_id`, `campaign_name`, `spend`, `impressions`, `clicks`. One event per `(platform, location_id, date)`. Unmapped campaigns are not published. |
 | Lead Service | EventBridge consumer (`ad_lead.received`) | Lead Service must handle `location_id: null` gracefully (unmapped campaigns) |
 | Identity Service | JWT validation | All non-webhook endpoints require a valid JWT |
 | AWS Secrets Manager | Startup credential load | `INTEGRATION_HUB_ENCRYPTION_KEY` fetched at service startup |
@@ -321,7 +313,7 @@ apps/platform/integration-hub/
 │   │   ├── oauth.ts                  # GET /connect/:platform, GET /oauth/:platform/callback, DELETE /accounts/:id
 │   │   ├── accounts.ts               # GET /accounts, GET /accounts/:id/campaigns, PUT /accounts/:id/mappings
 │   │   ├── webhooks.ts               # POST /webhooks/:platform, GET /webhooks/meta/verify
-│   │   └── backfill.ts               # POST /accounts/:id/backfill
+│   │   └── backfill.ts               # POST /accounts/:id/backfill, GET /accounts/:id/backfill/:job_id
 │   ├── connectors/
 │   │   ├── interface.ts              # Connector interface + SpendRecord, LeadEvent, OAuthTokens types
 │   │   ├── registry.ts               # ConnectorRegistry: Map<string, Connector>

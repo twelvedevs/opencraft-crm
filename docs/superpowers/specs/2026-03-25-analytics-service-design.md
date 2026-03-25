@@ -183,7 +183,7 @@ All events follow the standard envelope defined in `@ortho/types`. The dimension
 | `referral.converted` | `ReferralConvertedHandler` | `metrics_conversions_daily` (channel=`referral`) | `location_id` |
 | `ad_spend.synced` | `AdSpendSyncedHandler` | `metrics_ad_spend_daily` | `platform`, `location_id`, `campaign_id` |
 
-**`ad_spend.synced` specifics:** Integration Hub publishes one event per sync cycle. The payload structure is:
+**`ad_spend.synced` specifics:** Integration Hub publishes one event per `(platform, location_id, date)` combination. Campaigns with no location mapping configured are not published. The payload structure is:
 
 ```json
 {
@@ -202,7 +202,7 @@ All events follow the standard envelope defined in `@ortho/types`. The dimension
 }
 ```
 
-`AdSpendSyncedHandler` iterates `records` and upserts each entry into `metrics_ad_spend_daily` — `ON CONFLICT (date, platform, location_id, campaign_id) DO UPDATE` overwrites the full row. Re-syncs are idempotent regardless of `event_id`.
+`AdSpendSyncedHandler` reads `platform`, `location_id`, and `synced_date` from the top-level envelope and iterates `records`. Each record is upserted into `metrics_ad_spend_daily` — `ON CONFLICT (date, platform, location_id, campaign_id) DO UPDATE` overwrites the full row. Re-syncs are idempotent regardless of `event_id`.
 
 **Idempotency for `AdSpendSyncedHandler` differs from counter-increment handlers.** For all other handlers, the raw `analytics_events` insert uses `ON CONFLICT (event_id) DO NOTHING`, and if the insert is skipped the rollup update is also skipped (no double-count). For `AdSpendSyncedHandler`, this rule is relaxed: the rollup upsert always executes even if the raw `analytics_events` row already exists. This allows Integration Hub to re-publish a corrected spend figure using the same `event_id` without the correction being silently ignored. The `analytics_events` row records the first delivery only; the rollup row always reflects the latest synced figures.
 
