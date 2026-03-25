@@ -259,9 +259,9 @@ CREATE INDEX ON sequence_step_executions (scheduled_at, status) WHERE status = '
 
 **`job_id` on `sequence_step_executions`** — written after BullMQ enqueues the job. The safety-net poller uses `job_id IS NULL` (combined with `scheduled_at < now() - 1 minute`) to identify steps that were persisted to DB but never enqueued (crash between DB commit and BullMQ enqueue). Steps with a future `scheduled_at` and `job_id IS NULL` are also re-enqueued by a startup scan (see Section 5.5).
 
-**`dedup_key` on `sequence_enrollments` is caller-supplied.** For the no-response use case, the Automation Engine passes `"{{entity_id}}-{{payload.stage_entered_at}}-contacted-no-response"` — encoding both entity ID and stage entry timestamp. A lead re-entering the Contacted stage after Lost gets a fresh enrollment (different `stage_entered_at`); duplicate event deliveries are rejected.
+**`dedup_key` on `sequence_enrollments` is caller-supplied.** For the no-response use case, the Automation Engine passes `"{{event_id}}-no-response"` — unique per triggering event. Re-entry to Contacted (after Lost) generates a new `lead.outbound_sent` event with a new `event_id`, so a fresh enrollment is created automatically.
 
-**`dedup_key` idempotency applies regardless of prior enrollment status.** If a row with the given `dedup_key` already exists — whether `active`, `completed`, or `unenrolled` — the enroll call returns `200 OK` and makes no changes. Re-enrollment after a prior completed or unenrolled cycle requires a semantically distinct `dedup_key`. For the no-response use case, `stage_entered_at` serves this purpose — a lead re-entering Contacted always produces a new timestamp and therefore a new key.
+**`dedup_key` idempotency applies regardless of prior enrollment status.** If a row with the given `dedup_key` already exists — whether `active`, `completed`, or `unenrolled` — the enroll call returns `200 OK` and makes no changes. Re-enrollment after a prior completed or unenrolled cycle requires a semantically distinct `dedup_key` (e.g. a new event's `event_id`). Callers must design their dedup keys with this in mind.
 
 ---
 
@@ -338,7 +338,7 @@ Execute action (HTTP call to platform service)
 
 The endpoint matches by `(sequence_id, entity_type, entity_id, status = 'active')` — callers do not need to know the `enrollment_id`. Including `entity_type` in the match prevents a collision between different entity types that happen to share the same `entity_id` string.
 
-1. Find `sequence_enrollments` where `sequence_id + entity_id + status = 'active'`. If none, return `200` (idempotent no-op).
+1. Find `sequence_enrollments` where `sequence_id + entity_type + entity_id + status = 'active'`. If none, return `200` (idempotent no-op).
 2. In a single transaction: set enrollment `status = 'unenrolled'`; `UPDATE sequence_step_executions SET status = 'cancelled' WHERE enrollment_id = ? AND status = 'pending'`.
 3. Best-effort BullMQ job removal for cancelled steps using stored `job_id` values (`job.remove()` — succeeds if the job hasn't been picked up yet). Jobs already in a worker proceed to the optimistic lock check (which fails since status is now `cancelled`) and exit cleanly.
 4. Publish `nurturing.enrollment_unenrolled` to EventBridge.
@@ -438,6 +438,8 @@ This section documents the Automation Engine rules and new domain events that im
 
 ### 8.1 New Domain Events
 
+> **Arch doc amendment required:** Both events below (`lead.outbound_sent`, `lead.activity_logged`) are absent from the platform architecture event table (`docs/01-platform-arch-design.md`, Section 3.1) and from the `@ortho/event-bus` schema package. Both must be added as part of implementing this feature.
+
 **`lead.outbound_sent`** — published by Conversation Service for each outbound coordinator message. `is_first_in_stage` is computed by the Conversation Service by checking whether any prior outbound message exists for this `entity_id` since `stage_entered_at` (lightweight read against the conversation log).
 
 ```json
@@ -482,7 +484,7 @@ The no-response follow-up feature requires a new action type in the Automation E
 - `unenroll-sequence.worker.ts` to the action workers directory (Section 8)
 - A contract test for `POST /sequences/unenroll` outbound call shape (Section 9)
 
-The action calls `POST /sequences/unenroll` on the Nurturing Engine. Executes immediately, ignores `active_hours`. Idempotent — safe to call even when no active enrollment exists.
+The action calls `POST /sequences/unenroll` on the Nurturing Engine. Executes immediately, ignores `active_hours`. Idempotent by design — the endpoint matches by `(sequence_id, entity_type, entity_id, status='active')` and returns `200` when no active enrollment is found, so no `dedup_key` is needed.
 
 ```json
 {
@@ -490,8 +492,7 @@ The action calls `POST /sequences/unenroll` on the Nurturing Engine. Executes im
   "params": {
     "sequence_id": "<uuid-of-contacted-no-response-sequence>",
     "entity_type": "payload.entity_type",
-    "entity_id": "payload.entity_id",
-    "dedup_key": "{{event_id}}-unenroll"
+    "entity_id": "payload.entity_id"
   }
 }
 ```
@@ -500,7 +501,7 @@ The action calls `POST /sequences/unenroll` on the Nurturing Engine. Executes im
 
 **Rule 1 — Enroll on first outbound contact**
 
-Trigger: `lead.outbound_sent` with `is_first_in_stage = true` and `stage = contacted`. The enrollment `dedup_key` encodes entity ID and stage entry timestamp so re-entry to Contacted (after Lost) gets a fresh enrollment; duplicate event deliveries are rejected.
+Trigger: `lead.outbound_sent` with `is_first_in_stage = true` and `stage = contacted`. The enrollment `dedup_key` is `"{{event_id}}-no-response"` — unique per event. Re-entry to Contacted (after Lost) generates a new `lead.outbound_sent` event with a new `event_id`, producing a fresh dedup_key and a fresh enrollment. Duplicate EventBridge deliveries of the same event are blocked by the Automation Engine's own `(event_id, rule_id)` idempotency check before `enroll_sequence` is ever called.
 
 ```json
 {
@@ -520,7 +521,7 @@ Trigger: `lead.outbound_sent` with `is_first_in_stage = true` and `stage = conta
       "entity_type": "lead",
       "entity_id": "payload.entity_id",
       "context": "payload",
-      "dedup_key": "{{payload.entity_id}}-{{payload.stage_entered_at}}-no-response"
+      "dedup_key": "{{event_id}}-no-response"
     }
   }
 }
@@ -538,9 +539,8 @@ No stage condition needed — `unenroll_sequence` is idempotent; if the entity i
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
-      "entity_type_field": "payload.entity_type",
-      "entity_id_field": "payload.entity_id",
-      "dedup_key": "{{event_id}}-unenroll"
+      "entity_type": "payload.entity_type",
+      "entity_id": "payload.entity_id"
     }
   }
 }
@@ -561,9 +561,8 @@ Scoped to the contacted stage to avoid premature unenrollment triggered by activ
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
-      "entity_type_field": "payload.entity_type",
-      "entity_id_field": "payload.entity_id",
-      "dedup_key": "{{event_id}}-unenroll"
+      "entity_type": "payload.entity_type",
+      "entity_id": "payload.entity_id"
     }
   }
 }
@@ -582,9 +581,8 @@ Scoped to the contacted stage to avoid premature unenrollment triggered by activ
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
-      "entity_type_field": "payload.entity_type",
-      "entity_id_field": "payload.entity_id",
-      "dedup_key": "{{event_id}}-unenroll"
+      "entity_type": "payload.entity_type",
+      "entity_id": "payload.entity_id"
     }
   }
 }
@@ -610,9 +608,8 @@ Marketing managers enable this per their preference via `@platform/automation-ui
     "type": "unenroll_sequence",
     "params": {
       "sequence_id": "<uuid>",
-      "entity_type_field": "payload.entity_type",
-      "entity_id_field": "payload.entity_id",
-      "dedup_key": "{{event_id}}-unenroll"
+      "entity_type": "payload.entity_type",
+      "entity_id": "payload.entity_id"
     }
   }
 }
@@ -741,7 +738,8 @@ apps/platform/nurturing/
 | Cancellation mechanism | Explicit unenroll + optimistic lock guard | Atomic DB update; race-condition handled by optimistic lock, not by duplicate check |
 | Context snapshot at enrollment | Yes | Nurturing Engine never calls product services; platform/product isolation preserved |
 | A/B variant assignment | At enrollment time, uniform across all steps | Consistent per-entity experience; simple conversion attribution |
-| `dedup_key` on enrollment | Caller-supplied | Caller (Automation Engine) has semantic knowledge to construct meaningful keys (entity + stage entry timestamp) |
+| `dedup_key` on enrollment | Caller-supplied, event_id-based | Caller (Automation Engine) uses `{{event_id}}` — unique per trigger event; re-entry naturally produces a new event_id; Automation Engine's own idempotency guard prevents duplicate enrollment calls |
+| No `dedup_key` on unenroll | Omitted | Unenrollment is inherently idempotent by `(sequence_id, entity_type, entity_id, status='active')` DB match; no separate key needed |
 | Shared interpolator + active-hours | `@ortho/interpolator` package | Prevents logic divergence between Automation Engine and Nurturing Engine |
 | `unenroll_sequence` action | New Automation Engine action type (requires Automation Engine spec amendment) | Keeps cancellation configurable via marketing manager rules, not hardcoded |
 | `call_ai` output surfacing | `nurturing.step_output_ready` → Conversation Service → Notification Service WebSocket → coordinator browser polls output endpoint | Decouples Nurturing Engine from product UI; platform never calls product services directly |
