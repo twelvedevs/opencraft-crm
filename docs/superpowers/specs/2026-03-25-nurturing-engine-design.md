@@ -31,7 +31,7 @@ Automation Engine / Pipeline Engine
         │
         ▼  POST /sequences/enroll
 ┌──────────────────────────────────────────────┐
-│           Nurturing Engine                    │
+│           Nurturing Engine                   │
 │   apps/platform/nurturing                    │
 │                                              │
 │  REST API  ──→  Enrollment Manager           │
@@ -46,8 +46,8 @@ Automation Engine / Pipeline Engine
 │              → execute action)               │
 │                   │                          │
 │             Action Executor                  │
-│  ┌────────────┬───────────┬────────────────┐ │
-│  send_message send_email call_ai emit_event │ │
+│  ┌────────────┬───────────┬───────────────┐  │
+│  send_message send_email call_ai emit_event  │
 └──────────────────────────────────────────────┘
         │           │          │         │
   Messaging    Email Svc   AI Svc   EventBridge

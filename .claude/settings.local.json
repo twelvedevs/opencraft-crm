@@ -5,7 +5,8 @@
       "Bash(/Users/andrey/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.5/skills/brainstorming/scripts/start-server.sh --project-dir /Users/andrey/dev/pre-sale/ortho)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(curl -s http://localhost:53390)"
+      "Bash(curl -s http://localhost:53390)",
+      "Skill(update-config)"
     ]
   }
 }
