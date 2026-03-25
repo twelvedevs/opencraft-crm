@@ -68,7 +68,7 @@ The Identity Service is a **platform-layer service** (`apps/platform/identity`) 
 4. Identity Service validates the token via the `AuthProvider` interface, loads the user's role and location assignments from its own DB, and issues a signed enriched JWT (15-minute TTL) + a refresh token (30-day TTL)
 5. All subsequent API calls carry the enriched JWT — no further Identity Service round-trips per request
 
-**JWT verification across services:** Every service verifies JWTs locally using Identity Service's JWKS endpoint (`GET /identity/.well-known/jwks.json`). `@ortho/auth-middleware` fetches and caches the public key at startup, re-fetches on key rotation. No per-request call to Identity Service.
+**JWT verification across services:** Every service verifies JWTs locally using Identity Service's JWKS endpoint (`GET /identity/.well-known/jwks.json`). `@ortho/auth-middleware` fetches and caches the JWKS at startup. On receiving a JWT with a `kid` not present in the local cache, the middleware immediately re-fetches the JWKS endpoint (once, with exponential back-off on failure to prevent thundering herd during rotation). No per-request call to Identity Service under normal operation.
 
 **Auth provider abstraction:** A `AuthProvider` interface sits between Identity Service and the credential backend. Supabase Auth and Auth0 are two concrete implementations. Switching providers is a config change (`AUTH_PROVIDER=supabase|auth0`), not a service change.
 
@@ -107,7 +107,7 @@ The Identity Service is a **platform-layer service** (`apps/platform/identity`) 
 - `location:{id}` — middleware checks that `id` is in the JWT `locations` array, or that the role is `marketing_staff` / `marketing_manager` / `super_admin`
 - `user:{id}` — middleware checks that `id` matches `sub`
 
-**`must_change_password`:** Set to `true` on account creation. The frontend intercepts this claim and gates all navigation behind the password-change screen. Server-side, `@ortho/auth-middleware` also enforces this: any JWT with `must_change_password: true` is rejected with `403 { "error": "password_change_required" }` on all endpoints **except** `PUT /identity/me/password` and `GET /identity/me`. This prevents bypassing the frontend gate via direct API calls. Cleared on successful `PUT /identity/me/password`.
+**`must_change_password`:** Set to `true` on account creation. The frontend intercepts this claim and gates all navigation behind the password-change screen. Server-side, `@ortho/auth-middleware` also enforces this: any JWT with `must_change_password: true` is rejected with `403 { "error": "password_change_required" }` on all endpoints **except** `PUT /identity/me/password`, `GET /identity/me`, and `DELETE /identity/session` (a user must be able to log out even before changing their password). This prevents bypassing the frontend gate via direct API calls. Cleared on successful `PUT /identity/me/password`.
 
 **Signing algorithm:** RS256, RSA-2048. The private key is loaded from `IDENTITY_PRIVATE_KEY` env var. Each key pair carries a `kid` (key ID) that is embedded in the JWT header and included in the JWKS response. `@ortho/auth-middleware` selects the matching key from its JWKS cache using `kid`.
 
@@ -191,10 +191,10 @@ Raw key returned once on creation, never stored. Key format: `ak_<32 random byte
 | `POST` | `/identity/refresh` | None | Exchange refresh token → new JWT + new refresh token (rotation). Body: `{ "refresh_token": "<raw>" }`. Rate-limited at load balancer. |
 | `DELETE` | `/identity/session` | JWT | Logout — body: `{ "refresh_token": "<raw>" }`. Revokes only the presented token (single-device logout). |
 | `GET` | `/identity/.well-known/jwks.json` | None | Public key set for JWT verification |
-| `GET` | `/identity/me` | JWT | Own profile — returns `{ id, email, name, role, locations, force_password_reset, status }` |
-| `PUT` | `/identity/me/password` | JWT | Body: `{ "current_password": "...", "new_password": "..." }`. `current_password` verified via auth provider before update. On forced-reset (`must_change_password: true`) the `current_password` field is optional (the user never set it). Clears `force_password_reset` on success. |
+| `GET` | `/identity/me` | JWT | Own profile — returns `{ id, email, name, role, locations, force_password_reset, status }`. Note: `force_password_reset` in the REST response is the same flag as `must_change_password` in the JWT — different names for the same concept (DB column name vs JWT claim name). |
+| `PUT` | `/identity/me/password` | JWT | Body: `{ "current_password": "...", "new_password": "..." }`. When `must_change_password` is `false`: `current_password` is required and verified via `AuthProvider` before the update. When `must_change_password` is `true` (forced-reset flow): `current_password` is omitted from the request; Identity Service calls `AuthProvider.setPassword()` directly without verifying the existing credential. Accepted risk: a stolen JWT within its 15-min TTL can hijack a new account before the legitimate user first logs in. Returns `200 {}` on success; clears `force_password_reset`. |
 
-### User Management — `marketing_manager` + `super_admin` only
+### User Management — `require-role(['marketing_manager', 'super_admin'])`
 
 | Method | Path | Description |
 |---|---|---|
@@ -204,14 +204,14 @@ Raw key returned once on creation, never stored. Key format: `ak_<32 random byte
 | `PUT` | `/identity/users/:id` | Update name, role, location assignments, or status. When `status` is set to `inactive`: all active refresh tokens for that user are bulk-revoked (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = :id AND revoked_at IS NULL`) and `AuthProvider.deactivateUser()` is called. Outstanding JWTs remain valid for up to 15 minutes — accepted consequence of the stateless JWT model. |
 | `PUT` | `/identity/users/:id/password` | Admin password reset. Automatically sets `force_password_reset = true`. No notification is sent — the admin communicates the new password out-of-band. |
 
-### API Key Management — `marketing_manager` + `super_admin` only
+### API Key Management — `require-role(['marketing_manager', 'super_admin'])`
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/identity/api-keys` | Generate key; returns raw key once |
 | `GET` | `/identity/api-keys` | List keys (name, permissions, last_used_at, status) |
 | `DELETE` | `/identity/api-keys/:id` | Revoke key |
-| `POST` | `/identity/api-keys/validate` | **Internal VPC-only** — not exposed on the public ALB. Requires a service-to-service JWT in the `Authorization: Bearer` header (a regular enriched JWT issued to a service account with role `super_admin`). Validates an `ak_` key passed in the request body; returns `{ "permissions": [...] }` or `401`. CRM API Gateway caches valid responses for 60s. Updates `last_used_at`. |
+| `POST` | `/identity/api-keys/validate` | **Internal VPC-only** — not exposed on the public ALB. Protected by a pre-shared `INTERNAL_API_SECRET` env var (same value set on both Identity Service and CRM API Gateway); caller passes it as `X-Internal-Secret: <secret>`. Validates an `ak_` key passed in the request body; returns `{ "permissions": [...] }` or `401`. CRM API Gateway caches valid responses for 60s. Updates `last_used_at` on cache misses only — not on every API call. |
 
 ### Response shapes
 
@@ -278,7 +278,7 @@ apps/platform/identity/
 │   │   ├── supabase.provider.ts
 │   │   └── auth0.provider.ts
 │   ├── jobs/
-│   │   └── cleanup.job.ts       # daily BullMQ job: prune expired refresh tokens
+│   │   └── cleanup.job.ts       # daily BullMQ job: prune expired and old revoked refresh tokens
 │   └── index.ts
 ├── migrations/
 ├── test/
