@@ -84,7 +84,7 @@ For each matched row:
 4. If `membership.stage == "contract_signed"`, skip step 5 and go directly to step 6 (lead is already at the required pre-conversion stage)
 5. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "contract_signed", override: true, triggered_by, reason: "import" }`
 6. `POST /pipeline/memberships/:membership_id/convert` — `{ to_pipeline: "in_treatment", to_stage: "new_patient", triggered_by, reason: "converted", channel: "import" }`
-7. Write `post_import_membership_id` to snapshot → set row `status = executed`
+7. Write `post_import_membership_id` (from the `201` response body's `id` field — the newly created In Treatment membership) to snapshot → set row `status = executed`
 
 ### 3.2 completed_patients execution
 
@@ -95,7 +95,7 @@ For each matched row:
 4. If `membership.stage == "treatment_complete"`, skip step 5 and go directly to step 6
 5. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "treatment_complete", override: true, triggered_by, reason: "import" }`
 6. `POST /pipeline/memberships/:membership_id/convert` — `{ to_pipeline: "in_retention", to_stage: "active_retention", triggered_by, reason: "converted", channel: "import" }`
-7. Write `post_import_membership_id` → set row `status = executed`
+7. Write `post_import_membership_id` (from the `201` response body's `id` field — the newly created In Retention membership) → set row `status = executed`
 
 ### 3.3 scheduled_appointments execution
 
@@ -103,9 +103,10 @@ For each matched row:
 1. `GET /pipeline/memberships?lead_id={id}&pipeline=new_patient&status=active` (Pipeline Engine) — fetch the lead's active New Patient membership
 2. If no active membership returned: mark row `failed` with `error_message: "no_active_membership"`, continue to next row
 3. Write `before_snapshot` with `type: "transition"`, `membership_id`, `pipeline: "new_patient"`, `stage: <membership.stage>`, `appointment_id: null` → set row `status = executing`
-4. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "exam_scheduled", override: true, triggered_by, reason: "import" }`
-5. `POST /leads/:id/appointments` on Lead Service — `{ appointment_type: "exam", scheduled_at, status: "scheduled", created_by: triggered_by }`
-6. Write `appointment_id` into snapshot → set row `status = executed`
+4. If `membership.stage == "exam_scheduled"`, skip step 5 and go directly to step 6 — avoids emitting a duplicate `lead.stage_changed` event and re-triggering the appointment confirmation sequence
+5. `POST /pipeline/memberships/:membership_id/transition` — `{ stage: "exam_scheduled", override: true, triggered_by, reason: "import" }`
+6. `POST /leads/:id/appointments` on Lead Service — `{ appointment_type: "exam", scheduled_at, status: "scheduled", created_by: triggered_by }`
+7. Write `appointment_id` into snapshot → set row `status = executed`
 
 ### 3.4 no_shows execution
 
@@ -220,7 +221,7 @@ All endpoints require a valid JWT via `@ortho/auth-middleware`. RBAC: `call_cent
 | `GET /imports/:id/rows` | Preview rows | Paginated. Query params: `status` filter (`matched\|unmatched\|ambiguous\|failed`), `limit`, `cursor`. |
 | `POST /imports/:id/confirm` | Execute | Body: `{ column_mapping }`. Validates `status = preview_ready`. Saves mapping globally. Enqueues `execute` job. Returns `202`. `409` if wrong status. |
 | `POST /imports/:id/cancel` | Cancel | Valid only when `status = preview_ready`. Sets `status = cancelled`. No pipeline changes have been made. |
-| `POST /imports/:id/undo` | Undo | Atomically sets `status = 'undoing'` with `UPDATE imports SET status = 'undoing' WHERE id = $1 AND status = 'completed' AND undo_deadline > now()` — returns `0 rows updated` as `422 { "error": "undo_window_expired" }` if deadline passed, `409` if status was not `completed`. Enqueues `undo` job on success. Returns `202`. |
+| `POST /imports/:id/undo` | Undo | Atomically sets `status = 'undoing'` with `UPDATE imports SET status = 'undoing' WHERE id = $1 AND status = 'completed' AND undo_deadline > now()`. If 0 rows updated, do a follow-up `SELECT status, undo_deadline FROM imports WHERE id = $1` to discriminate: if `undo_deadline <= now()` → `422 { "error": "undo_window_expired" }`; if `status != 'completed'` → `409`; if row not found → `404`. Enqueues `undo` job on success. Returns `202`. |
 
 ### Import log
 
