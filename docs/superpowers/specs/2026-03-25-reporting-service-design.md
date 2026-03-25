@@ -1,0 +1,411 @@
+# Reporting Service — Design Spec
+
+**Date:** 2026-03-25
+**Status:** Draft
+**Scope:** Product-layer Reporting Service — Ortho-specific KPI computation, analytics dashboard API, report configuration, scheduled PDF/CSV delivery
+
+---
+
+## 1. Overview
+
+The Reporting Service is a **product-layer service** (`apps/crm/reporting`) that computes Ortho-specific KPIs from Analytics Service data and delivers formatted reports to staff.
+
+**Core responsibilities:**
+- Compute derived KPIs (cost per case, ROAS, funnel rates, coordinator metrics) by combining Analytics Service responses
+- Serve the analytics dashboard via a set of REST endpoints with a 5-min in-process LRU cache
+- Manage parameterized report configurations (5 named report types, each configurable with period/location/channel filters)
+- Schedule and deliver reports — BullMQ repeatable jobs generate PDF or CSV, store files in S3 via Media Service, deliver download links via Email Service
+- Store per-location average contract value for revenue and ROAS computation
+
+**What it does NOT do:**
+- Subscribe to any EventBridge events — it is a pure query consumer
+- Store metrics or rollup tables of its own
+- Call SendGrid, S3, or Twilio directly — uses Email Service and Media Service
+- Enforce location access control in Analytics Service — enforces it locally before making those calls
+
+**Architecture choice:** Thin query-time computation layer. All KPIs computed on each request by calling Analytics Service endpoints in parallel and computing ratios. A 5-min in-process LRU cache absorbs repeated dashboard loads from concurrent users. No background pre-computation jobs, no secondary metrics store.
+
+---
+
+## 2. Storage Schema
+
+Schema: `crm_reporting`. Four tables — configuration and operational state only. No metrics tables.
+
+### 2.1 `location_revenue_config`
+
+Per-location average contract value used for revenue and ROAS computation.
+
+```sql
+location_id         text           PRIMARY KEY
+avg_contract_value  numeric(10,2)  NOT NULL
+updated_at          timestamptz    NOT NULL DEFAULT now()
+updated_by          text           NOT NULL  -- JWT sub of updating user
+```
+
+### 2.2 `report_configs`
+
+Saved parameterized report definitions.
+
+```sql
+id           uuid        PRIMARY KEY DEFAULT gen_random_uuid()
+name         text        NOT NULL
+report_type  text        NOT NULL
+             -- weekly_summary | monthly_executive | channel_deep_dive
+             --   | coordinator_productivity | lead_source
+parameters   jsonb       NOT NULL DEFAULT '{}'
+             -- {
+             --   period_type: 'last_30d' | 'last_month' | 'custom',
+             --   from?: 'YYYY-MM-DD',
+             --   to?: 'YYYY-MM-DD',
+             --   location_ids?: string[],
+             --   channel?: string[]
+             -- }
+created_by   text        NOT NULL
+created_at   timestamptz NOT NULL DEFAULT now()
+updated_at   timestamptz NOT NULL DEFAULT now()
+```
+
+### 2.3 `report_schedules`
+
+Delivery schedule per saved report config.
+
+```sql
+id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid()
+report_config_id   uuid        NOT NULL REFERENCES report_configs(id) ON DELETE CASCADE
+frequency          text        NOT NULL   -- daily | weekly | monthly
+day_of_week        int                    -- 0–6 (weekly only; 0 = Sunday), null otherwise
+day_of_month       int                    -- 1–28 (monthly only), null otherwise
+hour_utc           int         NOT NULL   -- 0–23
+recipient_emails   text[]      NOT NULL
+format             text        NOT NULL DEFAULT 'pdf'  -- pdf | csv
+active             boolean     NOT NULL DEFAULT true
+created_by         text        NOT NULL
+created_at         timestamptz NOT NULL DEFAULT now()
+```
+
+### 2.4 `report_runs`
+
+Immutable log of every generation attempt (scheduled and on-demand).
+
+```sql
+id                  uuid        PRIMARY KEY DEFAULT gen_random_uuid()
+report_config_id    uuid        NOT NULL REFERENCES report_configs(id)
+report_schedule_id  uuid        REFERENCES report_schedules(id)  -- null = on-demand
+triggered_by        text        NOT NULL   -- user_id or 'scheduler'
+format              text        NOT NULL   -- pdf | csv
+status              text        NOT NULL   -- pending | running | done | failed
+media_file_id       text                   -- Media Service file_id, set on success
+error_message       text                   -- set on failure
+started_at          timestamptz NOT NULL DEFAULT now()
+completed_at        timestamptz
+recipient_emails    text[]
+```
+
+---
+
+## 3. Metrics Computation
+
+### 3.1 Analytics Service Calls
+
+On each dashboard or metric request, `metrics-calculator.ts` fans out parallel calls to the Analytics Service, then computes derived KPIs. All computation is pure arithmetic on pre-aggregated counts.
+
+| Call | Endpoint | Used for |
+|---|---|---|
+| Lead counts by channel | `GET /analytics/metrics/leads` | Leads generated, cost per lead |
+| Stage entries by stage | `GET /analytics/metrics/pipeline` | Exam conversion rate, exam show rate, case conversion rate |
+| Conversion counts by channel | `GET /analytics/metrics/conversions` | Cost per case, ROAS, revenue attributed |
+| Ad spend by platform + campaign | `GET /analytics/metrics/ad-spend` | All cost metrics |
+| Coordinator stats | `GET /analytics/metrics/coordinators` | Coordinator performance *(new endpoint — see Section 7)* |
+| Campaign stats | `GET /analytics/metrics/campaigns` | Campaign analytics report |
+
+All calls pass through the same `period`, `location_id[]`, and `granularity` params received from the caller. Location access control is enforced before these calls — the Analytics Service receives only the location IDs the caller is permitted to see.
+
+### 3.2 Computed KPIs
+
+| KPI | Formula |
+|---|---|
+| Cost per lead | `sum(ad_spend) ÷ sum(leads)` — by channel |
+| Exam conversion rate | `stage_entries(exam_scheduled) ÷ leads_count` |
+| Exam show rate | `stage_entries(exam_completed) ÷ stage_entries(exam_scheduled)` |
+| Case conversion rate | `conversions_count ÷ stage_entries(exam_completed)` |
+| Cost per exam | `sum(ad_spend) ÷ stage_entries(exam_completed)` |
+| Cost per case start | `sum(ad_spend) ÷ conversions_count` — primary KPI |
+| Revenue attributed | `conversions_count × avg_contract_value` (from `location_revenue_config`) |
+| ROAS | `revenue_attributed ÷ sum(ad_spend)` |
+| Lead response time | Average `response_time_seconds` from coordinator rollup |
+| Time in stage | Average `time_in_stage_seconds` from coordinator rollup |
+
+**Channel → spend attribution:** `google_ads` leads attributed to `google_ads` platform spend; `facebook` leads attributed to `facebook_ads` spend. Each channel's cost metrics are computed independently — cross-platform spend is never blended.
+
+**Division by zero:** All ratio KPIs return `null` (not `0` or error) when the denominator is zero. The frontend renders `null` as `—`.
+
+**Missing `location_revenue_config`:** If a location has no configured average contract value, `revenue_attributed` and `ROAS` are returned as `null` for that location. The API response includes a `missing_revenue_config: string[]` field listing affected location IDs.
+
+### 3.3 Caching
+
+An in-process LRU cache (500 entries, 5-min TTL) wraps `metrics-calculator.ts` in `metrics-cache.ts`.
+
+- **Cache key:** `sha256(metric_family + '|' + period + '|' + sorted(location_ids).join(','))`
+- **Cache miss:** triggers all parallel Analytics Service calls; result stored before returning
+- **Cache scope:** per ECS instance — no shared state across tasks. Acceptable given the 5-min TTL and typical single-session dashboard load patterns
+- **No manual invalidation:** TTL expiry is the only eviction mechanism
+
+---
+
+## 4. API
+
+All routes served via the CRM API Gateway. JWT required on every endpoint via `@ortho/auth-middleware`.
+
+**Location access control** (enforced by Reporting Service, not Analytics Service):
+- `call_center_agent`: own location only
+- `call_center_manager`: assigned locations only
+- `marketing_staff`, `marketing_manager`: all locations
+
+### 4.1 Dashboard & Metrics
+
+```
+GET /reporting/dashboard
+    ?period=YYYY-MM | YYYY-MM-DD/YYYY-MM-DD
+    &location_id[]=...
+    &granularity=daily|monthly|total
+    → { period, granularity, kpis: {...}, missing_revenue_config: [...] }
+
+GET /reporting/metrics/channel-performance
+    → leads, funnel rates, and cost metrics broken down by channel
+
+GET /reporting/metrics/location-comparison
+    → all computed KPIs for each location, sorted by any requested metric
+
+GET /reporting/metrics/coordinator-performance
+    → per-coordinator: stage_transitions, exams_booked, conversions, avg_response_time_seconds
+
+GET /reporting/metrics/campaign-analytics
+    → sent, delivered, opened, clicked, conversion rate per email campaign
+```
+
+All metric endpoints accept `period`, `location_id[]`, `granularity`. Metric-specific additional filters (e.g. `channel`, `coordinator_id`) are passed through to Analytics Service after access-control filtering.
+
+### 4.2 Report Configs
+
+```
+GET    /reporting/report-configs              → list caller's saved configs
+POST   /reporting/report-configs              → create config
+PUT    /reporting/report-configs/:id          → update (own config, or marketing_manager+)
+DELETE /reporting/report-configs/:id          → delete (cascades to schedules)
+POST   /reporting/report-configs/:id/generate → on-demand generate
+                                               ?format=pdf|csv (default: pdf)
+                                               → { run_id }
+```
+
+### 4.3 Schedules
+
+```
+GET    /reporting/schedules                   → list schedules for caller's configs
+POST   /reporting/schedules                   → create schedule → registers BullMQ repeatable job
+PUT    /reporting/schedules/:id               → update → replaces BullMQ job
+DELETE /reporting/schedules/:id               → delete → removes BullMQ job
+```
+
+### 4.4 Report Runs
+
+```
+GET  /reporting/runs                          → run history; filterable by ?config_id=
+GET  /reporting/runs/:id                      → single run status
+GET  /reporting/runs/:id/download             → 302 redirect to fresh Media Service presigned URL
+```
+
+`/download` calls `GET /media/internal/:file_id/signed-url` on each request — never stores presigned URLs, respecting the 15-min TTL.
+
+### 4.5 Configuration
+
+```
+GET  /reporting/config/revenue                → list all location_revenue_config rows
+PUT  /reporting/config/revenue/:location_id   → set avg_contract_value
+                                               requires marketing_manager role
+                                               → 404 if location_id unrecognized
+```
+
+---
+
+## 5. Report Generation Pipeline
+
+On-demand and scheduled report runs share the same pipeline, implemented in `report-renderer.ts`.
+
+### 5.1 Steps
+
+```
+1. Load report_config + parameters from DB
+2. Resolve period (e.g. 'last_month' → concrete YYYY-MM-DD/YYYY-MM-DD range)
+3. Fetch metrics via metrics-cache.ts (5-min cache applies)
+4. Generate document:
+   ├── PDF → render Handlebars template with metrics data
+   │         → Puppeteer headless Chromium → Buffer
+   └── CSV → fast-csv serialize metrics rows → Buffer
+5. Upload to S3 via Media Service internal endpoint:
+   POST /media/internal/store { buffer, filename, content_type, location_id: null }
+   → { file_id, url }
+6. Update report_run: status=done, media_file_id, completed_at
+7. If recipient_emails present:
+   POST /emails/send {
+     to: recipient_emails,
+     subject: "<ReportName> — <period>",
+     body_html: "<p>Your report is ready: <a href='{presigned_url}'>Download</a></p>"
+   }
+8. On any failure: update report_run: status=failed, error_message
+```
+
+### 5.2 HTML Templates
+
+Five Handlebars templates in `templates/` — one per report type. Bundled into the Docker image at build time. Puppeteer launches headless Chromium, renders the compiled template with injected metrics data, and exports PDF. No runtime template fetch.
+
+### 5.3 Media Service Integration
+
+Uses the internal service auth token (`INTERNAL_API_SECRET` header). `uploaded_by` set to `SERVICE_CALLER_ID` sentinel UUID per Media Service spec. Files stored in the **private bucket** (presigned GET URLs, 15-min TTL) — report content is business-sensitive.
+
+### 5.4 BullMQ Job: `generate-report`
+
+```typescript
+interface GenerateReportJob {
+  report_config_id: string
+  report_run_id: string        // pre-created in DB with status=pending
+  format: 'pdf' | 'csv'
+  recipient_emails?: string[]
+  report_schedule_id?: string  // set for scheduled runs, null for on-demand
+}
+```
+
+Queue: `reporting-jobs`. Retries: 2 attempts with exponential backoff. On final failure, `report_run` row updated to `status=failed`.
+
+The Fastify HTTP server and BullMQ worker run in the same ECS task process — consistent with other services in the codebase.
+
+---
+
+## 6. Scheduled Reports
+
+### 6.1 Schedule Manager
+
+`schedule-manager.ts` maintains a BullMQ repeatable job for every active `report_schedule` row. Job ID is deterministic: `report-schedule:{schedule_id}`.
+
+**Cron expression derivation:**
+```
+daily   → 0 {hour_utc} * * *
+weekly  → 0 {hour_utc} * * {day_of_week}
+monthly → 0 {hour_utc} {day_of_month} * *
+```
+
+**Lifecycle:**
+- `POST /reporting/schedules` → insert DB row → `queue.add(jobId, payload, { repeat: { cron } })`
+- `PUT /reporting/schedules/:id` → update DB row → remove old repeatable + add new (BullMQ has no in-place update for repeatable jobs)
+- `DELETE /reporting/schedules/:id` → set `active=false` in DB → `queue.removeRepeatable(jobId)`
+- `PUT /reporting/schedules/:id` with `{ active: false }` → same BullMQ removal; DB row retained for history
+
+### 6.2 Scheduled Job Handler
+
+When a repeatable job fires:
+```
+1. Load report_schedule + report_config from DB
+2. Check schedule.active — if false, acknowledge and skip (safety net for race conditions)
+3. Create report_run row (status=pending, triggered_by='scheduler')
+4. Enqueue one-off generate-report job with run_id
+```
+
+The repeatable job itself is lightweight. The actual PDF/CSV work runs in its own one-off job with independent retry semantics.
+
+---
+
+## 7. Cross-Service Dependencies
+
+| Dependency | Type | Notes |
+|---|---|---|
+| Analytics Service | REST consumer | All metric endpoint families + generic DSL. Reporting Service fans out parallel calls per dashboard request. |
+| Media Service | REST (internal) | `POST /media/internal/store` to upload reports. `GET /media/internal/:file_id/signed-url` on each download. |
+| Email Service | REST | `POST /emails/send` for scheduled and on-demand report delivery. No template_id — plain HTML body with download link. |
+| Identity Service | JWT validation | JWT required on all endpoints via `@ortho/auth-middleware`. |
+| BullMQ / Redis | Job queue | `reporting-jobs` queue for report generation. Repeatable jobs for scheduled delivery. |
+
+---
+
+## 8. Pending Amendments
+
+### 8.1 Pipeline Engine Spec
+
+Add three fields to the `lead.stage_changed` event payload:
+
+1. `coordinator_id` — ID of the staff member who triggered the transition; `null` for automated transitions (timeout, Automation Engine)
+2. `response_time_seconds` — seconds elapsed from `lead.created_at` to this transition; populated **only** when `stage_to = 'contacted'`, `null` otherwise
+3. `time_in_stage_seconds` — seconds spent in the previous stage; populated on every transition except the first enrollment into a pipeline
+
+`coordinator_id` should also be added to the `lead.converted` payload so conversions can be attributed to coordinators in `metrics_coordinators_daily`.
+
+### 8.2 Analytics Service Spec
+
+**Add `metrics_coordinators_daily` rollup table:**
+```sql
+date                       date           NOT NULL
+location_id                text           NOT NULL
+coordinator_id             text           NOT NULL
+stage_transitions          int            NOT NULL DEFAULT 0
+exams_booked               int            NOT NULL DEFAULT 0  -- stage_to = 'exam_scheduled'
+conversions                int            NOT NULL DEFAULT 0  -- from lead.converted
+avg_response_time_seconds  numeric(10,2)            -- rolling avg, updated when stage_to = 'contacted'
+UNIQUE (date, location_id, coordinator_id)
+```
+
+**Update `StageChangedHandler`** to extract `coordinator_id`, `response_time_seconds`, `time_in_stage_seconds` from payload and populate `metrics_coordinators_daily`.
+
+**Update `LeadConvertedHandler`** to extract `coordinator_id` and increment `metrics_coordinators_daily.conversions`.
+
+**Add `GET /analytics/metrics/coordinators` endpoint** — same shared `period`/`granularity`/`location_id` params; additional filter: `coordinator_id`.
+
+### 8.3 Arch Doc
+
+1. Remove Reporting Service from `lead.converted` EventBridge subscribers — Reporting Service does not subscribe to any events.
+2. Add `GET /reporting/*` → Analytics Service to the REST call table in Section 3.2.
+
+---
+
+## 9. File Structure
+
+```
+apps/crm/reporting/
+├── src/
+│   ├── routes/
+│   │   ├── dashboard.ts
+│   │   ├── metrics/
+│   │   │   ├── channel-performance.ts
+│   │   │   ├── location-comparison.ts
+│   │   │   ├── coordinator-performance.ts
+│   │   │   └── campaign-analytics.ts
+│   │   ├── report-configs.ts
+│   │   ├── schedules.ts
+│   │   ├── runs.ts
+│   │   └── config.ts
+│   ├── services/
+│   │   ├── analytics-client.ts       # typed HTTP client for Analytics Service
+│   │   ├── metrics-calculator.ts     # fans out Analytics calls + computes KPIs
+│   │   ├── metrics-cache.ts          # 5-min LRU wrapping metrics-calculator
+│   │   ├── report-renderer.ts        # orchestrates: calc → generate → upload → email
+│   │   ├── pdf-generator.ts          # Puppeteer HTML→PDF Buffer
+│   │   ├── csv-generator.ts          # fast-csv serialization per report type
+│   │   ├── email-sender.ts           # calls Email Service with download link
+│   │   └── schedule-manager.ts       # BullMQ repeatable job CRUD
+│   ├── repositories/
+│   │   ├── report-configs.ts
+│   │   ├── schedules.ts
+│   │   ├── runs.ts
+│   │   └── revenue-config.ts
+│   ├── jobs/
+│   │   └── generate-report.ts        # BullMQ job handler → calls report-renderer
+│   └── index.ts
+├── templates/
+│   ├── weekly-summary.hbs
+│   ├── monthly-executive.hbs
+│   ├── channel-deep-dive.hbs
+│   ├── coordinator-productivity.hbs
+│   └── lead-source.hbs
+├── migrations/
+├── test/
+├── Dockerfile
+├── package.json
+└── tsconfig.json
+```
