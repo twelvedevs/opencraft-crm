@@ -254,7 +254,7 @@ Request:
 ```
 
 - `snapshot_id` is required. Returns `400` if absent.
-- `snapshot_id` is caller-generated (UUID). On first call, the engine creates the snapshot row using `INSERT ... ON CONFLICT (id) DO NOTHING` — concurrent first-batch calls with the same `snapshot_id` are safe; only one row is created.
+- `snapshot_id` is caller-generated (UUID). On first call, the engine creates the snapshot row using `INSERT ... ON CONFLICT (id) DO NOTHING` — concurrent first-batch calls with the same `snapshot_id` are safe; only one row is created. `filter_snapshot` is populated from the segment's active filter at row-creation time (read in the same transaction that validates the segment is active — ensuring the snapshot always records the filter that was actually applied).
 - Every batch call validates that the existing `audience_snapshots.segment_id` matches the `:id` in the URL. Returns `400` if mismatch — prevents cross-segment snapshot pollution.
 - Submitting the same `(snapshot_id, entity_id)` pair twice is idempotent — `INSERT INTO audience_snapshot_members ... ON CONFLICT DO NOTHING`.
 - `matched_count` is updated atomically: `UPDATE audience_snapshots SET matched_count = matched_count + $newly_matched` — never read-modify-write.
