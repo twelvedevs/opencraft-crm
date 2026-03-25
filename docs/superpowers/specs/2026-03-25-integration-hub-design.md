@@ -69,7 +69,7 @@ interface Connector {
 
   // Webhooks
   verifyWebhook(headers: Record<string, string>, rawBody: Buffer): boolean
-  parseLeadWebhook(payload: unknown): LeadEvent | null
+  parseLeadWebhook(payload: unknown): LeadEvent[]
 }
 ```
 
@@ -113,7 +113,7 @@ created_at       timestamptz  NOT NULL DEFAULT now()
 UNIQUE (platform, account_id)
 ```
 
-`status = 'error'` is set when token refresh fails or polling fails with an auth error. Polling is halted for the account until the error is resolved (manual reconnect or automatic recovery). Status is cleared on the next successful poll.
+`status = 'error'` is set when token refresh fails (Google Ads) or polling fails with an auth error (Meta). Polling is halted for the account. For Google Ads: the `refresh-token` job continues to retry — if token refresh succeeds, `status` is cleared and polling resumes. For Meta: recovery requires manual reconnect via the UI (no automatic refresh path). `status` is cleared on the next successful poll.
 
 ### 3.2 `campaign_location_mappings`
 
@@ -158,6 +158,7 @@ All endpoints except webhooks require a valid Identity Service JWT.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/integrations/accounts/:id/backfill` | Queue a one-off backfill job. Body: `{ from: "YYYY-MM-DD", to: "YYYY-MM-DD" }`. Max range: 24 months. Returns `{ job_id }`. |
+| `GET` | `/integrations/accounts/:id/backfill/:job_id` | Return current BullMQ job state: `{ job_id, status: "active" \| "completed" \| "failed", progress: { chunks_done, chunks_total }, error?: string }`. Used by `<BackfillTrigger>` to poll progress without direct Redis access from the browser. |
 
 ### 4.4 Webhooks (no JWT — signature-verified)
 
@@ -167,6 +168,8 @@ All endpoints except webhooks require a valid Identity Service JWT.
 | `GET` | `/integrations/webhooks/meta/verify` | Meta webhook subscription verification. Returns `hub.challenge` if `hub.verify_token` matches configured secret. |
 
 Signature verification happens before any processing. Invalid signature → `403`, no job enqueued.
+
+After verification, the route handler calls `connector.parseLeadWebhook(payload)` → receives `LeadEvent[]` (Meta delivers batched payloads; Google delivers single leads). One `process-lead-webhook` BullMQ job is enqueued per `LeadEvent`. Returns `200` immediately after enqueue.
 
 ---
 
@@ -193,18 +196,18 @@ Integration Hub uses four job types. BullMQ is already in the stack (Automation 
 
 **Execution:** Call `connector.refreshTokens(account)` → write new `access_token`, `refresh_token`, `token_expires_at`. On failure: set `status = 'error'`, trigger Datadog alert — polling will fail until reconnected.
 
-Not registered for Meta accounts (long-lived tokens; handled reactively on poll failure).
+Not registered for Meta accounts (long-lived tokens have a 60-day expiry). When a Meta poll fails with an auth error (401/token-invalid), `status` is set to `'error'` and polling halts. Recovery requires manual reconnect via the UI — there is no automatic token refresh path for Meta.
 
 ### 5.3 `process-lead-webhook`
 
-**Type:** One-off. Created by the webhook route handler after signature verification.
+**Type:** One-off per lead. Created by the webhook route handler — one job per `LeadEvent` returned by `parseLeadWebhook()`.
 
 **Execution:**
-1. Call `connector.parseLeadWebhook(payload)` → extract `external_lead_id`, `campaign_id`, `fields`
+1. Receive `LeadEvent` (already parsed; payload extracted by route handler before enqueue)
 2. Look up `location_id` from `campaign_location_mappings` (null if unmapped)
 3. Publish `ad_lead.received` to EventBridge
 
-**Idempotency:** Job ID is set to `{platform}:{external_lead_id}`. BullMQ silently rejects duplicate job IDs — duplicate webhook deliveries produce no duplicate events.
+**Idempotency:** Job ID is set to `{platform}:{external_lead_id}`. BullMQ silently rejects duplicate job IDs — duplicate webhook deliveries (Meta retries on non-200 delivery, Google may redeliver) produce no duplicate events.
 
 ### 5.4 `backfill-ad-spend`
 
@@ -302,7 +305,7 @@ Date range picker (`from` / `to`, max 24 months lookback). "Run Historical Sync"
 
 | Dependency | Type | Notes |
 |---|---|---|
-| Analytics Service | EventBridge consumer (`ad_spend.synced`) | Payload shape contractually defined by Analytics spec: `platform`, `account_id`, `synced_date`, `records[]` with `campaign_id`, `campaign_name`, `location_id`, `spend`, `impressions`, `clicks` |
+| Analytics Service | EventBridge consumer (`ad_spend.synced`) | Payload: `platform`, `account_id`, `synced_date`, `records[]` with `campaign_id`, `campaign_name`, `location_id`, `spend`, `impressions`, `clicks`. `location_id` is **per-record** (campaigns in one account can map to different locations; unmapped campaigns carry `location_id: null`). **Pending:** Analytics spec CLAUDE.md summary lists `location_id` as a top-level field — requires amendment to reflect per-record placement. |
 | Lead Service | EventBridge consumer (`ad_lead.received`) | Lead Service must handle `location_id: null` gracefully (unmapped campaigns) |
 | Identity Service | JWT validation | All non-webhook endpoints require a valid JWT |
 | AWS Secrets Manager | Startup credential load | `INTEGRATION_HUB_ENCRYPTION_KEY` fetched at service startup |
