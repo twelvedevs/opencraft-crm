@@ -100,7 +100,13 @@ Segment filters are stored and evaluated as a generic JSON condition tree. The s
 | `gt` / `gte` / `lt` / `lte` | Numeric comparison |
 | `contains` | Array or string contains value |
 | `exists` / `not_exists` | Field presence check |
-| `AND` / `OR` / `NOT` | Boolean grouping (nestable) |
+| `AND` / `OR` | Boolean grouping — `"op": "AND"/"OR", "conditions": [...]` (array, nestable) |
+| `NOT` | Boolean negation — `"op": "NOT", "condition": { ... }` (singular child, not array) |
+
+Example `NOT` node:
+```json
+{ "op": "NOT", "condition": { "field": "opted_out", "op": "eq", "value": true } }
+```
 
 ### 3.3 Extended Temporal Operators (Audience Engine only)
 
@@ -148,7 +154,7 @@ evaluate(
 ): boolean
 ```
 
-**Automation Engine migration:** The existing `condition-evaluator.ts` in `apps/platform/automation` is replaced with a thin wrapper around `@platform/filter-engine`. The base operators and field resolution behavior are identical — no behavior change. The Automation Engine spec (Section 6 action types) requires a minor amendment noting that template string interpolation (`{{event_id}}-sms`) is performed by the field interpolator before passing values to the filter engine; the filter engine itself only evaluates resolved values.
+**Automation Engine migration:** The existing `condition-evaluator.ts` in `apps/platform/automation` is replaced with a thin wrapper around `@platform/filter-engine`. The base operators and field resolution behavior are identical — no behavior change. When the Automation Engine wraps `@platform/filter-engine`, the event object (post-schema-validation) is passed as the `entity` argument. Template string interpolation (`{{event_id}}-sms`) is performed by the field interpolator separately for `action_tree` param binding only — not for condition evaluation. The filter engine receives already-resolved field values when used from the Automation Engine context. The Automation Engine spec (Section 6 action types) requires a minor amendment noting this call chain.
 
 ---
 
@@ -172,6 +178,10 @@ Response `201`:
 { "segment_id": "uuid", "version": 1, "status": "draft" }
 ```
 
+Segment `name` is not required to be unique — segments are identified by UUID. Names are labels for human readability only.
+
+Error responses: `400` if `filter` is structurally invalid (unknown operator, missing required fields, `NOT` node missing `condition`, `AND`/`OR` node missing `conditions` array).
+
 ---
 
 **`PUT /audiences/segments/:id`** — Save a new draft version. Increments `current_version`. Does not affect `active_version`.
@@ -179,19 +189,29 @@ Response `201`:
 Request: `{ "filter": { ... } }`
 Response `200`: `{ "segment_id": "uuid", "version": 4, "status": "draft" }`
 
+Error responses: `404` if segment not found. `400` if `filter` is invalid.
+
 ---
 
-**`POST /audiences/segments/:id/activate`** — Promote current draft to active. Marketing Manager only.
+**`POST /audiences/segments/:id/activate`** — Promote current draft to active. Marketing Manager only. `current_version` must have a saved filter — returns `400` if `current_version` has never been saved with a filter.
 
 Response `200`: `{ "segment_id": "uuid", "active_version": 4 }`
 
----
-
-**`POST /audiences/segments/:id/disable`** — Disable segment. Membership checks on disabled segments return `404`.
+Error responses: `404` if segment not found. `403` if caller is not Marketing Manager role. `400` if no filter has been saved for `current_version`.
 
 ---
 
-**`GET /audiences/segments`** — List all segments.
+**`POST /audiences/segments/:id/disable`** — Disable segment. Membership checks and evaluate calls on disabled segments return `404`.
+
+Response `200`: `{ "segment_id": "uuid", "status": "disabled" }`
+
+Error responses: `404` if segment not found. `403` if caller is not Marketing Manager role.
+
+---
+
+**`GET /audiences/segments`** — List all segments. Paginated.
+
+Query params: `?limit=100&offset=0`
 
 Response: `[{ segment_id, name, status, active_version, current_version, updated_at }]`
 
@@ -200,6 +220,8 @@ Response: `[{ segment_id, name, status, active_version, current_version, updated
 **`GET /audiences/segments/:id`** — Get segment with active filter definition.
 
 Response: `{ segment_id, name, status, active_version, current_version, filter }`
+
+Error responses: `404` if segment not found.
 
 ---
 
@@ -225,8 +247,11 @@ Request:
 }
 ```
 
-- `snapshot_id` is caller-generated (UUID). On first call, the engine creates the snapshot row. Subsequent calls with the same `snapshot_id` accumulate members.
-- Submitting the same `(snapshot_id, entity_id)` pair twice is idempotent — no duplicate members inserted.
+- `snapshot_id` is caller-generated (UUID). On first call, the engine creates the snapshot row using `INSERT ... ON CONFLICT (id) DO NOTHING` — concurrent first-batch calls with the same `snapshot_id` are safe; only one row is created.
+- Every batch call validates that the existing `audience_snapshots.segment_id` matches the `:id` in the URL. Returns `400` if mismatch — prevents cross-segment snapshot pollution.
+- Submitting the same `(snapshot_id, entity_id)` pair twice is idempotent — `INSERT INTO audience_snapshot_members ... ON CONFLICT DO NOTHING`.
+- `matched_count` is updated atomically: `UPDATE audience_snapshots SET matched_count = matched_count + $newly_matched` — never read-modify-write.
+- `matched_count` reflects only entities that passed the filter, not total submitted entities.
 - `done: false` — engine accumulates, returns `{ snapshot_id, matched_count, status: "accumulating" }`.
 - `done: true` — engine seals the snapshot, returns `{ snapshot_id, matched_count, status: "ready" }`.
 - Returns `404` if segment has no active version or status is `disabled`.
@@ -247,6 +272,8 @@ Request:
 }
 ```
 
+- `snapshot_id` is required when `snapshot: true`; ignored (and optional) when `snapshot: false`. Returns `400` if `snapshot: true` and `snapshot_id` is absent.
+- `snapshot: false` is only valid with `done: true`. Returns `400` if `snapshot: false` and `done: false` — there is no in-memory accumulation across stateless HTTP calls.
 - `snapshot: false` (default) — engine evaluates and returns matched entity IDs in the response body. No snapshot row written.
 - `snapshot: true` — engine accumulates into a snapshot (same paging model as named evaluate). Useful for large one-off sends.
 
@@ -265,13 +292,15 @@ Response:
 ```json
 {
   "snapshot_id": "uuid",
-  "segment_id": "uuid",
+  "segment_id": "uuid | null",
   "status": "ready",
   "matched_count": 412,
   "expires_at": "2026-03-27T14:00:00Z",
   "entity_ids": ["lead-1", "lead-2", ...]
 }
 ```
+
+`segment_id` is `null` for inline one-off snapshots (created via `POST /audiences/evaluate` with `snapshot: true`).
 
 Returns `404` if snapshot not found or already expired.
 
@@ -300,7 +329,7 @@ Response `200`:
 ```
 
 - Returns `404` if segment has no active version or is disabled.
-- Segment filter loaded from in-memory cache (30s TTL). Cache keyed by `(segment_id, active_version)`. Cache invalidated on TTL expiry only — activation of a new version takes effect within 30 seconds.
+- Segment resolution is cached: the full resolved segment (group row + active filter) is stored in-memory keyed by `segment_id` with a 30s TTL. A single cache entry per `segment_id` — no secondary cache needed. On a cache miss, the service loads `audience_segments` (to get `active_version`) and `audience_segment_versions` (to get the filter) in one query. Cache invalidated on TTL expiry only — a new version activation takes effect within 30 seconds across all running instances. The `segment_version` returned in the response reflects the version in the cached entry.
 
 ---
 
@@ -354,7 +383,9 @@ audience_snapshot_members (
 **Schema notes:**
 - `filter_snapshot` records the exact filter used at evaluation time. If the segment is edited later, the audit record is preserved.
 - `audience_snapshot_members` is the high-cardinality table. For a 10,000-lead campaign send: 10k rows, deleted after 48 hours. `ON DELETE CASCADE` ensures members are removed when the snapshot is deleted.
-- Snapshot cleanup: BullMQ delayed job enqueued at snapshot creation with `delay = 48h`. On fire: `DELETE FROM audience_snapshots WHERE id = ?` (cascades to members).
+- `matched_count` reflects entities that passed the filter, not total submitted entities. Updated atomically via `UPDATE ... SET matched_count = matched_count + $delta`.
+- **Snapshot cleanup — primary path:** BullMQ delayed job enqueued at snapshot creation with `delay = 48h`. On fire: `DELETE FROM audience_snapshots WHERE id = ?` (cascades to members).
+- **Snapshot cleanup — safety net:** A BullMQ repeatable job runs every hour: `DELETE FROM audience_snapshots WHERE expires_at < NOW()`. This recovers any snapshots whose primary cleanup job was lost due to Redis eviction or migration. Analogous to the Notification Service TTL cleanup pattern.
 - No soft-deletes on segments — `status = 'disabled'` is sufficient.
 
 ---
@@ -374,7 +405,8 @@ apps/platform/audience/
 │   │   ├── segment-repository.ts   # DB access + 30s in-memory cache
 │   │   ├── filter-evaluator.ts     # thin wrapper around @platform/filter-engine
 │   │   ├── snapshot-manager.ts     # accumulate batches, seal on done, enqueue cleanup
-│   │   └── snapshot-cleanup.ts     # BullMQ worker — deletes expired snapshots
+│   │   ├── snapshot-cleanup.ts     # BullMQ worker — deletes expired snapshot (per-snapshot delayed job)
+│   │   └── snapshot-cleanup-sweep.ts  # BullMQ repeatable worker — hourly safety-net sweep
 │   ├── repositories/            # DB access (platform_audience schema only)
 │   └── index.ts
 ├── migrations/
@@ -402,9 +434,9 @@ Exported from `packages/@platform/audience-ui`. Calls Audience Engine API direct
 
 Views:
 - **Segment Library** — table of all named segments with name, status, version, and last-used date. Actions: create new, edit draft, activate (Marketing Manager only), disable.
-- **Segment Editor** — visual AND/OR filter tree. Each row: field selector, operator selector (populated based on field type), value input. Groups nestable. Live preview count — calls `POST /audiences/evaluate` inline with a sample to estimate audience size before saving.
+- **Segment Editor** — visual AND/OR filter tree. Each row: field selector, operator selector (populated based on field type), value input. Groups nestable. Live preview count — when `onFetchEntities` is provided, the component calls it with the current filter to retrieve a sample of candidate entities, then posts them to `POST /audiences/evaluate` (inline, `snapshot: false`) to show an estimated audience count before saving.
 
-The CRM configures the available fields at mount time:
+The CRM configures the available fields and entity data provider at mount time:
 
 ```tsx
 <SegmentBuilder
@@ -418,10 +450,15 @@ The CRM configures the available fields at mount time:
     { key: "custom_tags",     label: "Tags",         type: "array"     },
   ]}
   onSelect={(segmentId) => { /* Campaign Service captures segment ID */ }}
+  onFetchEntities={async (filter) => {
+    // CRM calls Lead Service to get a sample of candidate entities
+    // Returns EntityRecord[] — the component posts them to the Audience Engine for preview
+    return await leadService.getSample({ limit: 500 });
+  }}
 />
 ```
 
-Field `type` drives UI only — which operators are shown and which input widget is rendered. The Audience Engine has no concept of field types.
+`onFetchEntities` is optional. If omitted, the live preview count is not shown — the Segment Editor still works fully for building and saving the filter. Field `type` drives UI only — which operators are shown and which input widget is rendered. The Audience Engine has no concept of field types.
 
 **`<AudiencePreview segmentId={id} />`** — Read-only component. Renders segment name, filter summary (human-readable), and estimated audience count. Embedded in the Campaign Builder review step so staff can confirm audience before scheduling a send.
 
@@ -458,8 +495,16 @@ Pure function, exhaustive coverage:
 - Idempotent batch: same `(snapshot_id, entity_id)` submitted twice → single member row, no error
 - Snapshot sealed (`ready`) → subsequent batch with same `snapshot_id` → `400`
 - `filter_snapshot` on snapshot row matches segment's filter at evaluation time (not a later-edited version)
-- Snapshot cleanup job fires → `audience_snapshots` row deleted → `audience_snapshot_members` cascade deleted → `GET /audiences/snapshots/:id` returns `404`
+- Snapshot cleanup primary job fires → `audience_snapshots` row deleted → `audience_snapshot_members` cascade deleted → `GET /audiences/snapshots/:id` returns `404`
+- Snapshot cleanup safety-net repeatable job: insert expired snapshot directly in DB (bypassing BullMQ), run hourly job, assert row deleted
 - Segment cache: activate new version → membership check within 30s may use old version; after 30s uses new version
+- Concurrent first-batch: simulate two simultaneous `POST /audiences/segments/:id/evaluate` calls with the same `snapshot_id` — assert exactly one `audience_snapshots` row created, no error returned to either caller
+- Cross-segment snapshot pollution: submit batch with `snapshot_id` that was created for a different segment → `400`
+- `snapshot: false` + `done: false` → `400`
+- `snapshot: true` + missing `snapshot_id` → `400`
+- Malformed filter on `POST /audiences/segments`: unknown operator → `400` with error message; missing `conditions` on `AND` node → `400`; `NOT` node missing `condition` → `400`
+- `activate` with no saved filter on `current_version` → `400`
+- `GET /audiences/segments` pagination: create 5 segments, assert `?limit=2&offset=0` returns 2, `?offset=2` returns next 2
 
 ---
 
@@ -473,8 +518,8 @@ Pure function, exhaustive coverage:
 | Extended temporal operators | `within_last`, `not_within_last`, `before`, `after`, `date_range` | Covers all identified audience segmentation needs (date ranges, "no contact in X days"). No aggregate operators — callers enrich entity data with pre-resolved fields. |
 | No aggregate operators | Caller enriches entity data | "No contact in X days" is expressed as `last_contact_at not_within_last 5 days` — caller passes `last_contact_at` on each entity. Cross-service data joins stay in the product layer. |
 | Snapshot model | Entity IDs only, 48h TTL | Sufficient to drive any campaign send loop. No contact details stored in platform layer — those stay in Lead Service. |
-| Snapshot cleanup | BullMQ delayed job per snapshot | Simple, no cron polling. Job enqueued at snapshot creation with `delay = 48h`. Redis already present for this one use case. |
-| Membership check | Synchronous, no snapshot, cached | Fast in-memory evaluation for Automation Engine rule conditions and product-layer scoring. 30s cache avoids DB hit on repeated checks for the same segment. |
+| Snapshot cleanup | BullMQ delayed job per snapshot + hourly safety-net repeatable job | Primary: job enqueued at creation with `delay = 48h`. Safety-net: hourly repeatable job cleans up any snapshots whose primary job was lost (Redis eviction, migration). Same pattern as Notification Service TTL cleanup. |
+| Membership check | Synchronous, no snapshot, cached | Fast in-memory evaluation for Automation Engine rule conditions and product-layer scoring. Full resolved segment (group + filter) cached by `segment_id` with 30s TTL — one DB query on cache miss, zero DB queries on cache hit. |
 | Versioning | Same active/draft pattern as Automation Engine and Nurturing Engine | Consistent across platform services. Active version evaluates; editing a draft does not affect running campaigns. |
 | `filter_snapshot` on snapshot | Full filter JSON copied at evaluation time | Audit record: exact criteria that produced this audience are preserved regardless of subsequent segment edits. |
 | No EventBridge | None | Purely synchronous REST service. No side effects, no async workers beyond snapshot cleanup. Simplest runtime of all platform services. |
