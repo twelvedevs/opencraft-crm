@@ -96,7 +96,7 @@ Pipelines and stages are hardcoded in `src/services/state-machine.ts` as TypeScr
 | `tx_presented` | `contract_signed`, `lost` |
 | `lost` | `contacted` (re-engagement) |
 
-Coordinator-initiated requests may include `override: true` to bypass the graph and move to any stage within the same pipeline. RBAC enforcement (only `call_center_agent`, `call_center_manager`, `marketing_manager`, and `super_admin` may set `override: true`) is performed by the CRM API Gateway before forwarding. `super_admin` bypasses all Gateway permission checks and may always set `override: true`.
+Coordinator-initiated requests may include `override: true` to bypass the graph and move to any stage within the same pipeline. RBAC enforcement (only `call_center_manager`, `marketing_manager`, and `super_admin` may set `override: true` — `call_center_agent` may not bypass the transition graph) is performed by the CRM API Gateway before forwarding. `super_admin` bypasses all Gateway permission checks and may always set `override: true`.
 
 ### 3.2 In Treatment Pipeline (3 stages)
 
@@ -152,7 +152,7 @@ const STAGES: Record<string, StageConfig> = {
 
 `recall_due` has `timeoutDays: null` and `requiresCallerTimeoutAt: true` — its timeout is the patient's recall appointment date, which varies per patient. The caller must provide `timeout_at` (absolute datetime) in the transition request body. `transition.service.ts` validates this: `400` if `stage == 'recall_due' && timeout_at` is absent. `computeTimeoutAt(stage, enteredAt, callerProvidedTimeoutAt?)` returns `callerProvidedTimeoutAt` for this stage and ignores `enteredAt`. The poller uses the stored `timeout_at` value directly. When `recall_due` times out, the poller transitions to `long_term_follow` and publishes both `lead.stage_changed` + `lead.stage_timeout` (identical to all other non-null `timeoutStage` cases).
 
-`lost` has `timeoutStage: null` — when `lost` times out after 30 days, the poller sets `status = 'archived'` on the membership rather than transitioning to another stage. It still publishes `lead.stage_changed` (with `stage_to: null`, `reason: 'archived'`) so Lead Service and Automation Engine are notified of the archival (see Section 7).
+`lost` has `timeoutStage: null` — when `lost` times out after 30 days, the poller sets `status = 'archived'` on the membership. No stage transition occurs and no `lead.stage_changed` is published. Instead, a dedicated `lead.archived` event is published (see Section 6 and Section 7).
 
 ---
 
@@ -247,7 +247,7 @@ Enroll a lead in a pipeline at an initial stage. Publishes `lead.stage_changed` 
 }
 ```
 
-**Response:** `201` membership object. `409` if an active membership already exists for `(lead_id, pipeline)`.
+**Response:** `201` membership object. `409` if an active membership already exists for `(lead_id, pipeline)`. `400` if `stage == 'recall_due'` and `timeout_at` is absent (same guard as the transition endpoint). Publishes `lead.stage_changed` post-commit with `stage_from: null` and the caller-supplied `reason`.
 
 ---
 
@@ -308,7 +308,7 @@ Valid `channel` values (must match exactly — `400` otherwise): `google_ads` | 
 
 | Method | Path | Query params | Response |
 |---|---|---|---|
-| `GET` | `/pipeline/memberships` | `lead_id`, `pipeline`, `stage`, `location_id`, `status`, `cursor`, `limit` | Paginated list (default 50). Default `status` filter: **all statuses** (active + closed + archived). Pass `status=active` to get only live memberships — this is the query Lead Service uses for cache seeding on startup. |
+| `GET` | `/pipeline/memberships` | `lead_id`, `pipeline`, `stage`, `location_id`, `status`, `cursor`, `limit` | Paginated list (default 50). Default `status` filter: **all statuses** (active + closed + archived). Pass `status=active` to get only live memberships — this is the query Lead Service uses for cache seeding on startup. The CRM API Gateway **must** inject `location_id` from the JWT `locations[]` claim before forwarding for non-super_admin callers; Pipeline Engine does not independently re-validate location scope on list queries. |
 | `GET` | `/pipeline/memberships/:id` | — | Single membership. `404` if not found. |
 | `GET` | `/pipeline/memberships/:id/history` | — | Array of history rows, `transitioned_at ASC` |
 
@@ -366,14 +366,14 @@ Published by `/convert` endpoint after atomic pipeline conversion commits.
     "to_pipeline":       "in_treatment",
     "to_stage":          "new_patient",
     "new_membership_id": "uuid",
-    "channel":           "google",
+    "channel":           "google_ads",
     "triggered_by":      "user-uuid",
     "converted_at":      "..."
   }
 }
 ```
 
-**Subscribers:** Analytics Service (`metrics_conversions_daily`; uses `location_id` + `channel`), Automation Engine (welcome-to-treatment rules), Lead Service (cache update + attribution lock).
+**Subscribers:** Analytics Service (`metrics_conversions_daily`; uses `location_id` + `channel`), Automation Engine (welcome-to-treatment rules), Lead Service (updates `current_pipeline` / `current_stage` cache + locks attribution — **no `lead.stage_changed` is published for the new pipeline enrollment on conversion; Lead Service derives its cache update solely from this event**).
 
 ### `lead.stage_timeout`
 
@@ -455,7 +455,8 @@ Published by the timeout polling job when a `lost` membership's 30-day re-engage
 - **Idempotency:** Once a row is processed, its `timeout_at` is reset to the new stage's value (or `NULL`), so it won't reappear in future scans across any instance.
 - **Per-row transactions:** A failure on one lead does not affect others. Failures are logged to Datadog; the row is retried on the next run 15 minutes later.
 - **Batch cap of 100:** Sufficient for 34 locations at realistic lead volumes. Remainder caught in the next run (or processed concurrently by another instance).
-- **Post-commit publish:** EventBridge publish failure after commit is logged but does not roll back the DB state.
+- **Post-commit publish:** EventBridge publish failure after commit is logged to Datadog and does not roll back the DB state. Accepted risk: downstream caches (Lead Service) may diverge until the next corrective action. Mitigation: Lead Service can reseed its cache for a specific lead by calling `GET /pipeline/memberships?lead_id=...&status=active` directly. Persistent publish failures alert on-call via Datadog.
+- **Archival audit trail:** When a `lost` membership is archived, no `pipeline_stage_history` row is inserted (archival is not a stage transition). The archival is recorded by `closed_reason = 'archived'` and `closed_at` on the membership row, and by the `lead.archived` event. This is the authoritative audit record.
 - **`new_lead` 2-hour window:** No `timeout_at` is set for `new_lead`. The UI reads `entered_stage_at` and displays a visual warning after 2 hours — no automated transition.
 
 ---
@@ -502,7 +503,7 @@ apps/crm/pipeline/
 
 Pure function coverage with no external dependencies (`state-machine.ts`):
 - `isValidTransition(from, to, pipeline)` — all allowed pairs pass; all invalid pairs return false; override flag bypasses check
-- `computeTimeoutAt(stage, enteredAt)` — correct absolute datetime for fixed-duration stages; `null` for no-timeout stages; `recall_due` returns `null` (caller-provided)
+- `computeTimeoutAt(stage, enteredAt, callerProvidedTimeoutAt?)` — correct absolute datetime for fixed-duration stages; `null` for no-timeout stages; `recall_due` returns `callerProvidedTimeoutAt` (not null — the caller-supplied datetime is passed through)
 - `getTimeoutStage(stage)` — correct target stage per stage; `null` for `lost` (archive behavior)
 
 ### Integration Tests (Vitest + real Postgres)
