@@ -332,17 +332,19 @@ SendGrid POST /webhooks/sendgrid
   → For each event:
       1. Determine source: look up email_campaign_recipients by sendgrid_message_id first;
          if not found, look up email_sends by sendgrid_message_id
-      2. Update row status + timestamp per event type:
-           delivered   → status = 'delivered', delivered_at = event_timestamp
-           open        → campaign recipient: status = 'opened', opened_at = event_timestamp
-                         transactional send: publish event only — no status change, no timestamp column
-           click       → campaign recipient: status = 'clicked', clicked_at = event_timestamp (first only)
-                         transactional send: publish event only — no status change, no click table
-           bounce      → status = 'bounced', bounced_at = event_timestamp
-           spamreport  → campaign recipient: status = 'spam_reported'
-                         transactional send: status = 'bounced', bounced_at = event_timestamp
-           unsubscribe → status = 'unsubscribed'
-         All updates use ON CONFLICT DO NOTHING for idempotency
+      2. Update row status + timestamp per event type using forward-only WHERE guards (see Section 6):
+           delivered        → status = 'delivered', delivered_at = event_timestamp
+           open             → campaign recipient: status = 'opened', opened_at = event_timestamp
+                              transactional send: publish event only — no status change, no timestamp column
+           click            → campaign recipient: status = 'clicked', clicked_at = event_timestamp (first only)
+                              transactional send: publish event only — no status change, no click table
+           bounce (hard)    → status = 'bounced', bounced_at = event_timestamp
+                              (SendGrid event.type = "bounce")
+           bounce (blocked) → no status change, no event published — treated as temporary suppression
+                              (SendGrid event.type = "blocked")
+           spamreport       → campaign recipient: status = 'spam_reported'
+                              transactional send: status = 'bounced', bounced_at = event_timestamp
+           unsubscribe      → status = 'unsubscribed'
       3. For click events on campaign recipients: insert email_recipient_clicks row (always — multiple clicks tracked)
       4. Publish EventBridge event
 
@@ -381,7 +383,8 @@ All events use the standard `@ortho/event-bus` envelope: `{ event_id, event_type
 
 | SendGrid Event | Classification | Email Service Action |
 |---|---|---|
-| `bounce` | Hard (permanent) | Status → `bounced`, `bounced_at` set, publish `email.bounced { bounce_type: "hard" }`. Does not affect job `failed_count` — post-delivery bounce is engagement data, not a delivery failure. |
+| `bounce` with `type = "bounce"` | Hard (permanent) | Status → `bounced`, `bounced_at` set, publish `email.bounced { bounce_type: "hard" }`. Does not affect job `failed_count` — post-delivery bounce is engagement data, not a delivery failure. |
+| `bounce` with `type = "blocked"` | Blocked (temporary) | No status change, no event published. Treated as temporary suppression — may resolve on retry. |
 | `deferred` | Soft (temporary) | No status change, no event published — SendGrid retries automatically |
 | `spamreport` | Spam | Campaign recipient: status → `spam_reported`, publish `email.spam_reported`. Transactional send: status → `bounced`, `bounced_at` set, publish `email.spam_reported`. Neither increments job `failed_count`. |
 
@@ -398,7 +401,7 @@ Hard bounces are not retried. SendGrid automatically suppresses the address; fut
 | Duplicate `dedup_key` | UNIQUE constraint — return existing row with `200`, no re-send |
 | SendGrid transient error (5xx, timeout) | BullMQ retry: 5s → 30s → 2m → 10m; `attempt` incremented |
 | SendGrid permanent error (4xx) | No retry. Status → `failed`, `error` populated, publish `email.failed` |
-| Worker crash mid-send | Job not ACKed — re-queued on restart. `dedup_key` prevents double-send |
+| Worker crash mid-send | Job not ACKed — re-queued on restart. At start of each worker execution, re-fetch the `email_sends` row: if `sendgrid_message_id IS NOT NULL` (SendGrid already accepted), skip the SendGrid call and proceed to publishing `email.sent` using the existing `sendgrid_message_id`. This guards against double-send when the worker crashes after calling SendGrid but before updating the DB row. |
 | `location_id` has no configured or verified domain | `422` before enqueue — no BullMQ job created |
 
 ### Campaign Send
@@ -407,7 +410,7 @@ Hard bounces are not retried. SendGrid automatically suppresses the address; fut
 |---|---|
 | Duplicate `job_ref` | UNIQUE constraint — return existing job with current status in `200`, no re-processing |
 | Spam check fails | Job row inserted (status: `spam_check_failed`), `422` returned. No recipients inserted, no BullMQ jobs enqueued. Subsequent calls with same `job_ref` return the `spam_check_failed` job |
-| Worker crash mid-campaign | On worker process startup: scan `email_campaign_jobs WHERE status = 'processing'`; for each job, re-enqueue all `email_campaign_recipients WHERE job_id = ? AND status = 'pending'`. This startup recovery hook runs before the worker begins processing new jobs |
+| Worker crash mid-campaign | On worker process startup: scan `email_campaign_jobs WHERE status = 'processing'`; for each job, re-enqueue all `email_campaign_recipients WHERE job_id = ? AND status = 'pending'`. This startup recovery hook runs before the worker begins processing new jobs. At the start of each Campaign Recipient Worker job execution, re-fetch the recipient row: if `status != 'pending'` (already processed), skip all processing and return without calling SendGrid or updating counts. This guards against double-send when the worker crashes after calling SendGrid but before updating the recipient row. |
 | Individual recipient send fails | Recipient status → `failed`, `failed_count` atomically incremented (`UPDATE ... SET failed_count = failed_count + 1`). Other recipients continue unaffected |
 | Template Service 5xx / timeout | BullMQ retry for that recipient (transient). Parent job remains `processing` |
 | Template Service 4xx (e.g. template not found) | Permanent failure — no retry. Recipient status → `failed`, `failed_count` incremented |
