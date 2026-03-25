@@ -15,6 +15,7 @@ This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-
   - `2026-03-25-nurturing-engine-design.md` — Draft
   - `2026-03-25-messaging-service-design.md` — Draft
   - `2026-03-25-notification-service-design.md` — Draft
+  - `2026-03-25-template-service-design.md` — Draft
 
 ## Architecture
 
@@ -66,6 +67,10 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 ### Notification Service — Key API Decisions
 
 Transport: SSE (not WebSocket) — strictly server-to-client. Product services call `POST /notifications/publish` directly (no EventBridge). Redis pub/sub (`PSUBSCRIBE notif:*`) handles cross-instance fan-out. Channels are arbitrary strings; channel access control enforced via JWT claims (`location:{id}:*` checks location claims, `user:{id}:*` checks JWT subject). Persistence: 7-day TTL, one row per publish, per-user read state in `notification_reads`. `Last-Event-ID` replay uses monotonic `seq bigint` (Postgres sequence), not UUID. `read-all` publishes single bulk Redis message → `event: read-all` SSE type. `POST /notifications/:id/read` returns `404` for expired/missing notifications.
+
+### Template Service — Key API Decisions
+
+`POST /templates/render` accepts `template_id` (uuid) + `context` object → returns rendered `body_text` (SMS) or `subject` + `body_html` + `body_text` (email). Always renders `active_version` — returns `404` if `active_version IS NULL` or `status = disabled`. Merge tag syntax: `{{key}}` with dot-notation support. Missing tags → empty string + log. In-memory cache 30s TTL; `POST /templates/:id/disable` eagerly evicts cache. Email templates store pre-rendered HTML (Unlayer export) + Unlayer JSON (for re-editing); SMS templates store plain text. Two-table versioning: `templates` group + `template_versions`. **Call chain:** Automation Engine and Nurturing Engine workers call `POST /templates/render` first, then pass pre-rendered body to Messaging/Email Service — Messaging Service never calls Template Service. **Pending:** Automation Engine spec (Section 6) and Nurturing Engine spec need amendments to reflect this call chain.
 
 ### Messaging Service — Key API Decisions
 
