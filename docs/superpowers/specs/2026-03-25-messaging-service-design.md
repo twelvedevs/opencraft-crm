@@ -16,7 +16,7 @@ The Messaging Service (`apps/platform/messaging`) is a **platform-layer SMS/MMS 
 - Track delivery status via Twilio status callbacks; emit `message.delivered` / `message.failed`
 - Manage phone number pool (static provisioning + resolution by `location_id`+`channel` or direct `from_number`)
 - Render SMS templates inline (merge tag resolution) or accept a pre-rendered `body`
-- Enforce opt-out registry: reject sends to opted-out numbers; detect STOP/UNSTOP replies; emit `opt_out.received`
+- Enforce opt-out registry: reject sends to opted-out numbers; detect STOP/UNSTOP replies; emit `opt_out.received` / `opt_out.removed`
 - Rate-limit outbound sends per Twilio number via Redis token bucket (10DLC compliance)
 - Idempotency via caller-supplied `dedup_key` — duplicate sends silently no-op
 
@@ -59,6 +59,7 @@ Automation Engine / Nurturing Engine / Conversation Service
   message.delivered        → Conversation Service, Analytics
   message.failed           → Automation Engine
   opt_out.received         → Lead Service, Nurturing Engine
+  opt_out.removed          → Lead Service, Nurturing Engine
 ```
 
 ---
@@ -92,9 +93,8 @@ Request body (one of `from_number` or `location_id`+`channel`; one of `template`
 Callers (Automation Engine, Nurturing Engine) embed the template string directly in their rule or sequence definitions. The Messaging Service does not store or look up templates by ID.
 
 Responses:
-- `200` — `{ "message_id": "uuid", "status": "queued" }` — accepted and sent to Twilio
+- `200` — `{ "message_id": "uuid", "status": "queued" }` — accepted and sent to Twilio. Also returned for duplicate `dedup_key` — the existing `message_id` is returned so callers treat it as success without special handling.
 - `400` — destination number is opted out
-- `409` — `dedup_key` already exists (silent no-op; treated as success by callers)
 - `422` — validation error (missing required fields, invalid E.164, etc.)
 - `429` — rate limit exceeded; includes `Retry-After` header (seconds)
 
@@ -158,7 +158,7 @@ POST /messages/send
   → check opt-out registry (messaging_opt_outs)
       opted out → return 400
   → check dedup_key in messaging_messages
-      exists → return 409
+      exists → return 200 with existing message_id (idempotent success)
   → resolve from_number:
       if from_number provided → use directly
       if location_id + channel → query messaging_numbers
@@ -187,13 +187,15 @@ POST /webhooks/twilio/inbound
       → INSERT messaging_opt_outs (source: 'stop_reply')
       → publish opt_out.received to EventBridge
   → check if body matches UNSTOP/START variants
-      → DELETE from messaging_opt_outs
-      → publish opt_out.removed to EventBridge
+      → number exists in messaging_opt_outs?
+          YES → DELETE from messaging_opt_outs
+                publish opt_out.removed to EventBridge
+          NO  → no-op (no event published — avoids spurious events to subscribers)
   → publish inbound_message.received to EventBridge
   → return 200 with empty TwiML response (no auto-reply)
 ```
 
-Message insert occurs before opt-out processing so every inbound SMS is recorded regardless of subsequent failures. The `inbound_message.received` event is published for all inbound messages, including STOP/UNSTOP — Conversation Service records the exchange in the thread.
+Message insert occurs before opt-out processing so every inbound SMS is recorded regardless of subsequent failures. The `inbound_message.received` event is published for all inbound messages, including STOP/UNSTOP — Conversation Service records the exchange in the thread. The event includes a `message_type` field (`'normal'` | `'stop'` | `'unstop'`) so Conversation Service can render opt-out keywords distinctly without re-parsing the body.
 
 ---
 
@@ -221,8 +223,7 @@ POST /webhooks/twilio/status
 Per-number Redis token bucket for 10DLC compliance:
 
 - **Key:** `rate_limit:msg:{from_number}`
-- **Capacity:** configurable per number (default: 3 tokens for 10DLC registered numbers; 1 token for unregistered long codes)
-- **Refill rate:** matches capacity per second (e.g. 3 tokens/second for registered 10DLC)
+- **Capacity and refill rate:** both equal `rate_limit_mps` from the number record. A number with `rate_limit_mps = 3` has a bucket capacity of 3 tokens that refills at 3 tokens/second — sustaining up to 3 messages/second with no burst above that rate. Default `rate_limit_mps = 3` for 10DLC registered numbers; set to `1` for unregistered long codes.
 - **Implementation:** Lua script (atomic check-and-consume) to avoid race conditions across service instances
 - **On throttle:** return `429` with `Retry-After: 1` — callers (Automation Engine, Nurturing Engine) already have BullMQ retry semantics and will retry automatically
 - **Configuration:** stored on the `messaging_numbers` row as `rate_limit_mps integer NOT NULL DEFAULT 3`
@@ -250,7 +251,7 @@ SMS templates are short strings (160 chars for single SMS, up to 1600 for concat
 
 | Event | Trigger | Key Payload Fields |
 |---|---|---|
-| `inbound_message.received` | Inbound SMS webhook | `message_id`, `from_number`, `to_number`, `body`, `media_urls`, `received_at` |
+| `inbound_message.received` | Inbound SMS webhook | `message_id`, `from_number`, `to_number`, `body`, `media_urls`, `received_at`, `message_type` (`'normal'`\|`'stop'`\|`'unstop'`) |
 | `message.delivered` | Twilio status callback — delivered | `message_id`, `twilio_sid`, `to_number`, `from_number`, `delivered_at` |
 | `message.failed` | Twilio status callback — failed | `message_id`, `twilio_sid`, `to_number`, `from_number`, `error_code`, `error_message` |
 | `opt_out.received` | STOP reply detected | `phone_number`, `opted_out_at`, `source: 'stop_reply'` |
@@ -294,17 +295,20 @@ messaging_messages (
   from_number   text NOT NULL,          -- E.164
   body          text,
   media_urls    text[],                 -- MMS attachments
-  status        text NOT NULL,          -- 'queued'|'sent'|'delivered'|'failed'|'received'
+  message_type  text NOT NULL DEFAULT 'normal', -- 'normal' | 'stop' | 'unstop' (inbound only)
+  status        text NOT NULL,          -- outbound: 'queued'|'sending'|'sent'|'delivered'|'failed'|'undelivered'; inbound: 'received'
   twilio_sid    text UNIQUE,            -- Twilio message SID (populated after API call)
   dedup_key     text UNIQUE,            -- caller-supplied; NULL for inbound
   error_code    text,                   -- Twilio error code on failure
   error_message text,
   sent_at       timestamptz,
   delivered_at  timestamptz,
+  received_at   timestamptz,            -- populated for inbound messages (= created_at for inbound)
   created_at    timestamptz NOT NULL DEFAULT now()
 )
 
--- Opt-out registry
+-- Opt-out registry (hard delete on UNSTOP — no soft-delete/audit trail)
+-- removed_at in opt_out.removed event is set to now() at deletion time
 messaging_opt_outs (
   phone_number  text PRIMARY KEY,       -- E.164
   opted_out_at  timestamptz NOT NULL DEFAULT now(),
@@ -315,6 +319,7 @@ messaging_opt_outs (
 **Indexes:**
 - `messaging_messages(to_number, created_at DESC)` — inbox queries
 - `messaging_messages(from_number, created_at DESC)` — per-number send history
+- `messaging_messages(status, created_at DESC)` — status filter on GET /messages
 - `messaging_messages(dedup_key)` — enforced by UNIQUE constraint
 - `messaging_messages(twilio_sid)` — status callback lookup
 
@@ -377,7 +382,7 @@ Pure functions — no external dependencies:
 Twilio SDK mocked via HTTP interceptor:
 
 - Outbound happy path — opt-out check, dedup check, number resolve, render, rate limit, Twilio call, DB insert, 200 response
-- Dedup — same `dedup_key` twice → second call returns 409, Twilio called exactly once
+- Dedup — same `dedup_key` twice → second call returns 200 with original `message_id`, Twilio called exactly once
 - Opted-out number → 400, Twilio never called
 - Rate limit exceeded → 429 with `Retry-After`, Twilio never called
 - Number resolve — `location_id`+`channel` resolves correctly; unknown combination → 422
@@ -385,7 +390,8 @@ Twilio SDK mocked via HTTP interceptor:
 - Status callback failed → DB status + error fields updated, `message.failed` published
 - Invalid Twilio signature on webhook → 403, no DB writes, no events published
 - Inbound STOP → message inserted first, opt-out inserted, `opt_out.received` published, `inbound_message.received` published
-- Inbound UNSTOP → message inserted first, opt-out removed, `opt_out.removed` published, `inbound_message.received` published
+- Inbound UNSTOP (number was opted out) → message inserted first, opt-out removed, `opt_out.removed` published, `inbound_message.received` published
+- Inbound UNSTOP (number was not opted out) → message inserted, no `opt_out.removed` published (no-op), `inbound_message.received` published
 - Inbound normal message → message inserted, `inbound_message.received` published
 - Status callback intermediate (`sent`) → DB status updated, no EventBridge event
 
@@ -407,6 +413,6 @@ Twilio SDK mocked via HTTP interceptor:
 | Template rendering | Inline in Messaging Service | SMS templates are short strings with simple `{{merge_tag}}` substitution. Delegating to Template Service adds a synchronous dependency on every send for no benefit at this complexity level. |
 | Inbound routing | EventBridge `inbound_message.received` | Platform service must not call product-layer services directly. This service emits `inbound_message.received`; Conversation Service (product layer) subscribes, enriches with lead/conversation context, and emits its own downstream `message.received` event. |
 | Opt-out enforcement | Checked on every `POST /messages/send` | Callers do not manage opt-out state. Single enforcement point in the Messaging Service prevents leakage across Automation Engine, Nurturing Engine, and Conversation Service. |
-| Dedup | Unique `dedup_key` constraint in DB | Handles at-least-once delivery from BullMQ callers safely. 409 is a silent no-op — callers treat it as success. |
+| Dedup | Unique `dedup_key` constraint in DB; duplicate returns 200 with original `message_id` | Handles at-least-once delivery from BullMQ callers safely. Returning 200 (not 409) means callers need no special retry-suppression logic — the response is indistinguishable from a first-time send. |
 | Status callbacks | Twilio push → DB update → EventBridge | Polling Twilio for delivery status would be wasteful. Twilio pushes callbacks to the service; the service updates the record and emits events downstream. |
 | Voice | Out of scope | Call tracking is a separate concern; excluding it keeps the service focused on SMS/MMS. |
