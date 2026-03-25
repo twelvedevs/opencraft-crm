@@ -36,8 +36,8 @@ AWS EventBridge events
   │                                                   │
   │   SQS Consumer                                    │
   │        │                                          │
-  │   Event Handler Registry                          │
-  │   (maps event_type → typed handler fn)            │
+  │   Event Router                                    │
+  │   (switch on event_type → typed handler fn)       │
   │        │                                          │
   │   ┌────┴──────────────────────────┐               │
   │   Write raw event row             Update rollup   │
@@ -55,7 +55,7 @@ AWS EventBridge events
 
 **Ingest flow:**
 1. EventBridge delivers subscribed events to an SQS queue. The Analytics service polls SQS — the same durable pattern used by the Automation Engine. Events are not dropped during deploys or restarts; the SQS buffer absorbs backpressure.
-2. Each dequeued message is routed to a typed handler by `event_type`.
+2. Each dequeued message is routed to a typed handler by a plain `switch` on `event_type` in `event-router.ts`. There is no registration map or dynamic dispatch system — each handler is called directly.
 3. The handler extracts dimensions and writes atomically: one row to `analytics_events` (immutable raw log) + an `INSERT ... ON CONFLICT DO UPDATE` increment on the relevant daily rollup table.
 4. Unknown event types are logged at `debug` level, acknowledged from SQS, and dropped — no error, no retry.
 
@@ -136,12 +136,14 @@ date          date           NOT NULL
 platform      text           NOT NULL   -- google_ads, facebook_ads
 location_id   text           NOT NULL
 campaign_id   text           NOT NULL
-campaign_name text
+campaign_name text                      -- display hint only; see note below
 impressions   int            NOT NULL DEFAULT 0
 clicks        int            NOT NULL DEFAULT 0
 spend         numeric(12,2)  NOT NULL DEFAULT 0
 UNIQUE (date, platform, campaign_id)
 ```
+
+**`campaign_name` is a display hint.** The upsert overwrites the full row on each sync, so if a campaign is renamed in the ad platform, older rows retain the old name and newer rows have the new name. Reporting Service queries must always group by `campaign_id` — never by `campaign_name` — to produce correct aggregations.
 
 **`metrics_campaigns_daily`**
 ```sql
@@ -152,7 +154,7 @@ sent         int    NOT NULL DEFAULT 0
 delivered    int    NOT NULL DEFAULT 0
 opened       int    NOT NULL DEFAULT 0
 clicked      int    NOT NULL DEFAULT 0
-UNIQUE (date, campaign_id)
+UNIQUE (date, campaign_id, location_id)
 ```
 
 **Rollup retention:** No expiry on rollup tables. Row count is bounded by `days × locations × dimensions` — negligible footprint compared to the raw event log.
@@ -167,7 +169,7 @@ Nine typed handlers. Each follows the same contract: extract dimensions from the
 |---|---|---|---|
 | `lead.created` | `LeadCreatedHandler` | `metrics_leads_daily` | `location_id`, `channel` |
 | `lead.stage_changed` | `StageChangedHandler` | `metrics_pipeline_daily` | `location_id`, `pipeline`, `stage_to` |
-| `lead.converted` | `LeadConvertedHandler` | `metrics_conversions_daily` | `location_id`, `channel` |
+| `lead.converted` | `LeadConvertedHandler` | `metrics_conversions_daily` | `location_id`, `channel` (from attribution) |
 | `message.delivered` | `MessageDeliveredHandler` | `metrics_messages_daily` (delivered+1) | `location_id` |
 | `message.failed` | `MessageFailedHandler` | `metrics_messages_daily` (failed+1) | `location_id` |
 | `opt_out.received` | `OptOutHandler` | `metrics_messages_daily` (opt_outs+1) | `location_id` |
@@ -175,7 +177,28 @@ Nine typed handlers. Each follows the same contract: extract dimensions from the
 | `referral.converted` | `ReferralConvertedHandler` | `metrics_conversions_daily` (channel=`referral`) | `location_id` |
 | `ad_spend.synced` | `AdSpendSyncedHandler` | `metrics_ad_spend_daily` | `platform`, `location_id`, `campaign_id` |
 
-**`ad_spend.synced` specifics:** Integration Hub publishes one event per sync cycle containing an array of campaign spend records for a given platform and date. `AdSpendSyncedHandler` upserts each record — `ON CONFLICT (date, platform, campaign_id) DO UPDATE` overwrites the full row. Re-syncs are idempotent.
+**`ad_spend.synced` specifics:** Integration Hub publishes one event per sync cycle. The payload structure is:
+
+```json
+{
+  "platform": "google_ads",
+  "location_id": "loc_123",
+  "synced_date": "2026-03-25",
+  "records": [
+    {
+      "campaign_id": "camp_abc",
+      "campaign_name": "Spring Braces Promo",
+      "impressions": 4200,
+      "clicks": 310,
+      "spend": 185.40
+    }
+  ]
+}
+```
+
+`AdSpendSyncedHandler` iterates `records` and upserts each entry into `metrics_ad_spend_daily` — `ON CONFLICT (date, platform, campaign_id) DO UPDATE` overwrites the full row. Re-syncs are idempotent regardless of `event_id`.
+
+**Idempotency for `AdSpendSyncedHandler` differs from counter-increment handlers.** For all other handlers, the raw `analytics_events` insert uses `ON CONFLICT (event_id) DO NOTHING`, and if the insert is skipped the rollup update is also skipped (no double-count). For `AdSpendSyncedHandler`, this rule is relaxed: the rollup upsert always executes even if the raw `analytics_events` row already exists. This allows Integration Hub to re-publish a corrected spend figure using the same `event_id` without the correction being silently ignored. The `analytics_events` row records the first delivery only; the rollup row always reflects the latest synced figures.
 
 **Email engagement (future):** `email.opened` and `email.clicked` handler stubs exist in the registry. They will populate `metrics_campaigns_daily.opened` and `.clicked` once the Email Service is confirmed to publish these events with `campaign_id` and `location_id` in the payload. This is a cross-service dependency that requires an amendment to the Email Service spec.
 
@@ -259,7 +282,7 @@ Response: `{ rows: [...], total: N, truncated: boolean }`
 
 ### 5.4 Auth
 
-All endpoints require a valid Identity Service JWT. Location-scoped access control is enforced by the Reporting Service before calling Analytics — the Analytics Service itself does not enforce location restrictions (it is domain-agnostic and unaware of which locations a caller may access).
+All endpoints require a valid Identity Service JWT. The `@ortho/auth-middleware` verifies the JWT signature against the Identity Service public key and rejects expired tokens — presence of the `Authorization` header alone is not sufficient. Location-scoped access control is enforced by the Reporting Service before calling Analytics — the Analytics Service itself does not enforce location restrictions (it is domain-agnostic and unaware of which locations a caller may access).
 
 ---
 
@@ -274,7 +297,9 @@ INSERT INTO analytics_events (...) VALUES (...)
 ON CONFLICT (event_id) DO NOTHING
 ```
 
-If the raw insert is skipped (duplicate), the rollup update is also skipped within the same transaction. No double-counting.
+For all counter-increment handlers (`lead.created`, `lead.stage_changed`, `lead.converted`, `message.delivered`, `message.failed`, `opt_out.received`, `campaign.sent`, `referral.converted`): if the raw insert is skipped (duplicate), the rollup increment is also skipped in the same transaction — no double-counting.
+
+**Exception — `AdSpendSyncedHandler`:** The rollup upsert always executes regardless of whether the raw insert was skipped. See Section 4 for the rationale.
 
 ### 6.2 SQS Configuration
 
@@ -288,6 +313,8 @@ If the raw insert is skipped (duplicate), the rollup update is also skipped with
 1. Creates the partition for the next calendar month
 2. Drops the partition from 25 months ago (retaining exactly 24 months of data)
 
+Example: when the job runs on 2026-04-01, it creates the `2026-05` partition and drops the `2024-03` partition, retaining the 24 months from 2024-04 through 2026-03.
+
 Dropping an old partition is a metadata operation — no row-by-row deletion, no table lock on the live table.
 
 ### 6.4 No `@platform/filter-engine` Dependency
@@ -300,10 +327,12 @@ Analytics does not evaluate filter condition trees. The generic DSL performs sim
 
 | Dependency | Type | Notes |
 |---|---|---|
-| Integration Hub | EventBridge (`ad_spend.synced`) | Must include `platform`, `location_id`, `campaign_id`, `date`, `spend`, `impressions`, `clicks` per campaign record in payload |
-| Email Service | EventBridge (`email.opened`, `email.clicked`) | Must include `campaign_id`, `location_id` in payload. **Not yet in arch doc event table — requires amendment.** |
+| Integration Hub | EventBridge (`ad_spend.synced`) | Payload: `platform`, `location_id`, `synced_date` at top level; `records[]` with `campaign_id`, `campaign_name`, `impressions`, `clicks`, `spend` per entry |
+| Campaign Service | EventBridge (`campaign.sent`) | Payload must include `campaign_id`, `location_id`. **Required fields not yet defined in arch doc event table — requires amendment.** |
+| Email Service | EventBridge (`email.opened`, `email.clicked`) | Payload must include `campaign_id`, `location_id`. **Not yet in arch doc event table — requires amendment.** |
+| Lead Service | EventBridge (`lead.converted`) | Payload must include `location_id` and `channel` (the lead's first-touch attribution channel). **`channel` field must be confirmed in Lead Service event schema.** |
 | Reporting Service | REST consumer (`GET /analytics/metrics/*`, `POST /analytics/query`) | All Ortho-specific metric computation (cost per case, ROAS, coordinator metrics) lives in Reporting Service |
-| Identity Service | JWT validation | All API endpoints require a valid JWT |
+| Identity Service | JWT validation | All API endpoints require JWT with valid signature and non-expired claims |
 
 ---
 
@@ -322,8 +351,8 @@ apps/platform/analytics/
 │   │   │   └── campaigns.ts
 │   │   └── query.ts          # generic DSL endpoint
 │   ├── services/
-│   │   ├── sqs-consumer.ts   # polls SQS, routes to handler registry
-│   │   ├── handler-registry.ts
+│   │   ├── sqs-consumer.ts   # polls SQS, calls event-router
+│   │   ├── event-router.ts   # switch on event_type → typed handler fn
 │   │   └── query-builder.ts  # DSL → SQL translation
 │   ├── handlers/
 │   │   ├── lead-created.ts
