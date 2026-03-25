@@ -18,6 +18,7 @@ This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-
   - `2026-03-25-template-service-design.md` — Draft
   - `2026-03-25-audience-engine-design.md` — Draft
   - `2026-03-25-ai-service-design.md` — Draft
+  - `2026-03-25-analytics-service-design.md` — Draft
 
 ## Architecture
 
@@ -83,6 +84,10 @@ Callers submit entity data (hybrid push model) — engine never calls product AP
 
 Thin Claude API gateway — no stateful agent behavior (AI Agent autonomous mode lives in Conversation Service). Single endpoint: `POST /ai/complete` with `{ prompt_id, context, model? }` → `{ text, model, prompt_id, cached }`. Sync only (no streaming). Static prompts as TypeScript files in `src/prompts/` — changes require deploy. Model routing: `"haiku"` → `claude-haiku-4-5-20251001`, `"sonnet"` → `claude-sonnet-4-6`; prompt sets default, caller can override; invalid model string → 400. Response cache: L1 in-memory LRU 500 entries / 60s TTL + L2 Postgres `ai_completions` 5min TTL, keyed on SHA256(prompt_id + model + canonicalized context). `ai_completions` is a response cache only — not an audit log. LLM observability via Arize Phoenix (OpenInference SDK instrumentation; `ARIZE_PHOENIX_ENDPOINT` env var). No Redis, no BullMQ, no events published. Error shape: `{ "error": "<message>" }` — 503 for all Claude API errors (5xx, 429, 529). **Pending:** Arch doc Section 2.1 lists "streaming" and "usage metering" for AI Service — both are out of scope; arch doc needs amendment.
 
+### Analytics Service — Key API Decisions
+
+EventBridge → SQS → typed event handlers → atomic write: raw `analytics_events` log + daily rollup table update (single DB transaction). Nine typed handlers dispatched via plain `switch` in `event-router.ts` (no registration map). Storage: `analytics_events` (24-month partitioned, with default partition for late-job safety) + 6 named rollup tables (`metrics_leads_daily`, `metrics_pipeline_daily`, `metrics_conversions_daily`, `metrics_messages_daily`, `metrics_ad_spend_daily`, `metrics_campaigns_daily`). Idempotency: `ON CONFLICT (event_id) DO NOTHING` on raw insert skips rollup for counter-increment handlers — **exception:** `AdSpendSyncedHandler` always executes rollup upsert to allow corrected re-syncs. Ad spend arrives via `ad_spend.synced` event from Integration Hub (payload: `platform`, `location_id`, `synced_date` + `records[]`). API: named endpoint families `GET /analytics/metrics/{leads|pipeline|conversions|messages|ad-spend|campaigns}` with shared `period`/`granularity`/`location_id` params + `POST /analytics/query` generic DSL against raw event log (single event type, equality/IN filters, 10k row cap). No platform UI component — Reporting Service owns dashboard. **Pending amendments required:** Messaging Service spec (add `location_id` to `message.delivered`, `message.failed`, `opt_out.received` payloads); Pipeline Engine spec (`lead.stage_changed` must carry `location_id`, `pipeline`, `stage_to`; `lead.converted` must carry `location_id`, `channel`); Campaign Service spec (`campaign.sent` must carry `campaign_id`, `location_id`); Email Service spec (add `email.opened`, `email.clicked` events with `campaign_id`, `location_id`); arch doc event table (add all above events).
+
 ### Messaging Service — Key API Decisions
 
 `POST /messages/send` accepts `template` (string) + `context`, or pre-rendered `body`. Callers embed the template string inline — the Messaging Service does not store templates by ID. Duplicate `dedup_key` returns `200` with the original `message_id` (not `409`). Events published: `inbound_message.received` (includes `message_type`: `normal`|`stop`|`unstop`), `message.delivered`, `message.failed`, `opt_out.received`, `opt_out.removed`.
@@ -107,7 +112,7 @@ Thin Claude API gateway — no stateful agent behavior (AI Agent autonomous mode
 | AI | Claude Sonnet 4.6 (complex tasks) / Haiku 4.5 (high-volume) |
 | Ads APIs | Google Ads API, Meta Marketing API |
 | Event bus | AWS EventBridge |
-| Job queue | BullMQ (Redis) — used by Automation Engine and Nurturing Engine for action dispatch and delayed step scheduling; Notification Service for TTL cleanup; Audience Engine for snapshot cleanup |
+| Job queue | BullMQ (Redis) — used by Automation Engine and Nurturing Engine for action dispatch and delayed step scheduling; Notification Service for TTL cleanup; Audience Engine for snapshot cleanup; Analytics Service for monthly partition maintenance |
 | Infra | AWS us-east-1 (ECS Fargate, RDS, S3, CloudFront) |
 | Monitoring | Datadog (APM, structured logs) |
 | Monorepo | Turborepo |
