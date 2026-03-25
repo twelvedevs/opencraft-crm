@@ -16,6 +16,7 @@ This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-
   - `2026-03-25-messaging-service-design.md` — Draft
   - `2026-03-25-notification-service-design.md` — Draft
   - `2026-03-25-template-service-design.md` — Draft
+  - `2026-03-25-audience-engine-design.md` — Draft
 
 ## Architecture
 
@@ -52,6 +53,7 @@ ortho/
 │   ├── @ortho/db            # Knex/Drizzle, migration runner
 │   ├── @ortho/logger        # Pino, Datadog-compatible
 │   ├── @ortho/testing       # fixtures, mocks, factories
+│   ├── @platform/filter-engine  # shared pure-function filter evaluator (Automation + Audience engines)
 │   └── @platform/*-ui       # React component packages
 └── infra/               # IaC (AWS CDK or Terraform)
 ```
@@ -71,6 +73,10 @@ Transport: SSE (not WebSocket) — strictly server-to-client. Product services c
 ### Template Service — Key API Decisions
 
 `POST /templates/render` accepts `template_id` (uuid) + `context` object → returns rendered `body_text` (SMS) or `subject` + `body_html` + `body_text` (email). Always renders `active_version` — returns `404` if `active_version IS NULL` or `status = disabled`. Merge tag syntax: `{{key}}` with dot-notation support. Missing tags → empty string + log. In-memory cache 30s TTL; `POST /templates/:id/disable` eagerly evicts cache. Email templates store pre-rendered HTML (Unlayer export) + Unlayer JSON (for re-editing); SMS templates store plain text. Two-table versioning: `templates` group + `template_versions`. **Call chain:** Automation Engine and Nurturing Engine workers call `POST /templates/render` first, then pass pre-rendered body to Messaging/Email Service — Messaging Service never calls Template Service. **Pending:** Automation Engine spec (Section 6) and Nurturing Engine spec need amendments to reflect this call chain.
+
+### Audience Engine — Key API Decisions
+
+Callers submit entity data (hybrid push model) — engine never calls product APIs. Named segments (versioned, draft/active/disabled) + inline one-offs. `POST /audiences/segments/:id/evaluate` (batch, caller-generated `snapshot_id`) → entity-ID-only snapshot, 48h TTL. `POST /audiences/evaluate` (inline, `snapshot: false` returns IDs directly; `snapshot: true` stores snapshot). `POST /audiences/segments/:id/check` (single entity, synchronous, no snapshot). Snapshot cleanup: per-snapshot BullMQ delayed job + hourly safety-net sweep. Membership check cache: full resolved segment keyed by `segment_id`, 30s TTL. Shared `@platform/filter-engine` package (pure functions, zero deps) used by both Automation Engine and Audience Engine — Automation Engine migration replaces `condition-evaluator.ts` with thin wrapper passing event object as entity. Extended temporal operators: `within_last`, `not_within_last`, `before`, `after`, `date_range` (Audience Engine only). `@platform/audience-ui`: `<SegmentBuilder fields onSelect onFetchEntities? />` + `<AudiencePreview segmentId />`.
 
 ### Messaging Service — Key API Decisions
 
@@ -96,7 +102,7 @@ Transport: SSE (not WebSocket) — strictly server-to-client. Product services c
 | AI | Claude Sonnet 4.6 (complex tasks) / Haiku 4.5 (high-volume) |
 | Ads APIs | Google Ads API, Meta Marketing API |
 | Event bus | AWS EventBridge |
-| Job queue | BullMQ (Redis) — used by Automation Engine and Nurturing Engine for action dispatch and delayed step scheduling; Notification Service for TTL cleanup |
+| Job queue | BullMQ (Redis) — used by Automation Engine and Nurturing Engine for action dispatch and delayed step scheduling; Notification Service for TTL cleanup; Audience Engine for snapshot cleanup |
 | Infra | AWS us-east-1 (ECS Fargate, RDS, S3, CloudFront) |
 | Monitoring | Datadog (APM, structured logs) |
 | Monorepo | Turborepo |
