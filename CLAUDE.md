@@ -10,6 +10,10 @@ This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-
 
 - `docs/00-prd-1.md` — Full PRD (v1.0, March 2026). Authoritative source for product decisions.
 - `docs/01-platform-arch-design.md` — Platform architecture design (Draft, March 2026). Authoritative source for technical decisions.
+- `docs/superpowers/specs/` — Component-level design specs (naming: `YYYY-MM-DD-{component}-design.md`). Authoritative for their named component once status is **Approved**.
+  - `2026-03-24-automation-engine-design.md` — **Approved**
+  - `2026-03-25-nurturing-engine-design.md` — Draft
+  - `2026-03-25-messaging-service-design.md` — Draft
 
 ## Architecture
 
@@ -58,6 +62,10 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 
 **Sync — REST** for queries and immediate commands (e.g. `POST /templates/render`, `POST /messages/send`, `POST /ai/complete`).
 
+### Messaging Service — Key API Decisions
+
+`POST /messages/send` accepts `template` (string) + `context`, or pre-rendered `body`. Callers embed the template string inline — the Messaging Service does not store templates by ID. Duplicate `dedup_key` returns `200` with the original `message_id` (not `409`). Events published: `inbound_message.received` (includes `message_type`: `normal`|`stop`|`unstop`), `message.delivered`, `message.failed`, `opt_out.received`, `opt_out.removed`.
+
 ### Golden Rules (from arch doc)
 
 1. Each service owns its DB schema — no cross-service table reads, all access through APIs or events.
@@ -78,6 +86,7 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 | AI | Claude Sonnet 4.6 (complex tasks) / Haiku 4.5 (high-volume) |
 | Ads APIs | Google Ads API, Meta Marketing API |
 | Event bus | AWS EventBridge |
+| Job queue | BullMQ (Redis) — used by Automation Engine and Nurturing Engine for action dispatch and delayed step scheduling |
 | Infra | AWS us-east-1 (ECS Fargate, RDS, S3, CloudFront) |
 | Monitoring | Datadog (APM, structured logs) |
 | Monorepo | Turborepo |
