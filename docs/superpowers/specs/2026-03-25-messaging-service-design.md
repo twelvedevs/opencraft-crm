@@ -73,7 +73,7 @@ Automation Engine / Nurturing Engine / Conversation Service
 POST /messages/send
 ```
 
-Request body (one of `from_number` or `location_id`+`channel`; one of `template_id`+`context` or `body`):
+Request body (one of `from_number` or `location_id`+`channel`; one of `template`+`context` or `body`):
 
 ```json
 {
@@ -81,13 +81,15 @@ Request body (one of `from_number` or `location_id`+`channel`; one of `template_
   "from_number": "+15559876543",
   "location_id": "uuid",
   "channel": "google",
-  "template_id": "welcome-sms-v2",
+  "template": "Hi {{first_name}}, your free exam at {{location_name}} is ready to book.",
   "context": { "first_name": "Sara", "location_name": "North Austin" },
   "body": "Hi Sara, ...",
   "media_url": "https://example.com/image.jpg",
   "dedup_key": "evt-abc-sms-1"
 }
 ```
+
+Callers (Automation Engine, Nurturing Engine) embed the template string directly in their rule or sequence definitions. The Messaging Service does not store or look up templates by ID.
 
 Responses:
 - `200` — `{ "message_id": "uuid", "status": "queued" }` — accepted and sent to Twilio
@@ -162,7 +164,7 @@ POST /messages/send
       if location_id + channel → query messaging_numbers
       number not found or inactive → return 422
   → render body:
-      if template_id + context → inline {{merge_tag}} substitution
+      if template + context → inline {{merge_tag}} substitution
       if body → use as-is
   → check rate limiter (Redis token bucket keyed by from_number)
       throttled → return 429 with Retry-After header
@@ -179,16 +181,19 @@ POST /messages/send
 POST /webhooks/twilio/inbound
   → validate X-Twilio-Signature → 403 if invalid
   → parse Twilio params (From, To, Body, MediaUrl0..N)
+  → INSERT messaging_messages (direction: 'inbound', status: 'received')
   → check if body matches STOP variants
       (STOP, STOPALL, UNSUBSCRIBE, CANCEL, END, QUIT — case-insensitive, trim whitespace)
       → INSERT messaging_opt_outs (source: 'stop_reply')
       → publish opt_out.received to EventBridge
   → check if body matches UNSTOP/START variants
       → DELETE from messaging_opt_outs
-  → INSERT messaging_messages (direction: 'inbound', status: 'received')
+      → publish opt_out.removed to EventBridge
   → publish inbound_message.received to EventBridge
   → return 200 with empty TwiML response (no auto-reply)
 ```
+
+Message insert occurs before opt-out processing so every inbound SMS is recorded regardless of subsequent failures. The `inbound_message.received` event is published for all inbound messages, including STOP/UNSTOP — Conversation Service records the exchange in the thread.
 
 ---
 
@@ -200,11 +205,13 @@ POST /webhooks/twilio/status
   → parse MessageSid, MessageStatus, ErrorCode, ErrorMessage
   → lookup messaging_messages by twilio_sid
   → UPDATE status:
+      'queued' / 'sending' / 'sent' → update status field, no event emitted
       'delivered' → update status, set delivered_at
       'failed' / 'undelivered' → update status, set error_code, error_message
   → publish to EventBridge:
       delivered → message.delivered
       failed    → message.failed
+      (intermediate statuses update DB only — no EventBridge event)
 ```
 
 ---
@@ -214,10 +221,11 @@ POST /webhooks/twilio/status
 Per-number Redis token bucket for 10DLC compliance:
 
 - **Key:** `rate_limit:msg:{from_number}`
-- **Capacity:** 1 token
-- **Refill rate:** 1 token per second
+- **Capacity:** configurable per number (default: 3 tokens for 10DLC registered numbers; 1 token for unregistered long codes)
+- **Refill rate:** matches capacity per second (e.g. 3 tokens/second for registered 10DLC)
 - **Implementation:** Lua script (atomic check-and-consume) to avoid race conditions across service instances
 - **On throttle:** return `429` with `Retry-After: 1` — callers (Automation Engine, Nurturing Engine) already have BullMQ retry semantics and will retry automatically
+- **Configuration:** stored on the `messaging_numbers` row as `rate_limit_mps integer NOT NULL DEFAULT 3`
 
 No BullMQ in the Messaging Service — sends are synchronous. Rate limit enforcement is Redis-only.
 
@@ -246,6 +254,7 @@ SMS templates are short strings (160 chars for single SMS, up to 1600 for concat
 | `message.delivered` | Twilio status callback — delivered | `message_id`, `twilio_sid`, `to_number`, `from_number`, `delivered_at` |
 | `message.failed` | Twilio status callback — failed | `message_id`, `twilio_sid`, `to_number`, `from_number`, `error_code`, `error_message` |
 | `opt_out.received` | STOP reply detected | `phone_number`, `opted_out_at`, `source: 'stop_reply'` |
+| `opt_out.removed` | UNSTOP/START reply detected | `phone_number`, `removed_at` |
 
 **Subscribed by Messaging Service:** None.
 
@@ -257,6 +266,7 @@ SMS templates are short strings (160 chars for single SMS, up to 1600 for concat
 | `message.delivered` | Conversation Service, Analytics |
 | `message.failed` | Automation Engine |
 | `opt_out.received` | Lead Service, Nurturing Engine |
+| `opt_out.removed` | Lead Service, Nurturing Engine |
 
 ---
 
@@ -265,13 +275,14 @@ SMS templates are short strings (160 chars for single SMS, up to 1600 for concat
 ```sql
 -- Phone number pool: maps location+channel to a Twilio number
 messaging_numbers (
-  id            uuid PRIMARY KEY,
-  location_id   uuid NOT NULL,
-  channel       text NOT NULL,          -- 'google', 'facebook', 'sms_inbox', 'referral', etc.
-  phone_number  text NOT NULL UNIQUE,   -- E.164 format
-  friendly_name text,
-  active        boolean NOT NULL DEFAULT true,
-  created_at    timestamptz NOT NULL DEFAULT now(),
+  id               uuid PRIMARY KEY,
+  location_id      uuid NOT NULL,
+  channel          text NOT NULL,             -- 'google', 'facebook', 'sms_inbox', 'referral', etc.
+  phone_number     text NOT NULL UNIQUE,      -- E.164 format
+  friendly_name    text,
+  active           boolean NOT NULL DEFAULT true,
+  rate_limit_mps   integer NOT NULL DEFAULT 3, -- messages per second cap (1 for unregistered, 3+ for 10DLC)
+  created_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (location_id, channel)
 )
 
@@ -373,9 +384,10 @@ Twilio SDK mocked via HTTP interceptor:
 - Status callback delivered → DB status updated, `message.delivered` published
 - Status callback failed → DB status + error fields updated, `message.failed` published
 - Invalid Twilio signature on webhook → 403, no DB writes, no events published
-- Inbound STOP → opt-out inserted, `opt_out.received` published
-- Inbound UNSTOP → opt-out removed
+- Inbound STOP → message inserted first, opt-out inserted, `opt_out.received` published, `inbound_message.received` published
+- Inbound UNSTOP → message inserted first, opt-out removed, `opt_out.removed` published, `inbound_message.received` published
 - Inbound normal message → message inserted, `inbound_message.received` published
+- Status callback intermediate (`sent`) → DB status updated, no EventBridge event
 
 ### Contract Tests
 
@@ -383,7 +395,7 @@ Twilio SDK mocked via HTTP interceptor:
 - `messages.create` payload: `to`, `from`, `body`, `mediaUrl`, `statusCallback` URL present and correctly formatted
 
 **Events published — verify against `@ortho/event-bus` schema:**
-- `inbound_message.received`, `message.delivered`, `message.failed`, `opt_out.received` all match declared schema
+- `inbound_message.received`, `message.delivered`, `message.failed`, `opt_out.received`, `opt_out.removed` all match declared schema
 
 ---
 
@@ -393,7 +405,7 @@ Twilio SDK mocked via HTTP interceptor:
 |---|---|---|
 | Rate limiting mechanism | Redis token bucket (no BullMQ) | Callers already own retry/delay logic (Automation Engine, Nurturing Engine). Adding BullMQ creates double-retry complexity and makes `POST /messages/send` async, complicating dedup. Redis token bucket is sufficient for 10DLC compliance at expected volumes. |
 | Template rendering | Inline in Messaging Service | SMS templates are short strings with simple `{{merge_tag}}` substitution. Delegating to Template Service adds a synchronous dependency on every send for no benefit at this complexity level. |
-| Inbound routing | EventBridge `inbound_message.received` | Platform service must not call product-layer services directly. Conversation Service subscribes and enriches with lead/conversation context before emitting the arch doc's `message.received`. |
+| Inbound routing | EventBridge `inbound_message.received` | Platform service must not call product-layer services directly. This service emits `inbound_message.received`; Conversation Service (product layer) subscribes, enriches with lead/conversation context, and emits its own downstream `message.received` event. |
 | Opt-out enforcement | Checked on every `POST /messages/send` | Callers do not manage opt-out state. Single enforcement point in the Messaging Service prevents leakage across Automation Engine, Nurturing Engine, and Conversation Service. |
 | Dedup | Unique `dedup_key` constraint in DB | Handles at-least-once delivery from BullMQ callers safely. 409 is a silent no-op — callers treat it as success. |
 | Status callbacks | Twilio push → DB update → EventBridge | Polling Twilio for delivery status would be wasteful. Twilio pushes callbacks to the service; the service updates the record and emits events downstream. |
