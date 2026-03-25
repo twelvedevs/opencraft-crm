@@ -65,6 +65,8 @@ created_at   timestamptz NOT NULL DEFAULT now()
 updated_at   timestamptz NOT NULL DEFAULT now()
 ```
 
+**Indexes:** `INDEX (created_by)` — supports `GET /reporting/report-configs` filtered by caller. `INDEX (created_at DESC)` — supports time-ordered listing for marketing_manager all-configs view.
+
 ### 2.3 `report_schedules`
 
 Delivery schedule per saved report config.
@@ -101,6 +103,8 @@ completed_at        timestamptz
 recipient_emails    text[]
 ```
 
+**Indexes:** `INDEX (report_config_id, started_at DESC)` — supports `GET /reporting/runs?config_id=` with time-ordered results.
+
 ---
 
 ## 3. Metrics Computation
@@ -119,6 +123,10 @@ On each dashboard or metric request, `metrics-calculator.ts` fans out parallel c
 | Campaign stats | `GET /analytics/metrics/campaigns` | Campaign analytics report |
 
 All calls pass through the same `period`, `location_id[]`, and `granularity` params received from the caller. Location access control is enforced before these calls — the Analytics Service receives only the location IDs the caller is permitted to see.
+
+**`locations[] = []` handling:** When the caller's JWT has `locations[] = []` (marketing_staff or marketing_manager, meaning all-locations access), the Reporting Service omits the `location_id` parameter entirely when calling Analytics Service endpoints — it does NOT pass an empty array. Passing an empty array would return zero results.
+
+**Service-to-service auth:** All calls to Analytics Service — both synchronous (dashboard requests) and asynchronous (scheduled report jobs) — use a dedicated Identity Service API key stored in the `ANALYTICS_API_KEY` environment variable. This key is created via the Identity Service API key management with permissions scoped to analytics read. The Reporting Service includes it as `Authorization: Bearer ak_<key>`. The Analytics Service validates `ak_`-prefixed tokens via `POST /identity/api-keys/validate` (VPC-internal). See Section 8 for the required Analytics Service spec amendment.
 
 ### 3.2 Computed KPIs
 
@@ -174,9 +182,11 @@ GET /reporting/metrics/channel-performance
     → leads, funnel rates, and cost metrics broken down by channel
 
 GET /reporting/metrics/location-comparison
-    → all computed KPIs for each location, sorted by any requested metric
+    → per-location KPIs + network_average object (always computed across ALL locations,
+      regardless of caller's location filter — used for benchmark comparison)
 
 GET /reporting/metrics/coordinator-performance
+    ?coordinator_id=...   (optional)
     → per-coordinator: stage_transitions, exams_booked, conversions, avg_response_time_seconds
 
 GET /reporting/metrics/campaign-analytics
@@ -185,17 +195,29 @@ GET /reporting/metrics/campaign-analytics
 
 All metric endpoints accept `period`, `location_id[]`, `granularity`. Metric-specific additional filters (e.g. `channel`, `coordinator_id`) are passed through to Analytics Service after access-control filtering.
 
+**Coordinator performance access control:** A `call_center_agent` caller's `coordinator_id` filter is overwritten with their own JWT `sub` — agents may only view their own metrics. `call_center_manager` and marketing roles may pass any `coordinator_id` within their permitted locations.
+
 ### 4.2 Report Configs
 
 ```
-GET    /reporting/report-configs              → list caller's saved configs
+GET    /reporting/report-configs              → list saved configs
+                                               ?all=true  (marketing_manager+ only)
+                                                          returns all configs system-wide
 POST   /reporting/report-configs              → create config
 PUT    /reporting/report-configs/:id          → update (own config, or marketing_manager+)
 DELETE /reporting/report-configs/:id          → delete (cascades to schedules)
+                                               marketing_manager+ may delete any config
 POST   /reporting/report-configs/:id/generate → on-demand generate
                                                ?format=pdf|csv (default: pdf)
                                                → { run_id }
 ```
+
+**Role-based access:**
+- All roles may create report configs. Location-scoped roles (`call_center_agent`, `call_center_manager`) may only create configs whose `parameters.location_ids` are within their permitted locations.
+- `GET /reporting/report-configs` returns only the caller's own configs unless `all=true` is passed by a `marketing_manager+`.
+- `marketing_manager+` may update and delete any config regardless of `created_by`.
+
+**On-demand generate polling:** The endpoint enqueues the job and returns `{ run_id }` immediately. The caller polls `GET /reporting/runs/:id` at a recommended interval of 2s. If the run has not reached `done` or `failed` within 5 minutes, the frontend should surface a timeout message. Alternatively, the run completion can be pushed via Notification Service — the `generate-report` job calls `POST /notifications/publish` with the requesting user's channel on completion, eliminating the need to poll.
 
 ### 4.3 Schedules
 
@@ -209,21 +231,27 @@ DELETE /reporting/schedules/:id               → delete → removes BullMQ job
 ### 4.4 Report Runs
 
 ```
-GET  /reporting/runs                          → run history; filterable by ?config_id=
-GET  /reporting/runs/:id                      → single run status
-GET  /reporting/runs/:id/download             → 302 redirect to fresh Media Service presigned URL
+GET   /reporting/runs                          → run history; filterable by ?config_id=
+GET   /reporting/runs/:id                      → single run status
+GET   /reporting/runs/:id/download             → 302 redirect to fresh Media Service presigned URL
+POST  /reporting/runs/:id/retry                → re-enqueue a failed run as a new one-off job
+                                                requires run.status = 'failed'
+                                                → { run_id }  (new run_id)
 ```
 
-`/download` calls `GET /media/internal/:file_id/signed-url` on each request — never stores presigned URLs, respecting the 15-min TTL.
+`/download` calls `GET /media/internal/:file_id/signed-url` on each request — never stores presigned URLs, respecting the 15-min TTL. The `/download` endpoint requires a valid CRM user JWT; all report recipients must be CRM users (v1 scope). `/retry` creates a new `report_run` row and enqueues a fresh `generate-report` job — it does not mutate the failed run row.
 
 ### 4.5 Configuration
 
 ```
-GET  /reporting/config/revenue                → list all location_revenue_config rows
+GET  /reporting/config/revenue                → list location_revenue_config rows
+                                               scoped to caller's permitted locations
+                                               (marketing_manager+ sees all)
 PUT  /reporting/config/revenue/:location_id   → set avg_contract_value
                                                requires marketing_manager role
-                                               → 404 if location_id unrecognized
 ```
+
+`location_id` on the PUT is treated as an opaque string — the Reporting Service does not validate whether it corresponds to a real location. Invalid location IDs produce no harm (a revenue config for a non-existent location is never returned in metric queries). Location validation, if required, is the CRM API Gateway's responsibility.
 
 ---
 
@@ -239,24 +267,39 @@ On-demand and scheduled report runs share the same pipeline, implemented in `rep
 3. Fetch metrics via metrics-cache.ts (5-min cache applies)
 4. Generate document:
    ├── PDF → render Handlebars template with metrics data
-   │         → Puppeteer headless Chromium → Buffer
+   │         → Puppeteer headless Chromium → Buffer (see Section 5.2 for crash handling)
    └── CSV → fast-csv serialize metrics rows → Buffer
 5. Upload to S3 via Media Service internal endpoint:
-   POST /media/internal/store { buffer, filename, content_type, location_id: null }
+   POST /media/internal/store {
+     buffer, filename, content_type,
+     location_id: parameters.location_ids[0] if exactly one location, else null
+   }
    → { file_id, url }
 6. Update report_run: status=done, media_file_id, completed_at
 7. If recipient_emails present:
    POST /emails/send {
      to: recipient_emails,
      subject: "<ReportName> — <period>",
-     body_html: "<p>Your report is ready: <a href='{presigned_url}'>Download</a></p>"
+     body_html: "<p>Your report is ready:
+       <a href='{CRM_BASE_URL}/reporting/runs/{run_id}/download'>Download</a></p>"
    }
-8. On any failure: update report_run: status=failed, error_message
+   -- Link points to /reporting/runs/:id/download (the 302 endpoint) NOT to a presigned URL.
+   -- Presigned URLs expire in 15 minutes; the /download endpoint fetches a fresh one on each click.
+   -- All recipients must be CRM users (their JWT is required to access /download).
+8. If recipient_emails and run is for on-demand request:
+   POST /notifications/publish { channel: 'user:{triggered_by}', ... }  (notify requesting user)
+9. On any failure: update report_run: status=failed, error_message
 ```
 
-### 5.2 HTML Templates
+### 5.2 HTML Templates and Puppeteer Crash Handling
 
 Five Handlebars templates in `templates/` — one per report type. Bundled into the Docker image at build time. Puppeteer launches headless Chromium, renders the compiled template with injected metrics data, and exports PDF. No runtime template fetch.
+
+**Puppeteer safety rules (enforced in `pdf-generator.ts`):**
+- A new browser instance is launched per job — no shared browser across concurrent jobs. One Chromium crash cannot affect other in-flight generations.
+- `page.setDefaultTimeout(30_000)` set immediately after page creation — prevents indefinite hangs if Chromium stalls.
+- Browser is closed in a `finally` block regardless of success or failure — prevents zombie Chromium processes.
+- The ECS task memory allocation must account for Chromium's ~150MB baseline footprint in addition to Node.js heap. Recommended minimum: 512MB per task.
 
 ### 5.3 Media Service Integration
 
@@ -299,6 +342,13 @@ monthly → 0 {hour_utc} {day_of_month} * *
 - `DELETE /reporting/schedules/:id` → set `active=false` in DB → `queue.removeRepeatable(jobId)`
 - `PUT /reporting/schedules/:id` with `{ active: false }` → same BullMQ removal; DB row retained for history
 
+**Startup reconciliation (Redis flush recovery):** On service startup, `schedule-manager.ts` runs a reconciliation pass:
+1. Query all `active = true` rows from `report_schedules`
+2. Fetch the list of registered repeatable jobs from BullMQ via `queue.getRepeatableJobs()`
+3. For any schedule row whose `jobId` is absent from the BullMQ list, re-register the repeatable job
+
+This recovers silently lost schedules after Redis flushes, restarts, or failovers. It is a read-then-conditional-write operation — idempotent and safe to run on every deploy.
+
 ### 6.2 Scheduled Job Handler
 
 When a repeatable job fires:
@@ -317,11 +367,12 @@ The repeatable job itself is lightweight. The actual PDF/CSV work runs in its ow
 
 | Dependency | Type | Notes |
 |---|---|---|
-| Analytics Service | REST consumer | All metric endpoint families + generic DSL. Reporting Service fans out parallel calls per dashboard request. |
-| Media Service | REST (internal) | `POST /media/internal/store` to upload reports. `GET /media/internal/:file_id/signed-url` on each download. |
-| Email Service | REST | `POST /emails/send` for scheduled and on-demand report delivery. No template_id — plain HTML body with download link. |
-| Identity Service | JWT validation | JWT required on all endpoints via `@ortho/auth-middleware`. |
-| BullMQ / Redis | Job queue | `reporting-jobs` queue for report generation. Repeatable jobs for scheduled delivery. |
+| Analytics Service | REST consumer | All metric endpoint families + generic DSL. Authenticated via `ANALYTICS_API_KEY` Identity Service API key (not user JWT) — applies to both synchronous and scheduled calls. Reporting Service fans out parallel calls per dashboard request. |
+| Media Service | REST (internal) | `POST /media/internal/store` to upload reports. `GET /media/internal/:file_id/signed-url` on each `/download` request. Uses `INTERNAL_API_SECRET` header. |
+| Email Service | REST | `POST /emails/send` for report delivery. Plain HTML body with `/reporting/runs/:id/download` link — no presigned URL, no template_id. |
+| Notification Service | REST | `POST /notifications/publish` to notify requesting user when on-demand report completes. |
+| Identity Service | JWT validation + API key | JWT required on all inbound endpoints. `ANALYTICS_API_KEY` created via Identity Service for outbound Analytics Service calls. |
+| BullMQ / Redis | Job queue | `reporting-jobs` queue for report generation. Repeatable jobs for scheduled delivery. Startup reconciliation on Redis flush. |
 
 ---
 
@@ -329,13 +380,14 @@ The repeatable job itself is lightweight. The actual PDF/CSV work runs in its ow
 
 ### 8.1 Pipeline Engine Spec
 
-Add three fields to the `lead.stage_changed` event payload:
+The `lead.stage_changed` event already carries a `triggered_by` field (the user UUID of the staff member who triggered the transition; `null` for automated transitions). No new `coordinator_id` field is needed — the Analytics Service amendment (Section 8.2) reads `triggered_by` as the coordinator dimension.
 
-1. `coordinator_id` — ID of the staff member who triggered the transition; `null` for automated transitions (timeout, Automation Engine)
-2. `response_time_seconds` — seconds elapsed from `lead.created_at` to this transition; populated **only** when `stage_to = 'contacted'`, `null` otherwise
-3. `time_in_stage_seconds` — seconds spent in the previous stage; populated on every transition except the first enrollment into a pipeline
+Add two new fields to the `lead.stage_changed` event payload:
 
-`coordinator_id` should also be added to the `lead.converted` payload so conversions can be attributed to coordinators in `metrics_coordinators_daily`.
+1. `response_time_seconds` — seconds elapsed from `lead.created_at` to this transition; populated **only** when `stage_to = 'contacted'`, `null` otherwise
+2. `time_in_stage_seconds` — seconds spent in the previous stage; populated on every transition except the first enrollment into a pipeline
+
+`triggered_by` should also be confirmed present in the `lead.converted` payload so conversions can be attributed to coordinators in `metrics_coordinators_daily`.
 
 ### 8.2 Analytics Service Spec
 
@@ -343,21 +395,38 @@ Add three fields to the `lead.stage_changed` event payload:
 ```sql
 date                       date           NOT NULL
 location_id                text           NOT NULL
-coordinator_id             text           NOT NULL
+coordinator_id             text           NOT NULL   -- sourced from triggered_by on lead.stage_changed
 stage_transitions          int            NOT NULL DEFAULT 0
-exams_booked               int            NOT NULL DEFAULT 0  -- stage_to = 'exam_scheduled'
-conversions                int            NOT NULL DEFAULT 0  -- from lead.converted
-avg_response_time_seconds  numeric(10,2)            -- rolling avg, updated when stage_to = 'contacted'
+exams_booked               int            NOT NULL DEFAULT 0   -- stage_to = 'exam_scheduled'
+conversions                int            NOT NULL DEFAULT 0   -- from lead.converted
+response_time_count        int            NOT NULL DEFAULT 0   -- count of 'contacted' transitions
+avg_response_time_seconds  numeric(10,2)            -- correctly maintained via count column
 UNIQUE (date, location_id, coordinator_id)
 ```
 
-**Update `StageChangedHandler`** to extract `coordinator_id`, `response_time_seconds`, `time_in_stage_seconds` from payload and populate `metrics_coordinators_daily`.
+The `avg_response_time_seconds` upsert uses `response_time_count` to maintain a correct incremental mean:
+```sql
+ON CONFLICT (date, location_id, coordinator_id) DO UPDATE SET
+  response_time_count = metrics_coordinators_daily.response_time_count + 1,
+  avg_response_time_seconds = (
+    COALESCE(metrics_coordinators_daily.avg_response_time_seconds, 0)
+      * metrics_coordinators_daily.response_time_count
+      + EXCLUDED.avg_response_time_seconds
+  ) / (metrics_coordinators_daily.response_time_count + 1)
+```
+This update only executes when the incoming `lead.stage_changed` event has `stage_to = 'contacted'` and non-null `response_time_seconds`.
 
-**Update `LeadConvertedHandler`** to extract `coordinator_id` and increment `metrics_coordinators_daily.conversions`.
+**Update `StageChangedHandler`** to extract `triggered_by` (as coordinator_id), `response_time_seconds`, `time_in_stage_seconds` from payload and populate `metrics_coordinators_daily`. Skip coordinator rollup if `triggered_by` is null (automated transitions).
+
+**Update `LeadConvertedHandler`** to extract `triggered_by` from payload and increment `metrics_coordinators_daily.conversions`.
 
 **Add `GET /analytics/metrics/coordinators` endpoint** — same shared `period`/`granularity`/`location_id` params; additional filter: `coordinator_id`.
 
-### 8.3 Arch Doc
+### 8.3 Analytics Service Spec (Auth Amendment)
+
+The Analytics Service currently accepts only Identity Service JWTs. Add support for Identity Service API key tokens (`ak_`-prefixed) in the Analytics Service's `@ortho/auth-middleware` configuration. When the `Authorization: Bearer` value begins with `ak_`, validate via `POST /identity/api-keys/validate` (VPC-internal) instead of JWT signature verification. This enables service-to-service calls from Reporting Service (and potentially other consumers) without requiring a user session.
+
+### 8.4 Arch Doc
 
 1. Remove Reporting Service from `lead.converted` EventBridge subscribers — Reporting Service does not subscribe to any events.
 2. Add `GET /reporting/*` → Analytics Service to the REST call table in Section 3.2.
