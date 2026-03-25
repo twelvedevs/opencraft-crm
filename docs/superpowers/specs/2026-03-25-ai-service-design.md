@@ -29,6 +29,8 @@ The AI Service (`apps/platform/ai`) is a **thin Claude API gateway**. It is full
 
 **No events published.** Purely request/response — no calls to other services, no EventBridge.
 
+> **Note:** The platform architecture doc (Section 2.1) describes the AI Service as including "streaming" and "usage metering." Both are out of scope for this design (streaming not needed; metering handled by Arize Phoenix). The arch doc requires an amendment to remove those two capabilities from the AI Service row.
+
 ---
 
 ## 2. Architecture
@@ -103,9 +105,12 @@ The single endpoint. Internal service-to-service — no JWT auth required (same 
 ```
 
 **Error responses:**
-- `400` — missing `prompt_id` or `context`
+
+All errors return `{ "error": "<message>" }`.
+
+- `400` — missing `prompt_id`; missing `context`; `context` is not an object (`null`, string, array, etc. all rejected — `context: {}` is valid); `model` present but not `"haiku"` or `"sonnet"` (invalid model string falls through to 400, not silently ignored)
 - `404` — `prompt_id` not found in registry
-- `503` — Claude API error — caller handles retry (BullMQ backoff in Automation Engine; direct retry in Conversation Service)
+- `503` — Claude API error (includes 429 rate-limit and 529 overload from Anthropic API) — caller handles retry (BullMQ backoff in Automation Engine; direct retry in Conversation Service)
 
 No `dedup_key` field on the request. Idempotency is handled by the content hash cache — two calls with identical `(prompt_id, context, resolved_model)` within 5 minutes return the same response from L2 cache.
 
@@ -125,13 +130,15 @@ interface PromptDefinition {
 }
 ```
 
-**Context injection** uses `{{key}}` syntax with dot-notation support (`{{lead.treatment_interest}}`), identical to the Template Service merge tag resolver. Missing keys → replaced with empty string + Datadog warning log. No throw.
+**Context injection** uses `{{key}}` syntax with dot-notation support (`{{lead.treatment_interest}}`), identical to the Template Service merge tag resolver. Missing keys → replaced with empty string + structured log warning via `@ortho/logger`. No throw.
 
 **Model resolution order:** explicit `model` field in request → prompt's `defaultModel`.
 
 **Model ID mapping:**
-- `"haiku"` → `claude-haiku-4-5-20251001`
-- `"sonnet"` → `claude-sonnet-4-6`
+- `"haiku"` → `claude-haiku-4-5-20251001` (Haiku 4.5 — the `-20251001` date suffix is part of the Anthropic API model ID)
+- `"sonnet"` → `claude-sonnet-4-6` (Sonnet 4.6 — no date suffix; this is the stable versioned ID for this model family)
+
+The asymmetry in ID format is intentional — it reflects the actual Anthropic API model identifiers.
 
 ### Registered Prompts
 
@@ -172,17 +179,21 @@ POST /ai/complete
            → return (cached: false)
 ```
 
-The `ON CONFLICT` upsert handles the concurrent miss race — two ECS instances that simultaneously miss both cache layers both call Claude, but only one row is written; the second upserts harmlessly with no error.
+The `ON CONFLICT` upsert handles the concurrent miss race — two ECS instances that simultaneously miss both cache layers both call Claude, but only one row is written; the second upserts harmlessly. Each caller always receives the response from its own Claude call (not the value stored in L2) — the L2 write is fire-and-forget after the Claude response is returned. Because LLM responses are non-deterministic, the two callers may receive slightly different `text` values. This is acceptable: the cache goal is cost efficiency and burst dedup, not strict response consistency. Once either response is written to L2, all subsequent callers within the TTL window receive that cached response.
+
+**L1 eviction policy:** LRU with a maximum of 500 entries. TTL expiry (60s) is the primary eviction trigger; the 500-entry cap prevents unbounded memory growth under high load with many distinct cache keys.
 
 ### Lazy Cleanup
 
 On every L2 write: `DELETE FROM ai_completions WHERE expires_at < NOW() - INTERVAL '1 hour'`
 
-Write frequency is low enough that inline cleanup is sufficient. No BullMQ job needed.
+The 1-hour grace period beyond the 5-minute TTL is intentional — it avoids deleting rows that are technically expired but may still be race-read by a concurrent request that computed the cache key just before the DELETE ran. Expired rows are already excluded by the L2 SELECT (`expires_at > NOW()`), so they do not serve stale responses; the grace period simply avoids a cleanup/read race. Write frequency is low enough that inline cleanup is sufficient. No BullMQ job needed.
 
 ---
 
 ## 6. Data Model — `platform_ai`
+
+`ai_completions` is a **response cache only** — not an audit log. It does not store the original context, rendered prompt, or token counts. Those are captured by Arize Phoenix. Do not add context or token columns here.
 
 ```sql
 ai_completions (
@@ -290,7 +301,7 @@ Pure function coverage — no external dependencies:
 - **Model resolution:**
   - Explicit `model` field in request overrides prompt `defaultModel`
   - Absent `model` field uses prompt `defaultModel`
-  - `"haiku"` maps to `claude-haiku-4-5-20251001`
+  - `"haiku"` maps to `claude-haiku-4-5-20251001` (the `-20251001` date suffix is part of the Anthropic API model ID)
   - `"sonnet"` maps to `claude-sonnet-4-6`
 
 ### Integration Tests (Vitest + real Postgres, Claude mocked via HTTP interceptor)
@@ -304,6 +315,9 @@ Pure function coverage — no external dependencies:
 - Expired L2 entry (expires_at in past) → Claude called again, new entry written
 - Concurrent identical requests → upsert handles race, no unique constraint error
 - Claude returns 5xx → service returns 503
+- Claude returns 429 (rate limit) → service returns 503
+- Claude returns 529 (overload) → service returns 503
+- Invalid `model` value (e.g. `"gpt-4"`) → 400
 - Lazy cleanup: write with expired rows present → expired rows deleted after write
 
 ### Contract Tests
