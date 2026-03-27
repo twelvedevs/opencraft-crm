@@ -1,0 +1,59 @@
+## Codebase Patterns
+- Tests use Vitest with `vi.fn()` for mocks; import from `vitest` directly (not jest)
+- All imports use `.js` extension (ESM module resolution, even for `.ts` source files)
+- `RulesRepository` lives in `src/repositories/rules.repository.ts` — extend it in place, do not create new repo files
+- `Date.now()` can be spied on with `vi.spyOn(Date, 'now')` to advance TTL in tests
+- TypeBox: use `Value.Check(schema, val)` for boolean validation; `Value.Errors(schema, val)` for error details (spread into array); import `Value` from `@sinclair/typebox/value`
+- EventBridge envelope: only `detail` field matters — all other envelope fields (id, source, time, region) are ignored
+- To mock a module in Vitest: use `vi.mock('../../src/services/condition-evaluator.js', () => ({ evaluate: vi.fn() }))` then `import { evaluate } from '...'` after the mock — hoisting handles the ordering
+---
+
+# Ralph Progress Log
+Started: Fri Mar 27 16:26:18 +03 2026
+---
+
+## 2026-03-27 - US-001
+- Implemented `ActiveRule` interface and `findActiveByEventType` query in `RulesRepository`
+- Created `src/services/rule-cache.ts` with TTL-based in-memory cache (Map<string, {rules, cachedAt}>)
+- Created `test/unit/rule-cache.test.ts` with 5 test cases (miss, hit, TTL expiry, invalidate, multi-key)
+- Files changed: `src/repositories/rules.repository.ts`, `src/services/rule-cache.ts`, `test/unit/rule-cache.test.ts`
+- **Learnings for future iterations:**
+  - `findActiveByEventType` JOINs on `rv.rule_id = r.id AND rv.version = r.active_version` — Knex join builder uses `.on().andOn()` chaining
+  - TTL check: `Date.now() - cachedAt < ttlMs` for valid, `>= ttlMs` for expired (strict inequalities)
+  - `vi.spyOn(Date, 'now').mockReturnValue(...)` works cleanly for advancing time in TTL tests
+---
+
+## 2026-03-27 - US-002
+- Created `src/events/inbound-event.ts`: `InboundEventSchema` (TypeBox), `InboundEvent` type, `ParseError` class, `parseEventBridgeMessage` function
+- Created `test/unit/inbound-event.test.ts` with 8 test cases covering all acceptance criteria
+- Files changed: `src/events/inbound-event.ts`, `test/unit/inbound-event.test.ts`
+- **Learnings for future iterations:**
+  - `Value.Check` + `Value.Errors` from `@sinclair/typebox/value` work cleanly for runtime validation
+  - `Type.Record(Type.String(), Type.Unknown())` is the correct TypeBox pattern for an open-ended payload object
+  - `ParseError` requires `readonly cause?: unknown` — set via constructor parameter and `super(message)` call
+  - The envelope check must verify `'detail' in envelope` (not just `envelope.detail !== undefined`) to be TypeScript-safe
+---
+
+## 2026-03-27 - US-003
+- Created `src/services/rule-matcher.ts`: `MatchedRule` interface + `RuleMatcher` class with `matchRules(event)` method
+- Created `test/unit/rule-matcher.test.ts` with 6 test cases covering all acceptance criteria
+- Files changed: `src/services/rule-matcher.ts`, `test/unit/rule-matcher.test.ts`
+- **Learnings for future iterations:**
+  - `vi.mock(path, factory)` + import after mock declaration — Vitest hoists `vi.mock` so order in file doesn't matter
+  - `randomUUID` from `node:crypto` is available in Node 24 with no extra deps
+  - Cast `event as Record<string, unknown>` when passing `InboundEvent` to `evaluate` — structurally compatible, TS-safe
+---
+
+## 2026-03-27 - US-004
+- Created `src/events/sqs-consumer.ts`: `SqsConsumer` class with `start()`, `stop()` (graceful drain via `pollDone` promise), and private `poll()` loop using `@aws-sdk/client-sqs`
+- Created `src/services/event-consumer.ts`: `ExecutionManagerPort` interface + `EventConsumer` class with `process(body)` — catches both `ParseError` and generic errors, logs and returns without throwing
+- Updated `src/index.ts`: wires `RulesRepository → RuleCache → RuleMatcher → EventConsumer → SqsConsumer`; skips `sqsConsumer.start()` if `SQS_QUEUE_URL` not set; registers `SIGTERM` handler
+- Created `test/unit/event-consumer.test.ts`: 5 tests covering all acceptance criteria (valid body, two rules, no rules, ParseError, generic Error)
+- Added `@aws-sdk/client-sqs: ^3.0.0` to dependencies and ran `npm install`
+- Files changed: `package.json`, `package-lock.json`, `src/index.ts`, `src/events/sqs-consumer.ts`, `src/services/event-consumer.ts`, `test/unit/event-consumer.test.ts`
+- **Learnings for future iterations:**
+  - Graceful SQS stop pattern: `start()` sets `this.pollDone = this.poll()`, `stop()` sets `running = false` then `await this.pollDone`
+  - To partially mock a module (keep some exports real, mock others): use `vi.mock(path, async (importOriginal) => { const actual = await importOriginal(); return { ...actual, targetFn: vi.fn() }; })`
+  - `SQSClient({})` uses default credential chain — no explicit region/key config needed; ECS task role provides creds in prod
+  - Always delete SQS message even if `onMessage` throws — prevents poison-pill redelivery loops
+---
