@@ -20,6 +20,7 @@ import { createCallAiProcessor } from './services/action-workers/call-ai.worker.
 import { createCallWebhookProcessor } from './services/action-workers/call-webhook.worker.js';
 import { JobCanceller } from './services/job-canceller.js';
 import { createSecretsResolver } from './services/secrets-resolver.js';
+import executionRoutes from './routes/executions.js';
 
 const fastify = Fastify({ logger: true });
 
@@ -37,6 +38,7 @@ const jobCanceller = new JobCanceller(queue);
 const secretsResolver = createSecretsResolver();
 
 await fastify.register(rulesRoutes, { db, jobCanceller });
+await fastify.register(executionRoutes, { db });
 
 const port = parseInt(process.env['PORT'] ?? '3000', 10);
 
