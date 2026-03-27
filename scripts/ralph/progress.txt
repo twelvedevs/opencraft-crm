@@ -6,43 +6,10 @@
 - DOT_PATH_RE must be checked before TEMPLATE_TOKEN_RE since dot-paths won't contain `{{}}` but template strings might match path-like patterns
 - Use `Intl.DateTimeFormat` with `hourCycle: 'h23'` for timezone-aware time-of-day extraction; no third-party library needed
 - For active-hours tests: inject a fixed `now` Date using UTC-aligned timestamps so wall-clock time == UTC clock time; avoids test flakiness
+- TypeBox schemas use `import { Type } from '@sinclair/typebox'`; runtime checks use `import { Value } from '@sinclair/typebox/value'`
+- `RulesRepository` lives in `src/repositories/rules.repository.ts` — extend it for new query methods rather than creating a separate file
+- `Condition` type is in `src/services/condition-evaluator.ts`; `ActiveHoursConfig` is in `src/services/active-hours.ts`; `ExecutionContext` is in `src/services/field-interpolator.ts`
 
 # Ralph Progress Log
 Started: Fri Mar 27 16:08:49 +03 2026
----
-
-## 2026-03-27 - US-003
-- Implemented `src/services/active-hours.ts` with `ActiveHoursConfig` type and `computeDelay()` function
-- Uses `Intl.DateTimeFormat` with `hourCycle: 'h23'` to extract wall-clock time in any IANA timezone — no extra library
-- Handles non-midnight-crossing windows [start, end), midnight-crossing windows [start, 24h) ∪ [0, end), start===end (always open), and invalid/missing timezone (console.warn + UTC fallback)
-- Implemented `test/unit/active-hours.test.ts` with 16 tests covering all acceptance criteria including DST edge case (America/New_York spring-forward 2026-03-08)
-- Files changed: `src/services/active-hours.ts`, `test/unit/active-hours.test.ts`
-- **Learnings for future iterations:**
-  - `Intl.DateTimeFormat` with `hourCycle: 'h23'` returns hours 00–23 consistently; `hour12: false` alone can return 24 at midnight on some platforms
-  - For test determinism, use UTC-aligned `now` values (e.g. `new Date('2026-01-15T14:00:00Z')`) so UTC wall-clock == timezone wall-clock for UTC payload tests
-  - DST test: 2026-03-08T10:00:00Z = 6:00 AM EDT in America/New_York (after spring-forward at 07:00 UTC)
-  - All 71 tests pass (5 rule-validator + 15 field-interpolator + 35 condition-evaluator + 16 active-hours)
----
-
-## 2026-03-27 - US-002
-- Implemented `src/services/condition-evaluator.ts` with `LeafCondition`, `GroupCondition`, `NotCondition`, `Condition` types and `evaluate()` function
-- Implemented `test/unit/condition-evaluator.test.ts` with 35 tests covering all 11 leaf operators (truthy + falsy), AND, OR, NOT, nested 3-level grouping, missing field → false, null → true, dot-path field resolution
-- Files changed: `src/services/condition-evaluator.ts`, `test/unit/condition-evaluator.test.ts`
-- **Learnings for future iterations:**
-  - `isGroup`/`isNot` type guards cleanly separate branch logic from leaf evaluation
-  - Missing field (resolves to `undefined`) returns `false` for all comparison ops except `not_exists` — guard with `if (fieldValue === undefined || fieldValue === null) return false` at top of each case
-  - For `in`/`not_in`, operand is the array (`leaf.value`) and the field value is the element being checked — not the reverse
-  - Re-exporting `LeafCondition` type in tests with a type-import alias works fine under NodeNext; `type LeafCondition = import('...').LeafCondition` at bottom of file is valid
-  - All 55 tests pass (5 rule-validator + 15 field-interpolator + 35 condition-evaluator)
----
-
-## 2026-03-27 - US-001
-- Implemented `src/services/field-interpolator.ts` with `ExecutionContext` type, `resolveValue`, and `resolveParams`
-- Implemented `test/unit/field-interpolator.test.ts` with 15 tests covering all acceptance criteria
-- Files changed: `src/services/field-interpolator.ts`, `test/unit/field-interpolator.test.ts`
-- **Learnings for future iterations:**
-  - The `TEMPLATE_TOKEN_RE` regex has state (`lastIndex`) when using `g` flag — must reset with `TEMPLATE_TOKEN_RE.lastIndex = 0` before calling `.test()` and then `.replace()`, or use a fresh regex literal in `.replace()`
-  - Test data must be carefully aligned: `'literal'` matches the dot-path regex `/^[a-zA-Z_][\w.]*$/` so use strings with spaces or hyphens for actual string literals in tests
-  - `source` is a top-level key in `eventCtx`; `payload.source` would be undefined — match your test event shape carefully
-  - All 20 tests pass (5 rule-validator + 15 field-interpolator)
 ---
