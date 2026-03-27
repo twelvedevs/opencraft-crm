@@ -16,7 +16,10 @@ import { createEnrollSequenceProcessor } from './services/action-workers/enroll-
 import { createEmitEventProcessor } from './services/action-workers/emit-event.worker.js';
 import { createSendMessageProcessor } from './services/action-workers/send-message.worker.js';
 import { createSendEmailProcessor } from './services/action-workers/send-email.worker.js';
+import { createCallAiProcessor } from './services/action-workers/call-ai.worker.js';
+import { createCallWebhookProcessor } from './services/action-workers/call-webhook.worker.js';
 import { JobCanceller } from './services/job-canceller.js';
+import { createSecretsResolver } from './services/secrets-resolver.js';
 
 const fastify = Fastify({ logger: true });
 
@@ -31,6 +34,7 @@ const db = createDb();
 const connection = { url: process.env['REDIS_URL'] ?? 'redis://localhost:6379' };
 const queue = createQueue(connection);
 const jobCanceller = new JobCanceller(queue);
+const secretsResolver = createSecretsResolver();
 
 await fastify.register(rulesRoutes, { db, jobCanceller });
 
@@ -57,6 +61,8 @@ const workers = [
   createActionWorker(QUEUE_NAME, connection, createEmitEventProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
   createActionWorker(QUEUE_NAME, connection, createSendMessageProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
   createActionWorker(QUEUE_NAME, connection, createSendEmailProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
+  createActionWorker(QUEUE_NAME, connection, createCallAiProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
+  createActionWorker(QUEUE_NAME, connection, createCallWebhookProcessor(execRepo, queue, secretsResolver), fastify.log as Pick<Console, 'error'>),
 ];
 
 const queueUrl = process.env['SQS_QUEUE_URL'] ?? '';
