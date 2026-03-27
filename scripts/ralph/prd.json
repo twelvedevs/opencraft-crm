@@ -66,7 +66,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "The `connection` parameter is typed as `object` to remain compatible with both a plain `{ host, port }` config object and an IORedis instance — BullMQ 5 accepts both. `attempts: 5` means 1 initial attempt + 4 retries. `backoff: { type: 'custom' }` tells BullMQ to use the `backoffStrategy` registered on the Worker (defined in the worker factory story). `removeOnComplete/removeOnFail` counts prevent Redis memory bloat over time."
     },
     {

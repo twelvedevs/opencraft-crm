@@ -33,3 +33,15 @@ Started: Fri Mar 27 16:57:58 +03 2026
   - `node.params ?? {}` guard is essential — params can be undefined at the type level even though the type says `Record<string, unknown>`
   - No mocking needed — function is fully synchronous and pure (except randomUUID)
 ---
+
+## 2026-03-27T17:10:00+03 - US-003
+- Implemented `createQueue` factory and `ActionJobData` interface in `src/queue/index.ts`
+- Exported `QUEUE_NAME = 'automation-actions'` constant
+- No tests required per PRD (pure factory, no logic)
+- Files changed: `src/queue/index.ts`
+- **Learnings for future iterations:**
+  - `bullmq` was already in `package.json` dependencies — no install needed
+  - `connection` typed as `object` to accept both plain config objects and IORedis instances (BullMQ 5 accepts both)
+  - `backoff: { type: 'custom' }` delegates retry delays to `backoffStrategy` on the Worker (defined in US-005)
+  - Queue lives in `src/queue/` directory — separate from services
+---
