@@ -16,7 +16,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "No external deps needed at runtime yet — just scaffolding. ESM throughout (import/export, .js extensions in relative imports)."
     },
     {
@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "All tables in platform_automation schema (set search_path in connection config). Executions/steps tables are used in later phases but must exist now per the phase spec."
     },
     {

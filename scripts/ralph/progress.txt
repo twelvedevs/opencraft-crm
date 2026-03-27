@@ -1,0 +1,34 @@
+## Codebase Patterns
+- Always add `.gitignore` with `node_modules/` and `dist/` before staging service files — `git add apps/platform/<service>/` will otherwise pull in node_modules
+- ESM throughout: `"type": "module"` in package.json, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig.json
+- Fastify v5 with `@fastify/sensible`; use `logger: true` for pino — no pino-pretty dep needed
+- `tsc --noEmit` is the typecheck command (via `npm run typecheck`)
+- Knex migrations: use `withSchema('platform_automation')` on every `knex.schema` call; create schema in migration 001 with `knex.raw('CREATE SCHEMA IF NOT EXISTS platform_automation')`
+- knexfile.ts lives in `migrations/` alongside migration files; set `directory: '.'` in migrations config
+- tsconfig.json `include` only covers `src/**/*` — migration files are excluded from typecheck by design (avoids rootDir conflict)
+
+# Ralph Progress Log
+Started: Fri Mar 27 15:46:31 +03 2026
+---
+
+## 2026-03-27 - US-001
+- Scaffolded `apps/platform/automation` service from scratch
+- Files changed: `.gitignore`, `Dockerfile`, `package.json`, `package-lock.json`, `tsconfig.json`, `src/index.ts`
+- Created directory tree: `src/{routes,services,repositories,events}/`, `migrations/`, `test/unit/`, `test/integration/`
+- **Learnings for future iterations:**
+  - All platform service directories exist but are empty — fully greenfield
+  - Must create `.gitignore` before `git add` on a service directory to exclude `node_modules/`
+  - `npm run typecheck` (tsc --noEmit) is the quality gate for each story
+  - Fastify v5 `logger: true` uses pino directly without needing pino-pretty in deps
+---
+
+## 2026-03-27 - US-002
+- Created all 4 Knex migration files for the `platform_automation` schema
+- Files changed: `migrations/knexfile.ts`, `migrations/001_create_automation_rules.ts`, `migrations/002_create_automation_rule_versions.ts`, `migrations/003_create_automation_executions.ts`, `migrations/004_create_automation_execution_steps.ts`
+- **Learnings for future iterations:**
+  - Use `withSchema('platform_automation')` on every `knex.schema` builder call; Knex does not auto-apply searchPath to schema builder calls even if configured in knexfile
+  - Create the schema itself in migration 001 via `knex.raw('CREATE SCHEMA IF NOT EXISTS platform_automation')`
+  - Foreign key cross-schema references use the fully qualified table name string: `.references('id').inTable('platform_automation.automation_rules')`
+  - `migrations/` dir is excluded from main tsconfig (rootDir is `src`); typecheck passes because migration files are outside the include scope
+  - knexfile.ts placed in `migrations/` alongside migration files; `directory: '.'` points to same folder
+---
