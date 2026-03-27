@@ -49,7 +49,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "The `_if_true_subtree_ids` and `_if_false_subtree_ids` arrays include the root step of each subtree — so `_if_true_step_id === _if_true_subtree_ids[0]`. This allows the branch worker to mark ALL steps in the losing subtree (including the losing root) as 'skipped' with a single `updateManyStepsStatus` call. `params` on RegularActionNode may be undefined in practice — use `node.params ?? {}` as the spread source. The function has no I/O — it's synchronous and pure except for `randomUUID` calls."
     },
     {

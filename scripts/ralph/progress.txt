@@ -8,6 +8,8 @@ Started: Fri Mar 27 16:57:58 +03 2026
 - For `updateStepStatus` extras: build update object dynamically, only include key if value is not `undefined`
 - Knex mock pattern: `makeQueryBuilder()` returns chainable object; `makeDb(qb)` wraps it in a `vi.fn()` with `db.fn.now` attached
 - Early-return guard for empty arrays prevents unnecessary DB calls (insertSteps, updateManyStepsStatus)
+- ActionTreeWalker: `params` on RegularActionNode may be undefined — always use `node.params ?? {}` as spread source
+- ActionTreeWalker: branch subtree arrays include the branch root itself — `_if_true_step_id === _if_true_subtree_ids[0]`
 
 ## 2026-03-27T17:00:00+03 - US-001
 - Implemented `ExecutionRepository` in `src/repositories/execution.repository.ts`
@@ -18,4 +20,16 @@ Started: Fri Mar 27 16:57:58 +03 2026
   - Empty-array guards must short-circuit before calling `this.db(...)` at all — test verifies `db` itself was not called
   - `updateStepStatus` extras uses dynamic object build — only include keys for defined values (not just truthy)
   - Follow same SCHEMA pattern as `RulesRepository`: `const SCHEMA = 'platform_automation'` + template literal tables
+---
+
+## 2026-03-27T17:05:00+03 - US-002
+- Implemented `walkActionTree` in `src/services/action-tree-walker.ts`
+- Exported `RegularActionNode`, `BranchActionNode`, `ActionNode`, `StepRecord` types
+- Created `test/unit/action-tree-walker.test.ts` with 6 test cases covering all acceptance criteria
+- Files changed: `src/services/action-tree-walker.ts`, `test/unit/action-tree-walker.test.ts`
+- **Learnings for future iterations:**
+  - Recursive pure function: branch nodes recurse into if_true + if_false, regular nodes recurse into next if present
+  - The nested branch test in the PRD says "7 total steps" but the example structure only produces 5 (outer + inner + 2 leaves + 1 leaf); count carefully before asserting
+  - `node.params ?? {}` guard is essential — params can be undefined at the type level even though the type says `Record<string, unknown>`
+  - No mocking needed — function is fully synchronous and pure (except randomUUID)
 ---
