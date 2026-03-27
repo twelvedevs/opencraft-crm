@@ -4,6 +4,9 @@ import type { Knex } from 'knex';
 import { RulesRepository, type UpdateRuleWithVersionInput } from '../repositories/rules.repository.js';
 import { validateActionTree } from '../services/rule-validator.js';
 import type { JobCanceller } from '../services/job-canceller.js';
+import { evaluate, type Condition } from '../services/condition-evaluator.js';
+import { resolveDryRunPath } from '../services/dry-run-walker.js';
+import type { ActionNode } from '../services/action-tree-walker.js';
 
 const RuleSchema = Type.Object({
   id: Type.String(),
@@ -245,6 +248,68 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
       }
       await opts.jobCanceller?.cancelDelayedJobsForRule(id);
       return reply.status(204).send();
+    },
+  );
+
+  const TestRuleBodySchema = Type.Object({
+    event_type: Type.String(),
+    payload: Type.Record(Type.String(), Type.Unknown()),
+    entity_type: Type.Optional(Type.String()),
+    entity_id: Type.Optional(Type.String()),
+  });
+
+  fastify.post(
+    '/rules/:id/test',
+    {
+      schema: {
+        params: Type.Object({ id: Type.String() }),
+        body: TestRuleBodySchema,
+        response: {
+          200: Type.Object({
+            matches: Type.Boolean(),
+            would_execute: Type.Array(
+              Type.Object({
+                action_type: Type.String(),
+                action_params: Type.Record(Type.String(), Type.Unknown()),
+              }),
+            ),
+          }),
+          404: Type.Object({ error: Type.String() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        event_type: string;
+        payload: Record<string, unknown>;
+        entity_type?: string;
+        entity_id?: string;
+      };
+
+      const rule = await repo.findById(id);
+      if (!rule) {
+        return reply.status(404).send({ error: 'rule not found' });
+      }
+
+      const version = await repo.findVersion(id, rule.current_version);
+      if (!version) {
+        return reply.status(404).send({ error: 'rule version not found' });
+      }
+
+      const conditionMatches = evaluate(
+        version.condition as Condition | null | undefined,
+        body.payload,
+        { event_id: 'dry-run', execution_id: 'dry-run', rule_id: id, rule_version: rule.current_version },
+      );
+
+      if (!conditionMatches) {
+        return reply.send({ matches: false, would_execute: [] });
+      }
+
+      const would_execute = resolveDryRunPath(version.action_tree as ActionNode, body.payload);
+
+      return reply.send({ matches: true, would_execute });
     },
   );
 };
