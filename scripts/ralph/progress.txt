@@ -5,6 +5,7 @@
 - `Date.now()` can be spied on with `vi.spyOn(Date, 'now')` to advance TTL in tests
 - TypeBox: use `Value.Check(schema, val)` for boolean validation; `Value.Errors(schema, val)` for error details (spread into array); import `Value` from `@sinclair/typebox/value`
 - EventBridge envelope: only `detail` field matters — all other envelope fields (id, source, time, region) are ignored
+- To mock a module in Vitest: use `vi.mock('../../src/services/condition-evaluator.js', () => ({ evaluate: vi.fn() }))` then `import { evaluate } from '...'` after the mock — hoisting handles the ordering
 ---
 
 # Ralph Progress Log
@@ -31,4 +32,14 @@ Started: Fri Mar 27 16:26:18 +03 2026
   - `Type.Record(Type.String(), Type.Unknown())` is the correct TypeBox pattern for an open-ended payload object
   - `ParseError` requires `readonly cause?: unknown` — set via constructor parameter and `super(message)` call
   - The envelope check must verify `'detail' in envelope` (not just `envelope.detail !== undefined`) to be TypeScript-safe
+---
+
+## 2026-03-27 - US-003
+- Created `src/services/rule-matcher.ts`: `MatchedRule` interface + `RuleMatcher` class with `matchRules(event)` method
+- Created `test/unit/rule-matcher.test.ts` with 6 test cases covering all acceptance criteria
+- Files changed: `src/services/rule-matcher.ts`, `test/unit/rule-matcher.test.ts`
+- **Learnings for future iterations:**
+  - `vi.mock(path, factory)` + import after mock declaration — Vitest hoists `vi.mock` so order in file doesn't matter
+  - `randomUUID` from `node:crypto` is available in Node 24 with no extra deps
+  - Cast `event as Record<string, unknown>` when passing `InboundEvent` to `evaluate` — structurally compatible, TS-safe
 ---

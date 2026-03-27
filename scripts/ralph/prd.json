@@ -60,7 +60,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Import `ActiveRule` from `../repositories/rules.repository.js`, `RuleCache` from `./rule-cache.js`, `type Condition, evaluate` from `./condition-evaluator.js`, `type ExecutionContext` from `./field-interpolator.js`, `InboundEvent` from `../events/inbound-event.js`. Cast `event` as `Record<string, unknown>` when passing to `evaluate` — InboundEvent is structurally compatible. `randomUUID` is built into Node 24 via `node:crypto` — no external dependency needed."
     },
     {
