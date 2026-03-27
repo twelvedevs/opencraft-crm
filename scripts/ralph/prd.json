@@ -91,7 +91,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "No auth middleware in Phase 1 — auth is wired later. Soft-deleted rules (status='deleted') must not appear in any list or single-fetch response."
     },
     {

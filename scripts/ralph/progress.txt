@@ -1,4 +1,7 @@
 ## Codebase Patterns
+- Knex db instance created via `createDb()` in `src/db.ts`; injected into Fastify plugins via plugin options (`FastifyPluginAsync<{ db: Knex }>`)
+- Use `Type.Any()` for timestamptz date fields in TypeBox response schemas — avoids fast-json-stringify coercion issues with JS Date objects
+- Fastify v5 route plugin pattern: `const plugin: FastifyPluginAsync<Opts> = async (fastify, opts) => {}; export default plugin`
 - Always add `.gitignore` with `node_modules/` and `dist/` before staging service files — `git add apps/platform/<service>/` will otherwise pull in node_modules
 - ESM throughout: `"type": "module"` in package.json, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig.json
 - Fastify v5 with `@fastify/sensible`; use `logger: true` for pino — no pino-pretty dep needed
@@ -44,6 +47,18 @@ Started: Fri Mar 27 15:46:31 +03 2026
   - `this.db.fn.now()` for `updated_at` in update/softDelete calls
   - `action_tree` is jsonb in DB — pass `JSON.stringify(data.action_tree)` on insert to ensure correct serialization
   - `softDelete` filters by `whereNot('status', 'deleted')` before update so it returns `count === 0` if already deleted
+---
+
+## 2026-03-27 - US-005
+- Created `src/db.ts` with `createDb()` Knex factory using DATABASE_URL
+- Created `src/routes/rules.ts` with GET /rules (optional `?status=` filter) and GET /rules/:id
+- Updated `src/index.ts` to initialize db and register rulesRoutes plugin
+- Files changed: `src/db.ts`, `src/routes/rules.ts`, `src/index.ts`
+- **Learnings for future iterations:**
+  - Plugin options pattern: `FastifyPluginAsync<{ db: Knex }>` — pass db cleanly without Fastify decorator/augmentation
+  - TypeBox `Type.Any()` for timestamptz fields in response schema — `fast-json-stringify` can't coerce Date objects to strings when schema says `type: string`
+  - `Type.Optional(Type.Union([...]))` for optional query params with allowed literal values
+  - Soft-deleted rules excluded at repository layer (`whereNot('status', 'deleted')`) — routes don't need extra filtering
 ---
 
 ## 2026-03-27 - US-004
