@@ -27,7 +27,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Use Knex bulk insert pattern: `this.db(STEPS_TABLE).insert(rows)` — Knex accepts an array for bulk insert. For `updateStepStatus` extras, build the update object dynamically: only include a key if the extras value is not `undefined`. Do NOT use `.returning('*')` on bulk inserts unless you need the return value — `insertSteps` returns void so skip it. Follow the same Knex patterns already established in `RulesRepository`."
     },
     {
