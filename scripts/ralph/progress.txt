@@ -34,6 +34,32 @@ Started: Fri Mar 27 16:57:58 +03 2026
   - No mocking needed — function is fully synchronous and pure (except randomUUID)
 ---
 
+## 2026-03-27T17:15:00+03 - US-004
+- Implemented `ExecutionManager` in `src/services/execution-manager.ts`
+- Created `test/unit/execution-manager.test.ts` with 3 test cases (idempotency, happy path, empty tree)
+- Files changed: `src/services/execution-manager.ts`, `test/unit/execution-manager.test.ts`
+- **Learnings for future iterations:**
+  - PRD step description (early return before insertSteps) and test spec (insertSteps called with []) were contradictory — test spec takes precedence; insertSteps is always called, then guard checks length
+  - vi.mock must be called BEFORE importing the mocked module; import the module after the mock declaration
+  - `vi.mocked(repo.findExecution).mockResolvedValue(null)` works cleanly when repo is typed as the real class; cast mocks as `unknown as ExecutionRepository`
+  - `walkActionTree` mock must return consistent `StepRecord[]` format with `status: 'pending' as const`
+---
+
+## 2026-03-27T17:20:00+03 - US-005
+- Implemented `createActionWorker` factory in `src/queue/worker-factory.ts`
+- Exported `RETRY_DELAYS = [5000, 30000, 120000, 600000]`
+- Worker created with `settings.backoffStrategy` mapping attemptsMade→delay, clamping to last value for out-of-bounds
+- Registered `'failed'` event handler: final-failure check via `attemptsMade >= (opts.attempts ?? 1)`, emits JSON alert via logger or console.error
+- Created `test/unit/worker-factory.test.ts` with 7 tests covering all acceptance criteria
+- Files changed: `src/queue/worker-factory.ts`, `test/unit/worker-factory.test.ts`
+- **Learnings for future iterations:**
+  - BullMQ Worker mock: `vi.mock('bullmq', () => ({ Worker: vi.fn().mockImplementation(() => ({ on: vi.fn() })) }))` — capture `on` calls then extract handler by event name for testing
+  - `backoffStrategy` receives `attemptsMade` (1-based) — use `RETRY_DELAYS[attemptsMade - 1]` to map attempt 1→index 0
+  - 'failed' fires on every failure — use `attemptsMade >= opts.attempts` to distinguish DLQ-worthy final failure from retryable ones
+  - `opts.attempts` may be undefined if not set — default to 1 for the check: `job.opts.attempts ?? 1`
+  - Logger is optional: `(logger?.error ?? console.error)(...)` pattern works cleanly
+---
+
 ## 2026-03-27T17:10:00+03 - US-003
 - Implemented `createQueue` factory and `ActionJobData` interface in `src/queue/index.ts`
 - Exported `QUEUE_NAME = 'automation-actions'` constant

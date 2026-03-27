@@ -92,7 +92,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "The `ExecutionManager` does NOT update `execution.status` to 'running' explicitly — `insertExecution` defaults status to 'running'. It also does NOT mark it 'completed' at this stage — that is the responsibility of the last action worker in the chain. The only exception is the empty-tree guard (step 3), which immediately completes the execution. `QUEUE_NAME` is imported but not used directly in `queue.add` — BullMQ's `Queue` instance already targets the named queue. `queue.add(jobName, data)` where jobName is the action_type string."
     },
     {
@@ -119,7 +119,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "BullMQ's `backoffStrategy` in `settings` receives `attemptsMade` (number of attempts already made, starting at 1 for the first retry). So `RETRY_DELAYS[attemptsMade - 1]` maps attempt 1→5000ms, attempt 2→30000ms, etc. The `'failed'` event fires on EVERY failed attempt, not just the last. The final-failure check (`attemptsMade >= opts.attempts`) distinguishes DLQ-worthy failures from normal retries. The `Worker` mock in tests: capture the `on` calls by storing them in a map, then call them manually to test the handler. Alternatively, call the backoffStrategy function extracted from the `new Worker(...)` args directly."
     },
     {
