@@ -12,7 +12,7 @@ export function createEmitEventProcessor(
   ebClient: EventBridgeClient = new EventBridgeClient({}),
 ): (job: Job<ActionJobData>) => Promise<void> {
   return async (job: Job<ActionJobData>): Promise<void> => {
-    const { execution_id, step_id, action_params, exec_ctx, event } = job.data;
+    const { execution_id, step_id, action_params, exec_ctx, event, active_hours } = job.data;
 
     await repo.updateStepStatus(step_id, 'running', { attempt: job.attemptsMade + 1 });
 
@@ -52,6 +52,7 @@ export function createEmitEventProcessor(
           action_params: nextStep.action_params as Record<string, unknown>,
           exec_ctx,
           event,
+          active_hours,
         });
       }
     } else {

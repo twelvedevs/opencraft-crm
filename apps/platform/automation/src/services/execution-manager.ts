@@ -4,6 +4,7 @@ import type { ExecutionRepository } from '../repositories/execution.repository.j
 import type { ActionJobData } from '../queue/index.js';
 import { walkActionTree, type ActionNode } from './action-tree-walker.js';
 import type { MatchedRule } from './rule-matcher.js';
+import type { ActiveHoursConfig } from './active-hours.js';
 import type { InboundEvent } from '../events/inbound-event.js';
 import type { ExecutionManagerPort } from './event-consumer.js';
 
@@ -53,6 +54,7 @@ export class ExecutionManager implements ExecutionManagerPort {
       action_params: rootStep.action_params,
       exec_ctx: rule.execCtx,
       event: event as Record<string, unknown>,
+      active_hours: (rule.rule.active_hours as ActiveHoursConfig | null) ?? null,
     });
   }
 }

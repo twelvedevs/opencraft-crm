@@ -47,6 +47,7 @@ function makeJob(overrides: Partial<ActionJobData> = {}, attemptsMade = 0): Job<
       },
       exec_ctx: { event_id: 'e1', execution_id: 'exec-1', rule_id: 'r1', rule_version: 1 },
       event: { lead_id: 'lead-1' },
+      active_hours: null,
       ...overrides,
     },
   } as unknown as Job<ActionJobData>;
@@ -136,12 +137,14 @@ describe('createEmitEventProcessor', () => {
     const nextStep = makeStep('step-2');
     vi.mocked(repo.findStepById).mockResolvedValue(nextStep);
 
+    const activeHours = { start: '08:00', end: '20:00', timezone_field: 'payload.tz' };
     const job = makeJob({
       action_params: {
         event_type: 'lead.updated',
         payload: {},
         _next_step_id: 'step-2',
       },
+      active_hours: activeHours,
     });
 
     const processor = createEmitEventProcessor(repo, queue, ebClient);
@@ -154,6 +157,7 @@ describe('createEmitEventProcessor', () => {
         execution_id: 'exec-1',
         step_id: 'step-2',
         action_type: nextStep.action_type,
+        active_hours: activeHours,
       }),
     );
     expect(vi.mocked(repo.updateExecutionStatus)).not.toHaveBeenCalled();

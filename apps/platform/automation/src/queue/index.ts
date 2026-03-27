@@ -1,5 +1,6 @@
 import { Queue } from 'bullmq';
 import type { ExecutionContext } from '../services/field-interpolator.js';
+import type { ActiveHoursConfig } from '../services/active-hours.js';
 
 export const QUEUE_NAME = 'automation-actions';
 
@@ -10,6 +11,7 @@ export interface ActionJobData {
   action_params: Record<string, unknown>;
   exec_ctx: ExecutionContext;
   event: Record<string, unknown>;
+  active_hours?: ActiveHoursConfig | null;
 }
 
 export function createQueue(connection: object): Queue<ActionJobData> {

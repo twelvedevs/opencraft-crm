@@ -8,7 +8,7 @@ export function createBranchProcessor(
   queue: Queue<ActionJobData>,
 ): (job: Job<ActionJobData>) => Promise<void> {
   return async (job: Job<ActionJobData>): Promise<void> => {
-    const { execution_id, step_id, action_params, exec_ctx, event } = job.data;
+    const { execution_id, step_id, action_params, exec_ctx, event, active_hours } = job.data;
 
     await repo.updateStepStatus(step_id, 'running', { attempt: job.attemptsMade + 1 });
 
@@ -37,6 +37,7 @@ export function createBranchProcessor(
       action_params: winnerStep.action_params as Record<string, unknown>,
       exec_ctx,
       event,
+      active_hours,
     });
 
     await repo.updateStepStatus(step_id, 'completed', { completedAt: new Date() });

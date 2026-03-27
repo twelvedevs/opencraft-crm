@@ -1,5 +1,5 @@
 # Ralph Progress Log
-Started: Fri Mar 27 2026
+Started: Fri Mar 27 18:13:31 +03 2026
 ---
 
 ## Codebase Patterns
@@ -15,3 +15,15 @@ Started: Fri Mar 27 2026
 - Branch worker: does NOT call `updateExecutionStatus` — responsibility of the final action worker in the chain
 - `active_hours` flows through the entire action chain via `ActionJobData` — all workers must propagate it when enqueuing next steps
 - `JobCanceller.cancelDelayedJobsForRule(ruleId)` uses `queue.getDelayed()` + filter by `job.data.exec_ctx.rule_id`
+
+## 2026-03-27T18:16 - US-001
+- Added `active_hours?: ActiveHoursConfig | null` to `ActionJobData` interface in `src/queue/index.ts`
+- Added `import type { ActiveHoursConfig }` to `execution-manager.ts`; propagates `rule.rule.active_hours ?? null` in root job enqueue
+- Updated `branch.worker.ts`, `enroll-sequence.worker.ts`, `emit-event.worker.ts` to destructure and forward `active_hours` in their `queue.add(...)` calls
+- Updated 4 test files to include `active_hours` in job fixtures; used a positive value `{ start: '08:00', end: '20:00', timezone_field: 'payload.tz' }` in each worker's next-step enqueue test to prove forwarding (not hardcoded)
+- Files changed: `src/queue/index.ts`, `src/services/execution-manager.ts`, `src/services/action-workers/{branch,enroll-sequence,emit-event}.worker.ts`, `test/unit/execution-manager.test.ts`, `test/unit/action-workers/{branch,enroll-sequence,emit-event}-worker.test.ts`
+- **Learnings for future iterations:**
+  - All `queue.add(...)` call sites need `active_hours` — always grep for them when adding new job data fields
+  - The `makeJob()` fixture in tests defaults `active_hours: null`; override with a real config in the next-step assertion test to prove forwarding
+  - `rule.rule.active_hours` is typed as `unknown` on `MatchedRule['rule']` — cast to `ActiveHoursConfig | null` and use `?? null`
+---

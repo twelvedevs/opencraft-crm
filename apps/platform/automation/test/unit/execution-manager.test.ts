@@ -130,6 +130,7 @@ describe('ExecutionManager', () => {
         action_params: { event_type: 'x' },
         exec_ctx: baseRule.execCtx,
         event: baseEvent,
+        active_hours: null,
       });
 
       // updateExecutionStatus NOT called

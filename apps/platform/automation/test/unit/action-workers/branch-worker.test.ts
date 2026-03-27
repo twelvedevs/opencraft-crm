@@ -46,6 +46,7 @@ function makeJob(overrides: Partial<ActionJobData> = {}, attemptsMade = 0): Job<
       },
       exec_ctx: { event_id: 'e1', execution_id: 'exec-1', rule_id: 'r1', rule_version: 1 },
       event: { status: 'active' },
+      active_hours: null,
       ...overrides,
     },
   } as unknown as Job<ActionJobData>;
@@ -78,8 +79,9 @@ describe('createBranchProcessor', () => {
     const winnerStep = makeStep('true-step-1');
     vi.mocked(repo.findStepById).mockResolvedValue(winnerStep);
 
+    const activeHours = { start: '08:00', end: '20:00', timezone_field: 'payload.tz' };
     const processor = createBranchProcessor(repo, queue);
-    const job = makeJob();
+    const job = makeJob({ active_hours: activeHours });
     await processor(job);
 
     expect(vi.mocked(repo.updateManyStepsStatus)).toHaveBeenCalledWith(['false-step-1'], 'skipped');
@@ -90,6 +92,7 @@ describe('createBranchProcessor', () => {
         execution_id: 'exec-1',
         step_id: 'true-step-1',
         action_type: winnerStep.action_type,
+        active_hours: activeHours,
       }),
     );
   });

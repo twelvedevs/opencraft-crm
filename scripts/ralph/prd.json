@@ -21,7 +21,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "All five `queue.add` call sites across the four files need the `active_hours` field added. In execution-manager.ts, `rule.rule.active_hours` is typed as `unknown | null` — cast it to `ActiveHoursConfig | null`. The three existing workers just forward `job.data.active_hours` without inspection — no logic change needed in those workers, only the data forwarded. Keep test fixture `active_hours` values simple: use `null` in most tests; add one positive case (e.g., `{ start: '08:00', end: '20:00', timezone_field: 'payload.tz' }`) to the next-step enqueue assertion test to prove the value is forwarded, not hardcoded."
     },
     {
