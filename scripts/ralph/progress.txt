@@ -11,3 +11,15 @@ Started: Fri Mar 27 19:21:05 +03 2026
   - Making a Knex mock thenable for `await query` requires defining a `then` getter that resolves immediately
   - `deleteExecutionsBefore` uses a subquery passed to `whereIn` — Knex handles this as a SQL subquery automatically
 ---
+
+## 2026-03-27 - US-002
+- Created `src/routes/executions.ts` — Fastify plugin with GET /executions (TypeBox querystring, pagination, filter→Date conversion) and GET /executions/:executionId/steps/:stepId/output (TypeBox params, 404 on null)
+- Registered `executionRoutes` in `src/index.ts` after `rulesRoutes`
+- Created `test/integration/executions.routes.test.ts` — 8 tests using `fastify.inject()` + `vi.mock` on ExecutionRepository; no real Postgres needed
+- Also corrected prd.json: US-001 was implemented in prior commit but `passes` flag was never flipped to `true`
+- Files changed: `apps/platform/automation/src/routes/executions.ts` (new), `apps/platform/automation/src/index.ts`, `apps/platform/automation/test/integration/executions.routes.test.ts` (new), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `@fastify/sensible` v5 is incompatible with Fastify v5.8.4 in test env (version check fails); drop `sensible` from test Fastify instances — routes don't need it
+  - For route integration tests, `vi.mock` the repository module before importing the route plugin; vitest hoists the mock correctly with top-level `await import()`
+  - Pass `db: {} as never` to the Fastify plugin in tests — the mock intercepts all DB calls before they reach knex
+---
