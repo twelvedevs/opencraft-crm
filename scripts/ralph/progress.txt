@@ -32,3 +32,15 @@ Started: Fri Mar 27 15:46:31 +03 2026
   - `migrations/` dir is excluded from main tsconfig (rootDir is `src`); typecheck passes because migration files are outside the include scope
   - knexfile.ts placed in `migrations/` alongside migration files; `directory: '.'` points to same folder
 ---
+
+## 2026-03-27 - US-003
+- Created `src/repositories/rules.repository.ts` with `RulesRepository` class
+- Methods: `create`, `findAll`, `findById`, `update`, `softDelete`, `insertVersion`, `findVersion`, `activateVersion`
+- Exported types: `Rule`, `RuleVersion`, `CreateRuleInput`, `UpdateRuleInput`, `CreateVersionInput`
+- Files changed: `src/repositories/rules.repository.ts`
+- **Learnings for future iterations:**
+  - Use fully-qualified table names (`platform_automation.automation_rules`) as the Knex table argument — avoids needing to call `.withSchema()` on every query builder
+  - `this.db.fn.now()` for `updated_at` in update/softDelete calls
+  - `action_tree` is jsonb in DB — pass `JSON.stringify(data.action_tree)` on insert to ensure correct serialization
+  - `softDelete` filters by `whereNot('status', 'deleted')` before update so it returns `count === 0` if already deleted
+---

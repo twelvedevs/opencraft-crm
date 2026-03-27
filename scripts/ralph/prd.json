@@ -54,7 +54,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Pure DB access — no validation logic here. Use Knex querybuilder; no raw SQL except where unavoidable."
     },
     {
