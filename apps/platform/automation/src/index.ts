@@ -5,8 +5,15 @@ import rulesRoutes from './routes/rules.js';
 import { RulesRepository } from './repositories/rules.repository.js';
 import { RuleCache } from './services/rule-cache.js';
 import { RuleMatcher } from './services/rule-matcher.js';
-import { EventConsumer, type ExecutionManagerPort } from './services/event-consumer.js';
+import { EventConsumer } from './services/event-consumer.js';
 import { SqsConsumer } from './events/sqs-consumer.js';
+import { ExecutionRepository } from './repositories/execution.repository.js';
+import { ExecutionManager } from './services/execution-manager.js';
+import { createQueue, QUEUE_NAME } from './queue/index.js';
+import { createActionWorker } from './queue/worker-factory.js';
+import { createBranchProcessor } from './services/action-workers/branch.worker.js';
+import { createEnrollSequenceProcessor } from './services/action-workers/enroll-sequence.worker.js';
+import { createEmitEventProcessor } from './services/action-workers/emit-event.worker.js';
 
 const fastify = Fastify({ logger: true });
 
@@ -29,11 +36,22 @@ try {
   process.exit(1);
 }
 
+const connection = { url: process.env['REDIS_URL'] ?? 'redis://localhost:6379' };
+const queue = createQueue(connection);
+
+const execRepo = new ExecutionRepository(db);
+const executionManager = new ExecutionManager(execRepo, queue);
+
 const repo = new RulesRepository(db);
 const cache = new RuleCache(repo);
 const matcher = new RuleMatcher(cache);
-const executionManagerStub: ExecutionManagerPort = { async handle() {} };
-const consumer = new EventConsumer(matcher, executionManagerStub, fastify.log as Pick<Console, 'info' | 'error'>);
+const consumer = new EventConsumer(matcher, executionManager, fastify.log as Pick<Console, 'info' | 'error'>);
+
+const workers = [
+  createActionWorker(QUEUE_NAME, connection, createBranchProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
+  createActionWorker(QUEUE_NAME, connection, createEnrollSequenceProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
+  createActionWorker(QUEUE_NAME, connection, createEmitEventProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
+];
 
 const queueUrl = process.env['SQS_QUEUE_URL'] ?? '';
 let sqsConsumer: SqsConsumer | undefined;
@@ -53,5 +71,6 @@ process.on('SIGTERM', async () => {
   if (sqsConsumer) {
     await sqsConsumer.stop();
   }
+  await Promise.all(workers.map((w) => w.close()));
   await fastify.close();
 });
