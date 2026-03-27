@@ -28,6 +28,15 @@ export interface CreateRuleInput {
   created_by?: string;
 }
 
+export interface CreateRuleWithVersionInput {
+  name: string;
+  trigger_event_type: string;
+  condition?: unknown;
+  active_hours?: unknown;
+  action_tree: unknown;
+  created_by?: string;
+}
+
 export interface UpdateRuleInput {
   name?: string;
 }
@@ -48,6 +57,31 @@ const VERSIONS_TABLE = `${SCHEMA}.automation_rule_versions`;
 
 export class RulesRepository {
   constructor(private readonly db: Knex) {}
+
+  async createWithVersion(data: CreateRuleWithVersionInput): Promise<Rule> {
+    return this.db.transaction(async (trx) => {
+      const [rule] = await trx(RULES_TABLE)
+        .insert({
+          name: data.name,
+          status: 'draft',
+          current_version: 1,
+          created_by: data.created_by ?? null,
+        })
+        .returning('*');
+
+      await trx(VERSIONS_TABLE).insert({
+        rule_id: (rule as Rule).id,
+        version: 1,
+        trigger_event_type: data.trigger_event_type,
+        condition: data.condition ?? null,
+        active_hours: data.active_hours ?? null,
+        action_tree: JSON.stringify(data.action_tree),
+        created_by: data.created_by ?? null,
+      });
+
+      return rule as Rule;
+    });
+  }
 
   async create(data: CreateRuleInput): Promise<Rule> {
     const [row] = await this.db(RULES_TABLE)
