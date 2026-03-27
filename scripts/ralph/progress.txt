@@ -1,16 +1,13 @@
 # Ralph Progress Log
-Started: Thu Mar 27 00:00:00 +03 2026
+Started: Fri Mar 27 19:21:05 +03 2026
 ---
 
-## Codebase Patterns
-- Action workers follow createXxxProcessor(repo, queue, fetchFn) factory pattern
-- fetchFn defaults to globalThis.fetch — injected in tests for mocking
-- Active hours check in send_message/send_email happens BEFORE marking 'running'; in call_ai it happens AFTER the AI call (intentional: AI call always executes immediately)
-- Step chain pattern: if nextStepId → findStepById → if non-null → queue.add; else → updateExecutionStatus('completed')
-- updateStepStatus 'completed' accepts extras.output for storing JSON result
-- Test mock job: moveToDelayed must be added as vi.fn().mockResolvedValue(undefined) to the job object
-- vi.mock for active-hours must use factory returning { computeDelay: vi.fn() }; import mocked fn after vi.mock call
-- tsconfig only includes src/**/* — test files are not typechecked by tsc
-- resolveParams treats any string matching /^[a-zA-Z_][\w.]*$/ as a dot-path reference into eventCtx — use strings with hyphens/numbers in test data to avoid unintentional resolution (e.g. 'static-header-value' not 'value')
-
+## 2026-03-27 - US-001
+- Added `listExecutions`, `findStepOutput`, `deleteExecutionsBefore` to `ExecutionRepository`
+- Files changed: `apps/platform/automation/src/repositories/execution.repository.ts`, `apps/platform/automation/test/unit/execution.repository.test.ts`
+- **Learnings for future iterations:**
+  - `listExecutions` uses two queries (paginated executions + steps by IDs) then merges in JS — correct pagination without LIMIT distortion from JOIN
+  - For mocking two sequential `db()` calls, use a `callCount` counter in `vi.fn().mockImplementation()` to return different query builders per call
+  - Making a Knex mock thenable for `await query` requires defining a `then` getter that resolves immediately
+  - `deleteExecutionsBefore` uses a subquery passed to `whereIn` — Knex handles this as a SQL subquery automatically
 ---
