@@ -3,6 +3,8 @@
 - All imports use `.js` extension (ESM module resolution, even for `.ts` source files)
 - `RulesRepository` lives in `src/repositories/rules.repository.ts` — extend it in place, do not create new repo files
 - `Date.now()` can be spied on with `vi.spyOn(Date, 'now')` to advance TTL in tests
+- TypeBox: use `Value.Check(schema, val)` for boolean validation; `Value.Errors(schema, val)` for error details (spread into array); import `Value` from `@sinclair/typebox/value`
+- EventBridge envelope: only `detail` field matters — all other envelope fields (id, source, time, region) are ignored
 ---
 
 # Ralph Progress Log
@@ -18,4 +20,15 @@ Started: Fri Mar 27 16:26:18 +03 2026
   - `findActiveByEventType` JOINs on `rv.rule_id = r.id AND rv.version = r.active_version` — Knex join builder uses `.on().andOn()` chaining
   - TTL check: `Date.now() - cachedAt < ttlMs` for valid, `>= ttlMs` for expired (strict inequalities)
   - `vi.spyOn(Date, 'now').mockReturnValue(...)` works cleanly for advancing time in TTL tests
+---
+
+## 2026-03-27 - US-002
+- Created `src/events/inbound-event.ts`: `InboundEventSchema` (TypeBox), `InboundEvent` type, `ParseError` class, `parseEventBridgeMessage` function
+- Created `test/unit/inbound-event.test.ts` with 8 test cases covering all acceptance criteria
+- Files changed: `src/events/inbound-event.ts`, `test/unit/inbound-event.test.ts`
+- **Learnings for future iterations:**
+  - `Value.Check` + `Value.Errors` from `@sinclair/typebox/value` work cleanly for runtime validation
+  - `Type.Record(Type.String(), Type.Unknown())` is the correct TypeBox pattern for an open-ended payload object
+  - `ParseError` requires `readonly cause?: unknown` — set via constructor parameter and `super(message)` call
+  - The envelope check must verify `'detail' in envelope` (not just `envelope.detail !== undefined`) to be TypeScript-safe
 ---

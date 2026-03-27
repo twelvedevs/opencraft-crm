@@ -41,7 +41,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Use `Value.Check(InboundEventSchema, raw.detail)` for validation — returns boolean. Collect errors with `[...Value.Errors(InboundEventSchema, raw.detail)]` if you want to include them in the ParseError message. `Value` is imported from `@sinclair/typebox/value`. The `detail` field on the EventBridge envelope is the plain ortho event object — not nested further."
     },
     {
