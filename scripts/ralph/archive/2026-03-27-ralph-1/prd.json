@@ -1,0 +1,79 @@
+{
+  "project": "Ortho CRM — Automation Engine",
+  "branchName": "ralph-2",
+  "description": "Phase 2 — Evaluation Core: three pure-function modules (Field Interpolator, Condition Evaluator, Active Hours Calculator) with full Vitest unit test coverage.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Field Interpolator — dot-notation + template string resolver (pure function + unit tests)",
+      "description": "As a developer, I need a pure field-interpolator module so that condition evaluation, active hours calculation, and action param binding can all resolve event-payload paths and execution-context template strings through a single consistent mechanism.",
+      "acceptanceCriteria": [
+        "src/services/field-interpolator.ts exports type ExecutionContext = { event_id: string; execution_id: string; rule_id: string; rule_version: number }",
+        "Exports resolveValue(value: unknown, eventCtx: Record<string, unknown>, execCtx: ExecutionContext): unknown",
+        "resolveValue: a string like 'payload.phone' (matches /^[a-zA-Z_][\\w.]*$/) is treated as a dot-notation path and resolved via lodash-style deep lookup against eventCtx; returns undefined (not throws) when path is absent",
+        "resolveValue: a string containing '{{...}}' tokens (e.g. '{{event_id}}-sms', '{{rule_id}}') has each token replaced with the matching key from execCtx; unknown tokens are left as-is",
+        "resolveValue: a string that is neither a dot-path nor contains template tokens is returned as a literal",
+        "resolveValue: non-string values (number, boolean, null, object, array) are returned as-is without modification",
+        "Exports resolveParams(params: Record<string, unknown>, eventCtx: Record<string, unknown>, execCtx: ExecutionContext): Record<string, unknown>",
+        "resolveParams recursively resolves all string values within the params object, including values nested inside child objects and arrays, by calling resolveValue on each leaf string",
+        "test/unit/field-interpolator.test.ts covers: dot-notation present, dot-notation missing (returns undefined), deeply nested dot-path, single template token, multiple template tokens in one string, unknown template token left as-is, string literal passthrough, number/boolean/null passthrough, recursive object resolution (nested object), recursive array resolution (array of strings), mixed dot-path inside nested params object",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Pure function — no DB, no I/O, no side effects. No external dependencies required; implement dot-path lookup manually (split on '.', reduce). Template tokens: match /\\{\\{(\\w+)\\}\\}/g, replace from execCtx. This module is imported by Condition Evaluator (US-002) and Active Hours Calculator (US-003)."
+    },
+    {
+      "id": "US-002",
+      "title": "Condition Evaluator — boolean expression tree evaluator (pure function + unit tests)",
+      "description": "As a developer, I need a pure condition-evaluator module so that the Rule Matcher can test whether an incoming event payload satisfies a rule's condition tree before creating an execution.",
+      "acceptanceCriteria": [
+        "src/services/condition-evaluator.ts exports the following TypeScript types: LeafCondition = { field: string; op: 'eq'|'neq'|'in'|'not_in'|'gt'|'gte'|'lt'|'lte'|'contains'|'exists'|'not_exists'; value?: unknown }, GroupCondition = { op: 'AND'|'OR'; conditions: Condition[] }, NotCondition = { op: 'NOT'; condition: Condition }, Condition = LeafCondition | GroupCondition | NotCondition",
+        "Exports evaluate(condition: Condition | null | undefined, event: Record<string, unknown>, execCtx: ExecutionContext): boolean",
+        "evaluate returns true when condition is null or undefined (no condition = always passes)",
+        "Field values are resolved from the event object using resolveValue from field-interpolator (dot-notation path lookup)",
+        "eq: resolved field value strictly equals operand; neq: strictly not equal",
+        "in: operand is an array and includes the resolved field value; not_in: operand is an array and does not include the resolved field value",
+        "gt/gte/lt/lte: numeric comparison between resolved field value (coerced to number) and operand (coerced to number)",
+        "contains: resolved field value is a string and includes operand string, OR resolved field value is an array and includes operand",
+        "exists: resolved field value is not undefined and not null; not_exists: resolved field value is undefined or null",
+        "AND: returns true only if all sub-conditions in conditions[] evaluate to true (short-circuits on first false)",
+        "OR: returns true if at least one sub-condition in conditions[] evaluates to true (short-circuits on first true)",
+        "NOT: returns the negation of the single nested condition",
+        "Nested grouping: AND containing OR containing NOT evaluates correctly",
+        "Missing field (path resolves to undefined) for comparison operators (eq, gt, in, contains, etc.) returns false without throwing",
+        "test/unit/condition-evaluator.test.ts covers: each of the 11 leaf operators (both truthy and falsy case), AND (all-true, one-false), OR (one-true, all-false), NOT (true→false, false→true), nested AND/OR/NOT three levels deep, missing field returns false, null condition returns true, field resolved via dot-path from event payload",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Import ExecutionContext and resolveValue from ./field-interpolator.js. Pure function — no DB, no I/O. The execCtx param is threaded through so that field paths that reference execution context keys (e.g. '{{event_id}}') also work inside condition field paths, though this is uncommon."
+    },
+    {
+      "id": "US-003",
+      "title": "Active Hours Calculator — delay-until-window-open computation (pure function + unit tests)",
+      "description": "As a developer, I need a pure active-hours module so that send_message and send_email workers can determine whether to execute immediately or delay until the next window-open time in the correct timezone.",
+      "acceptanceCriteria": [
+        "src/services/active-hours.ts exports type ActiveHoursConfig = { start: string; end: string; timezone_field: string } where start and end are 'HH:MM' 24-hour strings",
+        "Exports computeDelay(config: ActiveHoursConfig, eventPayload: Record<string, unknown>, execCtx: ExecutionContext, now?: Date): number",
+        "Returns 0 (execute immediately) when the current time in the resolved timezone is within [start, end) window",
+        "Returns milliseconds until the next occurrence of start time when the current time is before the window opens on the same calendar day",
+        "Returns milliseconds until the next occurrence of start time on the following calendar day when the current time is after the window has closed (delay always ≤ 86400000 ms / 24 h)",
+        "timezone_field is resolved from eventPayload via resolveValue from field-interpolator",
+        "When the resolved timezone string is missing, empty, or invalid (not a recognised IANA timezone), logs a console.warn and falls back to UTC",
+        "start === end is treated as an always-open window (returns 0 immediately)",
+        "Uses the Intl.DateTimeFormat API (available in Node 24) for timezone-aware time-of-day calculation — no additional timezone library required",
+        "add luxon as a dependency ONLY if Intl-based DST handling proves insufficient; otherwise use native Intl",
+        "test/unit/active-hours.test.ts injects a fixed `now` Date via the optional parameter to make all tests deterministic; covers: current time inside window (returns 0), current time before window on same day (returns correct positive ms), current time after window end (delay rolls to next day, ≤ 86400000 ms), window crossing midnight (e.g. start 22:00, end 06:00 next day), missing/invalid timezone falls back to UTC and returns a number (no throw), start === end returns 0",
+        "DST edge case test: use a timezone with a known DST transition (e.g. America/New_York) and a `now` that is at a DST boundary — assert returned delay is > 0 and ≤ 86400000",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Import ExecutionContext and resolveValue from ./field-interpolator.js. Pure function — no DB, no I/O. The `now` optional param exists solely for test determinism; workers call computeDelay() without it (defaults to new Date()). The function does NOT schedule anything — it only returns a delay number. Workers own the BullMQ delay call."
+    }
+  ]
+}
