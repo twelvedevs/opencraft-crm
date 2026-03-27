@@ -1,7 +1,7 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyPluginAsync } from 'fastify';
 import type { Knex } from 'knex';
-import { RulesRepository } from '../repositories/rules.repository.js';
+import { RulesRepository, type UpdateRuleWithVersionInput } from '../repositories/rules.repository.js';
 import { validateActionTree } from '../services/rule-validator.js';
 
 const RuleSchema = Type.Object({
@@ -110,6 +110,113 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex }> = async (fastify, opts) => {
       });
 
       return reply.status(201).send(rule);
+    },
+  );
+
+  const PutRuleBodySchema = Type.Object({
+    name: Type.Optional(Type.String()),
+    trigger_event_type: Type.Optional(Type.String()),
+    condition: Type.Optional(Type.Any()),
+    active_hours: Type.Optional(Type.Any()),
+    action_tree: Type.Optional(Type.Any()),
+  });
+
+  fastify.put(
+    '/rules/:id',
+    {
+      schema: {
+        params: Type.Object({ id: Type.String() }),
+        body: PutRuleBodySchema,
+        response: {
+          200: RuleSchema,
+          404: Type.Object({ error: Type.String() }),
+          422: Type.Object({ errors: Type.Array(Type.String()) }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as UpdateRuleWithVersionInput;
+
+      if (body.action_tree !== undefined) {
+        const validation = validateActionTree(body.action_tree);
+        if (!validation.valid) {
+          return reply.status(422).send({ errors: validation.errors });
+        }
+      }
+
+      const rule = await repo.updateWithVersion(id, body);
+      if (!rule) {
+        return reply.status(404).send({ error: 'Not found' });
+      }
+      return reply.send(rule);
+    },
+  );
+
+  fastify.put(
+    '/rules/:id/versions/:v/activate',
+    {
+      schema: {
+        params: Type.Object({ id: Type.String(), v: Type.String() }),
+        response: {
+          200: RuleSchema,
+          404: Type.Object({ error: Type.String() }),
+          409: Type.Object({ error: Type.String() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id, v } = request.params as { id: string; v: string };
+      const version = parseInt(v, 10);
+
+      const rule = await repo.findByIdRaw(id);
+      if (!rule) {
+        return reply.status(404).send({ error: 'Not found' });
+      }
+      if (rule.status === 'deleted') {
+        return reply.status(409).send({ error: 'Rule is deleted' });
+      }
+
+      const ruleVersion = await repo.findVersion(id, version);
+      if (!ruleVersion) {
+        return reply.status(404).send({ error: 'Not found' });
+      }
+
+      const updated = await repo.activateVersion(id, version);
+      return reply.send(updated);
+    },
+  );
+
+  const PatchStatusBodySchema = Type.Object({
+    status: Type.Union([Type.Literal('active'), Type.Literal('disabled')]),
+  });
+
+  fastify.patch(
+    '/rules/:id/status',
+    {
+      schema: {
+        params: Type.Object({ id: Type.String() }),
+        body: PatchStatusBodySchema,
+        response: {
+          200: RuleSchema,
+          404: Type.Object({ error: Type.String() }),
+          422: Type.Object({ error: Type.String() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { status } = request.body as { status: string };
+
+      if (status !== 'active' && status !== 'disabled') {
+        return reply.status(422).send({ error: 'status must be active or disabled' });
+      }
+
+      const rule = await repo.updateStatus(id, status);
+      if (!rule) {
+        return reply.status(404).send({ error: 'Not found' });
+      }
+      return reply.send(rule);
     },
   );
 

@@ -41,6 +41,14 @@ export interface UpdateRuleInput {
   name?: string;
 }
 
+export interface UpdateRuleWithVersionInput {
+  name?: string;
+  trigger_event_type?: string;
+  condition?: unknown;
+  active_hours?: unknown;
+  action_tree?: unknown;
+}
+
 export interface CreateVersionInput {
   rule_id: string;
   version: number;
@@ -168,6 +176,56 @@ export class RulesRepository {
         status: 'active',
         updated_at: this.db.fn.now(),
       })
+      .returning('*');
+    return (row as Rule) ?? null;
+  }
+
+  async findByIdRaw(id: string): Promise<Rule | null> {
+    const row = await this.db(RULES_TABLE).where({ id }).first();
+    return (row as Rule) ?? null;
+  }
+
+  async updateWithVersion(id: string, data: UpdateRuleWithVersionInput): Promise<Rule | null> {
+    return this.db.transaction(async (trx) => {
+      const rule = await trx(RULES_TABLE).where({ id }).whereNot('status', 'deleted').first() as Rule | undefined;
+      if (!rule) return null;
+
+      const prev = await trx(VERSIONS_TABLE)
+        .where({ rule_id: id, version: rule.current_version })
+        .first() as RuleVersion | undefined;
+
+      const newVersion = rule.current_version + 1;
+
+      await trx(VERSIONS_TABLE).insert({
+        rule_id: id,
+        version: newVersion,
+        trigger_event_type: data.trigger_event_type ?? prev?.trigger_event_type ?? '',
+        condition: data.condition !== undefined ? data.condition : (prev?.condition ?? null),
+        active_hours: data.active_hours !== undefined ? data.active_hours : (prev?.active_hours ?? null),
+        action_tree: JSON.stringify(data.action_tree !== undefined ? data.action_tree : (prev?.action_tree ?? {})),
+        created_by: null,
+      });
+
+      const updateData: Record<string, unknown> = {
+        current_version: newVersion,
+        updated_at: trx.fn.now(),
+      };
+      if (data.name !== undefined) updateData['name'] = data.name;
+
+      const [updated] = await trx(RULES_TABLE)
+        .where({ id })
+        .update(updateData)
+        .returning('*');
+
+      return (updated as Rule) ?? null;
+    });
+  }
+
+  async updateStatus(id: string, status: string): Promise<Rule | null> {
+    const [row] = await this.db(RULES_TABLE)
+      .where({ id })
+      .whereNot('status', 'deleted')
+      .update({ status, updated_at: this.db.fn.now() })
       .returning('*');
     return (row as Rule) ?? null;
   }
