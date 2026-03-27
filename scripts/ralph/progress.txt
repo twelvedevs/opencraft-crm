@@ -1,5 +1,5 @@
 # Ralph Progress Log
-Started: Fri Mar 27 18:36:36 +03 2026
+Started: Thu Mar 27 00:00:00 +03 2026
 ---
 
 ## Codebase Patterns
@@ -13,47 +13,4 @@ Started: Fri Mar 27 18:36:36 +03 2026
 - tsconfig only includes src/**/* — test files are not typechecked by tsc
 - resolveParams treats any string matching /^[a-zA-Z_][\w.]*$/ as a dot-path reference into eventCtx — use strings with hyphens/numbers in test data to avoid unintentional resolution (e.g. 'static-header-value' not 'value')
 
----
-
-## 2026-03-27 - US-001
-- Implemented call_ai action worker: AI Service call, output storage, auto_send paths
-- Files changed:
-  - apps/platform/automation/src/services/action-workers/call-ai.worker.ts (created)
-  - apps/platform/automation/test/unit/action-workers/call-ai-worker.test.ts (created)
-  - scripts/ralph/prd.json (US-001 passes: true)
-- **Learnings for future iterations:**
-  - active_hours null check uses `!= null` (covers both null and undefined) per PRD spec
-  - dedup_key for auto_send path: `exec_ctx.event_id + '-ai-autosend'` (hardcoded suffix)
-  - model and dedup_key fields are conditionally added to AI payload only if defined
-  - 11 tests covering all acceptance criteria scenarios pass
----
-
-## 2026-03-27 - US-002
-- Implemented call_webhook action worker: secret resolution in headers + AbortController timeout → immediate step failure
-- Files changed:
-  - apps/platform/automation/src/services/action-workers/call-webhook.worker.ts (created)
-  - apps/platform/automation/test/unit/action-workers/call-webhook-worker.test.ts (created)
-  - scripts/ralph/prd.json (US-002 passes: true)
-- **Learnings for future iterations:**
-  - AbortError detection: `err instanceof Error && err.name === 'AbortError'` — do NOT use `AbortSignal.timeout()` for compatibility
-  - Declare `let webhookRes!: Response` outside try/catch (definite assignment assertion `!` required for TypeScript)
-  - resolveHeaderSecrets uses `^{{(\\w+)}}$` — matches ENTIRE header value only; partial patterns like `Bearer {{token}}` are not resolved
-  - resolveParams processes headers first (as part of action_params); unresolvable `{{key}}` tokens stay as-is; resolveHeaderSecrets catches them second-pass
-  - Test gotcha: resolveParams interprets plain word strings as dot-path references — use strings with hyphens in test data (e.g. 'static-header-value')
-  - 10 tests passing covering all acceptance criteria
----
-
-## 2026-03-27 - US-003
-- Implemented AWS Secrets Manager resolver + wired call_ai and call_webhook workers into index.ts
-- Files changed:
-  - apps/platform/automation/package.json (added @aws-sdk/client-secrets-manager dependency)
-  - apps/platform/automation/src/services/secrets-resolver.ts (created)
-  - apps/platform/automation/src/index.ts (added imports + secretsResolver + 2 new workers)
-  - apps/platform/automation/package-lock.json (updated by npm install)
-- **Learnings for future iterations:**
-  - createSecretsResolver creates ONE SecretsManagerClient instance in closure scope — reused across all calls
-  - secretsResolver placed immediately after jobCanceller (before fastify.register) for locality with other queue/worker setup
-  - call_ai uses execRepo (ExecutionRepository), not repo (RulesRepository) — same pattern as send_message/send_email
-  - npm install updates package-lock.json — must stage it alongside package.json in the commit
-  - All 184 tests pass with no changes needed to test files
 ---
