@@ -66,7 +66,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "The secret pattern `^{{(\\w+)}}$` matches the ENTIRE header value — partial patterns like `Bearer {{token}}` are NOT resolved (leave that as a future enhancement; the spec only shows full-value secret patterns). Note: `resolveParams` runs BEFORE secret resolution — it processes `{{key}}` values via its TEMPLATE_TOKEN_RE which tries exec_ctx first, returning `{{key}}` unchanged if exec_ctx has no such field. The second-pass `resolveHeaderSecrets` then catches these unchanged `{{key}}` values and resolves them via AWS. For AbortError testing: `const err = new Error('aborted'); err.name = 'AbortError'; fetchFn.mockRejectedValue(err)`. Do NOT use `AbortSignal.timeout()` — use `AbortController` + `setTimeout` for compatibility with Node.js 24 and test mocking. For the `webhookRes` variable: declare `let webhookRes!: Response` outside the try/catch (TypeScript needs it initialized before use in the ok-check). The `resolveHeaderSecrets` helper is exported so it can be unit-tested directly — write the direct unit tests before the processor integration tests in the same test file."
     },
     {
