@@ -1,0 +1,15 @@
+## Codebase Patterns
+- Test files in `test/unit/` import from `../../src/services/<module>.js` (ESM `.js` extension required even for `.ts` sources)
+- The project uses `"type": "module"` + NodeNext resolution — always use `.js` extensions in imports
+- `vitest run` executes all test files under `test/`; no extra config needed
+- Pure service modules go in `src/services/`; no registration in index.ts needed for pure functions
+- DOT_PATH_RE must be checked before TEMPLATE_TOKEN_RE since dot-paths won't contain `{{}}` but template strings might match path-like patterns
+- Use `Intl.DateTimeFormat` with `hourCycle: 'h23'` for timezone-aware time-of-day extraction; no third-party library needed
+- For active-hours tests: inject a fixed `now` Date using UTC-aligned timestamps so wall-clock time == UTC clock time; avoids test flakiness
+- TypeBox schemas use `import { Type } from '@sinclair/typebox'`; runtime checks use `import { Value } from '@sinclair/typebox/value'`
+- `RulesRepository` lives in `src/repositories/rules.repository.ts` — extend it for new query methods rather than creating a separate file
+- `Condition` type is in `src/services/condition-evaluator.ts`; `ActiveHoursConfig` is in `src/services/active-hours.ts`; `ExecutionContext` is in `src/services/field-interpolator.ts`
+
+# Ralph Progress Log
+Started: Fri Mar 27 16:08:49 +03 2026
+---

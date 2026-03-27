@@ -1,0 +1,91 @@
+{
+  "project": "Ortho CRM — Automation Engine",
+  "branchName": "ralph-3",
+  "description": "Phase 3 — Event Consumer + Rule Matching: add findActiveByEventType query + TTL cache to RulesRepository, TypeBox-validated EventBridge envelope parser, Rule Matcher wiring Phase 2 condition evaluator, and SQS consumer + EventConsumer orchestration with ExecutionManagerPort stub handoff.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "ActiveRule type + findActiveByEventType query + RuleCache with TTL",
+      "description": "As a developer, I need a query that loads all active rules for a given event type and a TTL cache around it, so that the Rule Matcher can look up matching rules without hitting the DB on every event.",
+      "acceptanceCriteria": [
+        "Export `ActiveRule` interface from `src/repositories/rules.repository.ts`: `{ rule_id: string; rule_name: string; rule_version: number; trigger_event_type: string; condition: unknown | null; active_hours: unknown | null; action_tree: unknown }`",
+        "Add `findActiveByEventType(eventType: string): Promise<ActiveRule[]>` to `RulesRepository` — JOINs `automation_rules` (status = 'active') to `automation_rule_versions` on `rv.rule_id = r.id AND rv.version = r.active_version` filtered by `rv.trigger_event_type = eventType`; returns mapped `ActiveRule[]`",
+        "Create `src/services/rule-cache.ts` exporting `RuleCache` class",
+        "`new RuleCache(repo: RulesRepository, ttlMs?: number)` — `ttlMs` defaults to `parseInt(process.env['RULE_CACHE_TTL_MS'] ?? '30000', 10)`",
+        "`getRulesForEvent(eventType: string): Promise<ActiveRule[]>` — returns in-memory cached result for `eventType` if entry exists and has not expired; on cache miss calls `repo.findActiveByEventType(eventType)`, stores result with current `Date.now()` timestamp, and returns it",
+        "Each cache key expires independently: `Date.now() - cachedAt >= ttlMs` triggers a fresh DB query",
+        "`invalidate(): void` method clears all cache entries",
+        "`test/unit/rule-cache.test.ts` mocks `RulesRepository.findActiveByEventType` and covers: (1) cache miss — repo called once and result returned; (2) second call within TTL — repo NOT called again, cached result returned; (3) call after TTL expires (advance Date.now mock) — repo called again; (4) `invalidate()` clears cache so next call goes to repo; (5) two different eventTypes cached independently",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Extend the existing `RulesRepository` class in `src/repositories/rules.repository.ts` — do not create a new repository file. The cache stores `{ rules: ActiveRule[]; cachedAt: number }` per eventType key in a `Map`. `invalidate()` is needed by tests; it is also useful for emergency cache flush in production but no HTTP endpoint is needed for it in Phase 3."
+    },
+    {
+      "id": "US-002",
+      "title": "InboundEvent TypeBox schema + EventBridge envelope parser",
+      "description": "As a developer, I need a validated InboundEvent type and a parser that extracts it from the SQS message body (which contains the EventBridge event envelope), so that the Event Consumer can safely hand strongly-typed events to the Rule Matcher.",
+      "acceptanceCriteria": [
+        "Create `src/events/inbound-event.ts`",
+        "Export `InboundEventSchema` defined with `Type.Object` from `@sinclair/typebox`: `{ event_id: Type.String(), event_type: Type.String(), entity_type: Type.Optional(Type.String()), entity_id: Type.Optional(Type.String()), payload: Type.Record(Type.String(), Type.Unknown()) }`",
+        "Export `type InboundEvent = Static<typeof InboundEventSchema>` using `import { type Static } from '@sinclair/typebox'`",
+        "Export `class ParseError extends Error` with a `readonly cause?: unknown` property set in the constructor",
+        "Export `parseEventBridgeMessage(sqsBody: string): InboundEvent` — parses `sqsBody` as JSON (throws `ParseError` on invalid JSON); expects a top-level `detail` field containing the InboundEvent object; validates `detail` against `InboundEventSchema` using `Value.Check` from `@sinclair/typebox/value` (throws `ParseError` if invalid); returns the validated `detail` cast as `InboundEvent`",
+        "Any `event_type` string value is valid — the engine is generic and must not reject unknown event types",
+        "`entity_type` and `entity_id` are optional; their absence does not cause a validation failure",
+        "Extra fields on the envelope object (e.g., `id`, `source`, `time`, `region`) are ignored — only `detail` is required at the envelope level",
+        "`test/unit/inbound-event.test.ts` covers: (1) valid full event with all fields parses and returns correct InboundEvent; (2) event without entity_type/entity_id parses successfully; (3) malformed JSON body throws ParseError; (4) missing `detail` field in envelope throws ParseError; (5) `detail.event_id` missing throws ParseError; (6) `detail.payload` missing throws ParseError; (7) unknown event_type string is accepted; (8) extra envelope fields (id, source, time) are ignored and parse succeeds",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Use `Value.Check(InboundEventSchema, raw.detail)` for validation — returns boolean. Collect errors with `[...Value.Errors(InboundEventSchema, raw.detail)]` if you want to include them in the ParseError message. `Value` is imported from `@sinclair/typebox/value`. The `detail` field on the EventBridge envelope is the plain ortho event object — not nested further."
+    },
+    {
+      "id": "US-003",
+      "title": "Rule Matcher — cache lookup + condition evaluation wiring",
+      "description": "As a developer, I need a RuleMatcher that loads active rules from the cache and runs each through the condition evaluator, so that only rules whose conditions pass are forwarded to the Execution Manager.",
+      "acceptanceCriteria": [
+        "Create `src/services/rule-matcher.ts`",
+        "Export `MatchedRule` interface: `{ rule: ActiveRule; execCtx: ExecutionContext }`",
+        "Export `RuleMatcher` class: `constructor(cache: RuleCache)`",
+        "`matchRules(event: InboundEvent): Promise<MatchedRule[]>` — calls `cache.getRulesForEvent(event.event_type)`, then for each rule builds `execCtx: ExecutionContext = { event_id: event.event_id, execution_id: randomUUID(), rule_id: rule.rule_id, rule_version: rule.rule_version }` using `randomUUID` from `node:crypto`",
+        "For each rule, calls `evaluate(rule.condition as Condition | null | undefined, event as Record<string, unknown>, execCtx)` from `condition-evaluator.ts`; includes the rule in the return array only if `evaluate` returns `true`",
+        "A rule with `condition: null` always passes (the condition-evaluator already handles null — this is not special-cased in the matcher)",
+        "`test/unit/rule-matcher.test.ts` mocks `RuleCache` and covers: (1) single matching rule (truthy condition) — returned with execCtx.event_id == event.event_id and non-empty execCtx.execution_id; (2) single non-matching rule (falsy condition) — empty result; (3) rule with null condition — always returned; (4) three rules with mixed conditions — only passing ones returned; (5) empty cache result — returns []; (6) each matched rule gets its own unique execution_id (call matchRules twice, assert execution_ids differ)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Import `ActiveRule` from `../repositories/rules.repository.js`, `RuleCache` from `./rule-cache.js`, `type Condition, evaluate` from `./condition-evaluator.js`, `type ExecutionContext` from `./field-interpolator.js`, `InboundEvent` from `../events/inbound-event.js`. Cast `event` as `Record<string, unknown>` when passing to `evaluate` — InboundEvent is structurally compatible. `randomUUID` is built into Node 24 via `node:crypto` — no external dependency needed."
+    },
+    {
+      "id": "US-004",
+      "title": "SQS consumer + EventConsumer orchestration + index.ts wiring",
+      "description": "As a developer, I need an SQS poller that feeds parsed events into the EventConsumer, which matches rules and dispatches to an ExecutionManagerPort stub, so that the Phase 3 pipeline is end-to-end wired and ready for Phase 4 to plug in the real Execution Manager.",
+      "acceptanceCriteria": [
+        "Add `@aws-sdk/client-sqs` to `dependencies` in `package.json` and run `npm install`",
+        "Create `src/events/sqs-consumer.ts` exporting `SqsConsumer` class",
+        "`new SqsConsumer(options: { queueUrl: string; maxMessages?: number; waitSeconds?: number; onMessage: (body: string) => Promise<void>; logger?: Pick<Console, 'info' | 'error'> })` — stores options; creates an `SQSClient` from `@aws-sdk/client-sqs` using default credential chain (no hardcoded keys)",
+        "`start(): void` — sets `this.running = true` and calls `this.poll()` without awaiting (fire-and-forget loop)",
+        "`async stop(): Promise<void>` — sets `this.running = false` and awaits `this.pollDone` promise (a Promise that resolves when the current `poll()` invocation exits its loop), ensuring graceful drain",
+        "`private async poll(): Promise<void>` — loops while `this.running`; each iteration sends `ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: maxMessages (default 10), WaitTimeSeconds: waitSeconds (default 20) })`; for each message calls `await onMessage(message.Body ?? '')` then sends `DeleteMessageCommand({ QueueUrl, ReceiptHandle })`; on error from `onMessage` logs the error and still sends `DeleteMessageCommand` (message is always removed to prevent poison-pill redelivery loops — Phase 4 execution manager is responsible for its own retry logic)",
+        "Create `src/services/event-consumer.ts` exporting `ExecutionManagerPort` interface: `{ handle(rule: MatchedRule, event: InboundEvent): Promise<void> }`",
+        "Export `EventConsumer` class: `constructor(matcher: RuleMatcher, executionManager: ExecutionManagerPort, logger?: Pick<Console, 'info' | 'error'>)`",
+        "`async process(body: string): Promise<void>` — calls `parseEventBridgeMessage(body)`; on `ParseError` logs the error message and returns without throwing; on success calls `matcher.matchRules(event)`, then calls `await executionManager.handle(rule, event)` for each matched rule in order",
+        "Update `src/index.ts`: after `fastify.listen(...)` succeeds, create `RuleCache` (with `new RuleCache(repo)`), `RuleMatcher`, a no-op `ExecutionManagerPort` stub (`{ async handle() {} }`), `EventConsumer`, and `SqsConsumer` (with `queueUrl: process.env['SQS_QUEUE_URL'] ?? ''` and `onMessage: (body) => consumer.process(body)`); if `SQS_QUEUE_URL` is not set in env, log a warning (`fastify.log.warn`) and skip `sqsConsumer.start()`; if set, call `sqsConsumer.start()`",
+        "Register a `process.on('SIGTERM', ...)` handler in `src/index.ts` that calls `await sqsConsumer.stop()` then `await fastify.close()`",
+        "`test/unit/event-consumer.test.ts` mocks `parseEventBridgeMessage` (from `../events/inbound-event.js`), `RuleMatcher`, and `ExecutionManagerPort`; covers: (1) valid body → `parseEventBridgeMessage` called, `matcher.matchRules` called with parsed event, `executionManager.handle` called once per matched rule; (2) two matched rules → `executionManager.handle` called twice with correct args; (3) no matched rules → `executionManager.handle` never called; (4) `ParseError` thrown by `parseEventBridgeMessage` → logged, `process()` resolves without throwing; (5) generic Error thrown by `parseEventBridgeMessage` → logged, `process()` resolves without throwing",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "The `pollDone` promise pattern for graceful stop: in `start()`, set `this.pollDone = this.poll()` so `stop()` can `await this.pollDone`. The `SqsConsumer` uses default AWS SDK credential resolution — no explicit region/key config needed in code; the ECS task role provides credentials in production. The `ExecutionManagerPort` stub in `index.ts` is intentionally empty — Phase 4 replaces it. Do NOT delete the stub or make it a class; it is a simple object literal satisfying the interface."
+    }
+  ]
+}
