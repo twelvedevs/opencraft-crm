@@ -48,7 +48,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Import ExecutionContext and resolveValue from ./field-interpolator.js. Pure function — no DB, no I/O. The execCtx param is threaded through so that field paths that reference execution context keys (e.g. '{{event_id}}') also work inside condition field paths, though this is uncommon."
     },
     {

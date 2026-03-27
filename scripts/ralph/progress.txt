@@ -9,6 +9,18 @@
 Started: Fri Mar 27 16:08:49 +03 2026
 ---
 
+## 2026-03-27 - US-002
+- Implemented `src/services/condition-evaluator.ts` with `LeafCondition`, `GroupCondition`, `NotCondition`, `Condition` types and `evaluate()` function
+- Implemented `test/unit/condition-evaluator.test.ts` with 35 tests covering all 11 leaf operators (truthy + falsy), AND, OR, NOT, nested 3-level grouping, missing field → false, null → true, dot-path field resolution
+- Files changed: `src/services/condition-evaluator.ts`, `test/unit/condition-evaluator.test.ts`
+- **Learnings for future iterations:**
+  - `isGroup`/`isNot` type guards cleanly separate branch logic from leaf evaluation
+  - Missing field (resolves to `undefined`) returns `false` for all comparison ops except `not_exists` — guard with `if (fieldValue === undefined || fieldValue === null) return false` at top of each case
+  - For `in`/`not_in`, operand is the array (`leaf.value`) and the field value is the element being checked — not the reverse
+  - Re-exporting `LeafCondition` type in tests with a type-import alias works fine under NodeNext; `type LeafCondition = import('...').LeafCondition` at bottom of file is valid
+  - All 55 tests pass (5 rule-validator + 15 field-interpolator + 35 condition-evaluator)
+---
+
 ## 2026-03-27 - US-001
 - Implemented `src/services/field-interpolator.ts` with `ExecutionContext` type, `resolveValue`, and `resolveParams`
 - Implemented `test/unit/field-interpolator.test.ts` with 15 tests covering all acceptance criteria
