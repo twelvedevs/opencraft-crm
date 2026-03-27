@@ -35,3 +35,14 @@ Started: Fri Mar 27 19:21:05 +03 2026
   - Branch node is NOT included in would_execute output — the walker resolves only the winning leaf path
   - When mocking RulesRepository for route integration tests, mock ALL methods the constructor exposes (not just the ones under test) to avoid `undefined is not a function` runtime errors
 ---
+
+## 2026-03-27 - US-004
+- Created `src/services/retention.ts` — `RetentionService` class with `cleanup()` (reads `EXECUTION_LOG_RETENTION_DAYS` env var defaulting to 90, computes cutoff, calls `repo.deleteExecutionsBefore`) and `start(intervalMs)` (fire-and-forget immediate cleanup + setInterval, returns stop fn)
+- Updated `src/index.ts` — imports `RetentionService`, instantiates after `execRepo`, calls `retention.start()`, calls `stopRetention()` in SIGTERM handler before closing workers
+- Created `test/unit/retention.test.ts` — 4 unit tests: default 90-day cutoff, custom env var, correct return value, stop function halts future runs
+- Files changed: `apps/platform/automation/src/services/retention.ts` (new), `apps/platform/automation/src/index.ts`, `apps/platform/automation/test/unit/retention.test.ts` (new), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `vi.runAllTilesAsync` does not exist in vitest 2.1.9 — use `await Promise.resolve()` to flush a single fire-and-forget microtask tick
+  - `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()` reliably tests interval-based services without real delays
+  - Delete `process.env['KEY']` in afterEach (not `= undefined`) to fully remove env vars set during tests
+---
