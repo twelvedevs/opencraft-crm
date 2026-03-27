@@ -34,7 +34,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "The active hours check for auto_send happens AFTER the AI call (unlike send_message/send_email where it precedes marking 'running'). This is intentional: the AI call itself always executes immediately; only the synthetic send respects active hours. On retry after moveToDelayed, step is marked 'running' again (attempt incremented) and AI called again — this is fine because the dedup_key prevents duplicate AI side effects. The `output: { ai_draft }` extras field in `updateStepStatus` is already supported by the existing ExecutionRepository (column `output` is serialized as JSON). Do NOT modify the repository. For the AI request payload, only include `model` if defined (undefined model → field omitted, AI Service uses its configured default). The `store_as` field from action_params is NOT forwarded to AI Service — the worker always stores the result under the key `ai_draft` regardless. For the mock job: use `exec_ctx: { event_id: 'evt-1', execution_id: 'exec-1', rule_id: 'rule-1', rule_version: 1 }` so that `(exec_ctx as ExecutionContext).event_id + '-ai-autosend'` evaluates to `'evt-1-ai-autosend'` in assertions. Use `vi.fn().mockResolvedValueOnce(...)` chain for multiple fetch calls."
     },
     {

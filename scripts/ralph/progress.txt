@@ -1,22 +1,28 @@
 # Ralph Progress Log
-Started: Fri Mar 27 2026
+Started: Fri Mar 27 18:36:36 +03 2026
 ---
 
 ## Codebase Patterns
-- Use `const SCHEMA = 'platform_automation'` + template literals for table names
-- Knex bulk insert: `this.db(TABLE).insert(rowsArray)` — no `.returning()` needed when return value is void
-- Worker pattern: `createXxxProcessor(repo, queue, fetchFn?)` returning `(job: Job<ActionJobData>) => Promise<void>`
-- Active hours check occurs BEFORE `updateStepStatus('running')` — if delaying, step stays 'pending' until window opens (exception: call_ai checks active hours for auto_send AFTER AI call, since AI must execute immediately)
-- Use `job.moveToDelayed(Date.now() + delay, job.token)` to delay a BullMQ job from inside the processor
-- `resolveParams(action_params, event, exec_ctx as ExecutionContext)` handles all field interpolation; routing keys (`_next_step_id`, etc.) survive as literal UUIDs
-- `send_message`/`send_email` construct HTTP payload manually from extracted fields — no need to strip routing keys from body
-- Use `process.env[ENV_CONSTANT]` bracket notation (with exported constant) so tests can stub via `process.env`
-- Inject `fetchFn = globalThis.fetch` as last parameter to all workers that make HTTP calls — enables clean test mocking
-- Branch worker: does NOT call `updateExecutionStatus` — responsibility of the final action worker in the chain
-- `active_hours` flows through the entire action chain via `ActionJobData` — all workers must propagate it when enqueuing next steps
-- `JobCanceller.cancelDelayedJobsForRule(ruleId)` uses `queue.getDelayed()` + filter by `job.data.exec_ctx.rule_id`
-- `ExecutionRepository.updateStepStatus` already supports `output?: unknown` and `error?: string` extras — no repo changes needed for call_ai or call_webhook
-- `exec_ctx` is typed as `ExecutionContext` in `ActionJobData` but workers cast it `as ExecutionContext` — follow existing pattern
-- For timeout handling in call_webhook: use `AbortController` + `setTimeout`, NOT `AbortSignal.timeout()` — AbortError caught by name (`err.name === 'AbortError'`), mark step+execution failed, return WITHOUT rethrowing
-- Secret pattern `^{{(\w+)}}$` matches full header value only — partial patterns like `Bearer {{token}}` are not resolved
+- Action workers follow createXxxProcessor(repo, queue, fetchFn) factory pattern
+- fetchFn defaults to globalThis.fetch — injected in tests for mocking
+- Active hours check in send_message/send_email happens BEFORE marking 'running'; in call_ai it happens AFTER the AI call (intentional: AI call always executes immediately)
+- Step chain pattern: if nextStepId → findStepById → if non-null → queue.add; else → updateExecutionStatus('completed')
+- updateStepStatus 'completed' accepts extras.output for storing JSON result
+- Test mock job: moveToDelayed must be added as vi.fn().mockResolvedValue(undefined) to the job object
+- vi.mock for active-hours must use factory returning { computeDelay: vi.fn() }; import mocked fn after vi.mock call
+- tsconfig only includes src/**/* — test files are not typechecked by tsc
 
+---
+
+## 2026-03-27 - US-001
+- Implemented call_ai action worker: AI Service call, output storage, auto_send paths
+- Files changed:
+  - apps/platform/automation/src/services/action-workers/call-ai.worker.ts (created)
+  - apps/platform/automation/test/unit/action-workers/call-ai-worker.test.ts (created)
+  - scripts/ralph/prd.json (US-001 passes: true)
+- **Learnings for future iterations:**
+  - active_hours null check uses `!= null` (covers both null and undefined) per PRD spec
+  - dedup_key for auto_send path: `exec_ctx.event_id + '-ai-autosend'` (hardcoded suffix)
+  - model and dedup_key fields are conditionally added to AI payload only if defined
+  - 11 tests covering all acceptance criteria scenarios pass
+---
