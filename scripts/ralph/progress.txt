@@ -43,3 +43,17 @@ Started: Fri Mar 27 16:26:18 +03 2026
   - `randomUUID` from `node:crypto` is available in Node 24 with no extra deps
   - Cast `event as Record<string, unknown>` when passing `InboundEvent` to `evaluate` — structurally compatible, TS-safe
 ---
+
+## 2026-03-27 - US-004
+- Created `src/events/sqs-consumer.ts`: `SqsConsumer` class with `start()`, `stop()` (graceful drain via `pollDone` promise), and private `poll()` loop using `@aws-sdk/client-sqs`
+- Created `src/services/event-consumer.ts`: `ExecutionManagerPort` interface + `EventConsumer` class with `process(body)` — catches both `ParseError` and generic errors, logs and returns without throwing
+- Updated `src/index.ts`: wires `RulesRepository → RuleCache → RuleMatcher → EventConsumer → SqsConsumer`; skips `sqsConsumer.start()` if `SQS_QUEUE_URL` not set; registers `SIGTERM` handler
+- Created `test/unit/event-consumer.test.ts`: 5 tests covering all acceptance criteria (valid body, two rules, no rules, ParseError, generic Error)
+- Added `@aws-sdk/client-sqs: ^3.0.0` to dependencies and ran `npm install`
+- Files changed: `package.json`, `package-lock.json`, `src/index.ts`, `src/events/sqs-consumer.ts`, `src/services/event-consumer.ts`, `test/unit/event-consumer.test.ts`
+- **Learnings for future iterations:**
+  - Graceful SQS stop pattern: `start()` sets `this.pollDone = this.poll()`, `stop()` sets `running = false` then `await this.pollDone`
+  - To partially mock a module (keep some exports real, mock others): use `vi.mock(path, async (importOriginal) => { const actual = await importOriginal(); return { ...actual, targetFn: vi.fn() }; })`
+  - `SQSClient({})` uses default credential chain — no explicit region/key config needed; ECS task role provides creds in prod
+  - Always delete SQS message even if `onMessage` throws — prevents poison-pill redelivery loops
+---
