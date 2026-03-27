@@ -1,135 +1,79 @@
 {
   "project": "Ortho CRM — Automation Engine",
-  "branchName": "ralph-1",
-  "description": "Phase 1 — Schema & Rule Management API: DB migrations for all 4 platform_automation tables, repository layer, rule DSL validator, and full REST API for rule CRUD, versioning, and lifecycle management.",
+  "branchName": "ralph-2",
+  "description": "Phase 2 — Evaluation Core: three pure-function modules (Field Interpolator, Condition Evaluator, Active Hours Calculator) with full Vitest unit test coverage.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Service scaffold — apps/platform/automation",
-      "description": "As a developer, I need the Automation Engine service directory initialised with correct project files so subsequent stories have a working build target.",
+      "title": "Field Interpolator — dot-notation + template string resolver (pure function + unit tests)",
+      "description": "As a developer, I need a pure field-interpolator module so that condition evaluation, active hours calculation, and action param binding can all resolve event-payload paths and execution-context template strings through a single consistent mechanism.",
       "acceptanceCriteria": [
-        "Create directory tree: apps/platform/automation/src/{routes,services,repositories,events}/, migrations/, test/unit/, test/integration/",
-        "package.json: name @platform/automation, type module (ESM), engines.node >=24, deps: fastify@^5, @fastify/sensible, knex@^3, pg, @sinclair/typebox@^0.34, bullmq, pino, devDeps: typescript@^5, vitest, @types/node, tsx",
-        "tsconfig.json: module NodeNext, moduleResolution NodeNext, strict true, target ES2022, outDir dist, rootDir src",
-        "src/index.ts: creates Fastify instance with pino logger, registers a /healthz route returning { ok: true }, calls fastify.listen on PORT env (default 3000)",
-        "Dockerfile: node:24-alpine, copies source, runs npm ci --omit=dev, CMD node dist/index.js",
-        "Typecheck passes"
-      ],
-      "priority": 1,
-      "passes": true,
-      "notes": "No external deps needed at runtime yet — just scaffolding. ESM throughout (import/export, .js extensions in relative imports)."
-    },
-    {
-      "id": "US-002",
-      "title": "Database migrations — platform_automation schema (all 4 tables)",
-      "description": "As a developer, I need Knex migration files that create the full platform_automation schema so the service has its complete DB structure from day one.",
-      "acceptanceCriteria": [
-        "migrations/001_create_automation_rules.ts: creates automation_rules table with columns: id uuid PK, name text NOT NULL, status text NOT NULL DEFAULT 'draft', active_version integer nullable, current_version integer NOT NULL DEFAULT 1, created_by uuid, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now()",
-        "migrations/002_create_automation_rule_versions.ts: creates automation_rule_versions with: id uuid PK, rule_id uuid NOT NULL REFERENCES automation_rules(id), version integer NOT NULL, trigger_event_type text NOT NULL, condition jsonb, active_hours jsonb, action_tree jsonb NOT NULL, created_by uuid, created_at timestamptz DEFAULT now(); UNIQUE(rule_id, version); index on trigger_event_type",
-        "migrations/003_create_automation_executions.ts: creates automation_executions with: id uuid PK, rule_id uuid NOT NULL REFERENCES automation_rules(id), rule_version integer NOT NULL, action_tree_snapshot jsonb NOT NULL, event_id text NOT NULL, event_type text NOT NULL, entity_type text, entity_id text, status text NOT NULL, started_at timestamptz, completed_at timestamptz; UNIQUE(event_id, rule_id)",
-        "migrations/004_create_automation_execution_steps.ts: creates automation_execution_steps with: id uuid PK, execution_id uuid NOT NULL REFERENCES automation_executions(id), action_type text NOT NULL, action_params jsonb, output jsonb, status text NOT NULL, attempt integer NOT NULL DEFAULT 0, error text, started_at timestamptz, completed_at timestamptz",
-        "migrations/knexfile.ts exports default config using DATABASE_URL env with schema: platform_automation, migrationsTableName: knex_migrations",
-        "Running knex migrate:latest against a Postgres instance applies all 4 migrations without error",
-        "Typecheck passes"
-      ],
-      "priority": 2,
-      "passes": true,
-      "notes": "All tables in platform_automation schema (set search_path in connection config). Executions/steps tables are used in later phases but must exist now per the phase spec."
-    },
-    {
-      "id": "US-003",
-      "title": "Repository layer — rules and rule versions",
-      "description": "As a developer, I need a typed Knex repository for automation_rules and automation_rule_versions so route handlers and services have a clean DB access interface.",
-      "acceptanceCriteria": [
-        "src/repositories/rules.repository.ts exports class RulesRepository with constructor(db: Knex)",
-        "create(data: CreateRuleInput): Promise<Rule> — inserts into automation_rules (status: 'draft', current_version: 1) and returns the created row",
-        "findAll(filters?: { status?: string }): Promise<Rule[]> — returns all non-deleted rules, optional status filter, ordered by created_at DESC",
-        "findById(id: string): Promise<Rule | null> — returns rule or null",
-        "update(id: string, data: Partial<UpdateRuleInput>): Promise<Rule | null> — updates rule row, sets updated_at, returns updated row or null if not found",
-        "softDelete(id: string): Promise<boolean> — sets status = 'deleted', updated_at = now(); returns true if row was found and updated",
-        "insertVersion(data: CreateVersionInput): Promise<RuleVersion> — inserts into automation_rule_versions, returns created row",
-        "findVersion(ruleId: string, version: number): Promise<RuleVersion | null>",
-        "activateVersion(ruleId: string, version: number): Promise<Rule | null> — sets automation_rules.active_version = version, status = 'active', updated_at = now(); returns updated rule",
-        "All TypeScript types (Rule, RuleVersion, CreateRuleInput, etc.) defined in src/repositories/rules.repository.ts or a co-located types file",
-        "Typecheck passes"
-      ],
-      "priority": 3,
-      "passes": true,
-      "notes": "Pure DB access — no validation logic here. Use Knex querybuilder; no raw SQL except where unavoidable."
-    },
-    {
-      "id": "US-004",
-      "title": "Rule DSL validator — branch nesting cap and required fields (pure function + unit tests)",
-      "description": "As a developer, I need a pure validation function for the rule action_tree DSL so invalid rules are rejected at save time before hitting the DB.",
-      "acceptanceCriteria": [
-        "src/services/rule-validator.ts exports validateActionTree(tree: unknown): ValidationResult where ValidationResult = { valid: true } | { valid: false; errors: string[] }",
-        "Rejects action_tree missing type field: error 'action_tree: missing required field type'",
-        "Rejects branch node at nesting depth 4 or greater: error 'action_tree: branch nesting exceeds maximum depth of 3'",
-        "Accepts branch node at depth 1, 2, and 3 (valid)",
-        "Rejects send_message node missing dedup_key: logs warning string (does not return error — per Q&A answer C: worker proceeds without idempotency protection)",
-        "Rejects unknown action type: error 'action_tree: unknown action type <value>' for types not in [send_message, send_email, call_ai, enroll_sequence, emit_event, call_webhook, branch]",
-        "Validates both if_true and if_false branches of a branch node recursively",
-        "test/unit/rule-validator.test.ts covers: valid flat action tree, valid 3-level nested branch, invalid 4-level nested branch, missing type field, unknown action type",
+        "src/services/field-interpolator.ts exports type ExecutionContext = { event_id: string; execution_id: string; rule_id: string; rule_version: number }",
+        "Exports resolveValue(value: unknown, eventCtx: Record<string, unknown>, execCtx: ExecutionContext): unknown",
+        "resolveValue: a string like 'payload.phone' (matches /^[a-zA-Z_][\\w.]*$/) is treated as a dot-notation path and resolved via lodash-style deep lookup against eventCtx; returns undefined (not throws) when path is absent",
+        "resolveValue: a string containing '{{...}}' tokens (e.g. '{{event_id}}-sms', '{{rule_id}}') has each token replaced with the matching key from execCtx; unknown tokens are left as-is",
+        "resolveValue: a string that is neither a dot-path nor contains template tokens is returned as a literal",
+        "resolveValue: non-string values (number, boolean, null, object, array) are returned as-is without modification",
+        "Exports resolveParams(params: Record<string, unknown>, eventCtx: Record<string, unknown>, execCtx: ExecutionContext): Record<string, unknown>",
+        "resolveParams recursively resolves all string values within the params object, including values nested inside child objects and arrays, by calling resolveValue on each leaf string",
+        "test/unit/field-interpolator.test.ts covers: dot-notation present, dot-notation missing (returns undefined), deeply nested dot-path, single template token, multiple template tokens in one string, unknown template token left as-is, string literal passthrough, number/boolean/null passthrough, recursive object resolution (nested object), recursive array resolution (array of strings), mixed dot-path inside nested params object",
         "Typecheck passes",
         "Tests pass"
       ],
-      "priority": 4,
-      "passes": true,
-      "notes": "Pure function — no DB, no I/O, no side effects. Branch depth counted from root (root branch node = depth 1). The send_message dedup_key warning is a log warning not a hard error per Q&A Q7 answer C."
+      "priority": 1,
+      "passes": false,
+      "notes": "Pure function — no DB, no I/O, no side effects. No external dependencies required; implement dot-path lookup manually (split on '.', reduce). Template tokens: match /\\{\\{(\\w+)\\}\\}/g, replace from execCtx. This module is imported by Condition Evaluator (US-002) and Active Hours Calculator (US-003)."
     },
     {
-      "id": "US-005",
-      "title": "Read API routes — GET /rules and GET /rules/:id",
-      "description": "As an API consumer, I want to list and retrieve automation rules so I can display them in the rule management UI.",
+      "id": "US-002",
+      "title": "Condition Evaluator — boolean expression tree evaluator (pure function + unit tests)",
+      "description": "As a developer, I need a pure condition-evaluator module so that the Rule Matcher can test whether an incoming event payload satisfies a rule's condition tree before creating an execution.",
       "acceptanceCriteria": [
-        "src/routes/rules.ts registers GET /rules route on the Fastify instance",
-        "GET /rules accepts optional query param ?status= (draft|active|disabled); omitting it returns all non-deleted rules",
-        "GET /rules response: 200 array of rule objects with fields: id, name, status, active_version, current_version, created_by, created_at, updated_at",
-        "GET /rules/:id returns 200 with single rule object if found, 404 with { error: 'Not found' } if not found or soft-deleted",
-        "TypeBox schemas defined for both responses and query params; Fastify serialises using the schemas",
-        "Routes registered in src/index.ts via fastify.register(rulesRoutes)",
-        "Typecheck passes"
+        "src/services/condition-evaluator.ts exports the following TypeScript types: LeafCondition = { field: string; op: 'eq'|'neq'|'in'|'not_in'|'gt'|'gte'|'lt'|'lte'|'contains'|'exists'|'not_exists'; value?: unknown }, GroupCondition = { op: 'AND'|'OR'; conditions: Condition[] }, NotCondition = { op: 'NOT'; condition: Condition }, Condition = LeafCondition | GroupCondition | NotCondition",
+        "Exports evaluate(condition: Condition | null | undefined, event: Record<string, unknown>, execCtx: ExecutionContext): boolean",
+        "evaluate returns true when condition is null or undefined (no condition = always passes)",
+        "Field values are resolved from the event object using resolveValue from field-interpolator (dot-notation path lookup)",
+        "eq: resolved field value strictly equals operand; neq: strictly not equal",
+        "in: operand is an array and includes the resolved field value; not_in: operand is an array and does not include the resolved field value",
+        "gt/gte/lt/lte: numeric comparison between resolved field value (coerced to number) and operand (coerced to number)",
+        "contains: resolved field value is a string and includes operand string, OR resolved field value is an array and includes operand",
+        "exists: resolved field value is not undefined and not null; not_exists: resolved field value is undefined or null",
+        "AND: returns true only if all sub-conditions in conditions[] evaluate to true (short-circuits on first false)",
+        "OR: returns true if at least one sub-condition in conditions[] evaluates to true (short-circuits on first true)",
+        "NOT: returns the negation of the single nested condition",
+        "Nested grouping: AND containing OR containing NOT evaluates correctly",
+        "Missing field (path resolves to undefined) for comparison operators (eq, gt, in, contains, etc.) returns false without throwing",
+        "test/unit/condition-evaluator.test.ts covers: each of the 11 leaf operators (both truthy and falsy case), AND (all-true, one-false), OR (one-true, all-false), NOT (true→false, false→true), nested AND/OR/NOT three levels deep, missing field returns false, null condition returns true, field resolved via dot-path from event payload",
+        "Typecheck passes",
+        "Tests pass"
       ],
-      "priority": 5,
-      "passes": true,
-      "notes": "No auth middleware in Phase 1 — auth is wired later. Soft-deleted rules (status='deleted') must not appear in any list or single-fetch response."
+      "priority": 2,
+      "passes": false,
+      "notes": "Import ExecutionContext and resolveValue from ./field-interpolator.js. Pure function — no DB, no I/O. The execCtx param is threaded through so that field paths that reference execution context keys (e.g. '{{event_id}}') also work inside condition field paths, though this is uncommon."
     },
     {
-      "id": "US-006",
-      "title": "Write routes — POST /rules and DELETE /rules/:id",
-      "description": "As an API consumer, I want to create new draft rules and soft-delete existing ones so I can manage the rule library.",
+      "id": "US-003",
+      "title": "Active Hours Calculator — delay-until-window-open computation (pure function + unit tests)",
+      "description": "As a developer, I need a pure active-hours module so that send_message and send_email workers can determine whether to execute immediately or delay until the next window-open time in the correct timezone.",
       "acceptanceCriteria": [
-        "POST /rules accepts body: { name: string, trigger_event_type: string, condition?: object, active_hours?: object, action_tree: object, created_by?: string }",
-        "POST /rules runs validateActionTree on action_tree; returns 422 with { errors: string[] } if invalid",
-        "POST /rules on success: inserts automation_rules row (status: 'draft', current_version: 1) and automation_rule_versions row (version: 1), returns 201 with created rule object",
-        "DELETE /rules/:id returns 204 on successful soft-delete (status → 'deleted')",
-        "DELETE /rules/:id returns 404 if rule not found or already deleted",
-        "TypeBox schemas defined for POST body and all responses",
-        "Typecheck passes"
+        "src/services/active-hours.ts exports type ActiveHoursConfig = { start: string; end: string; timezone_field: string } where start and end are 'HH:MM' 24-hour strings",
+        "Exports computeDelay(config: ActiveHoursConfig, eventPayload: Record<string, unknown>, execCtx: ExecutionContext, now?: Date): number",
+        "Returns 0 (execute immediately) when the current time in the resolved timezone is within [start, end) window",
+        "Returns milliseconds until the next occurrence of start time when the current time is before the window opens on the same calendar day",
+        "Returns milliseconds until the next occurrence of start time on the following calendar day when the current time is after the window has closed (delay always ≤ 86400000 ms / 24 h)",
+        "timezone_field is resolved from eventPayload via resolveValue from field-interpolator",
+        "When the resolved timezone string is missing, empty, or invalid (not a recognised IANA timezone), logs a console.warn and falls back to UTC",
+        "start === end is treated as an always-open window (returns 0 immediately)",
+        "Uses the Intl.DateTimeFormat API (available in Node 24) for timezone-aware time-of-day calculation — no additional timezone library required",
+        "add luxon as a dependency ONLY if Intl-based DST handling proves insufficient; otherwise use native Intl",
+        "test/unit/active-hours.test.ts injects a fixed `now` Date via the optional parameter to make all tests deterministic; covers: current time inside window (returns 0), current time before window on same day (returns correct positive ms), current time after window end (delay rolls to next day, ≤ 86400000 ms), window crossing midnight (e.g. start 22:00, end 06:00 next day), missing/invalid timezone falls back to UTC and returns a number (no throw), start === end returns 0",
+        "DST edge case test: use a timezone with a known DST transition (e.g. America/New_York) and a `now` that is at a DST boundary — assert returned delay is > 0 and ≤ 86400000",
+        "Typecheck passes",
+        "Tests pass"
       ],
-      "priority": 6,
-      "passes": true,
-      "notes": "POST creates both the rule group row and the first version row atomically (use a Knex transaction). active_version stays NULL on creation — rule is draft until explicitly activated."
-    },
-    {
-      "id": "US-007",
-      "title": "Edit and lifecycle routes — PUT /rules/:id, PUT /rules/:id/versions/:v/activate, PATCH /rules/:id/status",
-      "description": "As an API consumer, I want to edit rules, activate specific versions, and toggle rule status so I can manage the full rule lifecycle.",
-      "acceptanceCriteria": [
-        "PUT /rules/:id accepts body: { name?: string, trigger_event_type?: string, condition?: object, active_hours?: object, action_tree?: object }",
-        "PUT /rules/:id runs validateActionTree on action_tree if provided; returns 422 if invalid",
-        "PUT /rules/:id on success: inserts a new automation_rule_versions row with version = current_version + 1, increments automation_rules.current_version, updates name if provided; returns 200 with updated rule object",
-        "PUT /rules/:id returns 404 if rule not found or deleted",
-        "PUT /rules/:id/versions/:v/activate: sets automation_rules.active_version = v, status = 'active', updated_at = now(); returns 200 with updated rule",
-        "PUT /rules/:id/versions/:v/activate returns 404 if rule or version not found; returns 409 if rule is 'deleted'",
-        "PATCH /rules/:id/status accepts body: { status: 'active' | 'disabled' }; updates rule status; returns 200 with updated rule",
-        "PATCH /rules/:id/status returns 422 if status is not 'active' or 'disabled'; returns 404 if rule not found or deleted",
-        "TypeBox schemas defined for all request bodies and responses",
-        "Typecheck passes"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": "Activation does not re-validate the action_tree — validation happens only at save time. PATCH /rules/:id/status 'active' is allowed even if active_version is NULL (rule stays active but no version will match — this is a degenerate state the UI should prevent but the API does not block)."
+      "priority": 3,
+      "passes": false,
+      "notes": "Import ExecutionContext and resolveValue from ./field-interpolator.js. Pure function — no DB, no I/O. The `now` optional param exists solely for test determinism; workers call computeDelay() without it (defaults to new Date()). The function does NOT schedule anything — it only returns a delay number. Workers own the BullMQ delay call."
     }
   ]
 }

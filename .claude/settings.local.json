@@ -12,7 +12,10 @@
       "Bash(for f:*)",
       "Bash(do echo:*)",
       "Read(//Users/andrey/dev/pre-sale/ortho/**)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(mkdir -p /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-27-phase-1-schema-rule-management)",
+      "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/prd.json /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-27-phase-1-schema-rule-management/prd.json)",
+      "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/progress.txt /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-27-phase-1-schema-rule-management/progress.txt)"
     ]
   }
 }

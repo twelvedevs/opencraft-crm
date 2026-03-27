@@ -1,0 +1,101 @@
+## 2026-03-27 - US-007
+- Added `updateWithVersion` (transactional: reads current version to inherit fields, inserts new version, increments current_version), `findByIdRaw` (no deleted filter), and `updateStatus` methods to `RulesRepository`
+- Added `UpdateRuleWithVersionInput` interface to the repository
+- Added PUT /rules/:id — validates action_tree if provided, calls updateWithVersion, returns 200 or 404/422
+- Added PUT /rules/:id/versions/:v/activate — uses findByIdRaw to distinguish 404 (missing) from 409 (deleted), then findVersion → 404, then activateVersion → 200
+- Added PATCH /rules/:id/status — TypeBox Union schema handles 422 at schema level; updateStatus returns null → 404
+- Files changed: `src/repositories/rules.repository.ts`, `src/routes/rules.ts`
+- **Learnings for future iterations:**
+  - Distinguish "not found" (404) from "exists but deleted" (409) by calling `findByIdRaw` (no deleted filter) before the deleted-aware methods
+  - `updateWithVersion` must read the previous version row first to inherit trigger_event_type, condition, active_hours, action_tree when not provided by caller — these are NOT NULL or required fields in the DB
+  - TypeBox Union with Literal values in the body schema validates status at the Fastify schema layer; an explicit status check in the handler is still harmless but redundant
+---
+
+## Codebase Patterns
+- For transactional multi-table inserts (e.g., rule + version), add a dedicated method to the repository that calls `this.db.transaction(async (trx) => { ... })` — keeps route handlers clean
+- TypeBox `Type.Null()` as the 204 response schema allows `reply.status(204).send()` without TypeScript errors — omitting it causes TS2345 since Fastify infers reply types from the schema response map
+
+- Knex db instance created via `createDb()` in `src/db.ts`; injected into Fastify plugins via plugin options (`FastifyPluginAsync<{ db: Knex }>`)
+- Use `Type.Any()` for timestamptz date fields in TypeBox response schemas — avoids fast-json-stringify coercion issues with JS Date objects
+- Fastify v5 route plugin pattern: `const plugin: FastifyPluginAsync<Opts> = async (fastify, opts) => {}; export default plugin`
+- Always add `.gitignore` with `node_modules/` and `dist/` before staging service files — `git add apps/platform/<service>/` will otherwise pull in node_modules
+- ESM throughout: `"type": "module"` in package.json, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig.json
+- Fastify v5 with `@fastify/sensible`; use `logger: true` for pino — no pino-pretty dep needed
+- `tsc --noEmit` is the typecheck command (via `npm run typecheck`)
+- Vitest runs with no config file needed; `npm run test` (vitest run) works out of the box for ESM projects
+- Knex migrations: use `withSchema('platform_automation')` on every `knex.schema` call; create schema in migration 001 with `knex.raw('CREATE SCHEMA IF NOT EXISTS platform_automation')`
+- knexfile.ts lives in `migrations/` alongside migration files; set `directory: '.'` in migrations config
+- tsconfig.json `include` only covers `src/**/*` — migration files are excluded from typecheck by design (avoids rootDir conflict)
+
+# Ralph Progress Log
+Started: Fri Mar 27 15:46:31 +03 2026
+---
+
+## 2026-03-27 - US-001
+- Scaffolded `apps/platform/automation` service from scratch
+- Files changed: `.gitignore`, `Dockerfile`, `package.json`, `package-lock.json`, `tsconfig.json`, `src/index.ts`
+- Created directory tree: `src/{routes,services,repositories,events}/`, `migrations/`, `test/unit/`, `test/integration/`
+- **Learnings for future iterations:**
+  - All platform service directories exist but are empty — fully greenfield
+  - Must create `.gitignore` before `git add` on a service directory to exclude `node_modules/`
+  - `npm run typecheck` (tsc --noEmit) is the quality gate for each story
+  - Fastify v5 `logger: true` uses pino directly without needing pino-pretty in deps
+---
+
+## 2026-03-27 - US-002
+- Created all 4 Knex migration files for the `platform_automation` schema
+- Files changed: `migrations/knexfile.ts`, `migrations/001_create_automation_rules.ts`, `migrations/002_create_automation_rule_versions.ts`, `migrations/003_create_automation_executions.ts`, `migrations/004_create_automation_execution_steps.ts`
+- **Learnings for future iterations:**
+  - Use `withSchema('platform_automation')` on every `knex.schema` builder call; Knex does not auto-apply searchPath to schema builder calls even if configured in knexfile
+  - Create the schema itself in migration 001 via `knex.raw('CREATE SCHEMA IF NOT EXISTS platform_automation')`
+  - Foreign key cross-schema references use the fully qualified table name string: `.references('id').inTable('platform_automation.automation_rules')`
+  - `migrations/` dir is excluded from main tsconfig (rootDir is `src`); typecheck passes because migration files are outside the include scope
+  - knexfile.ts placed in `migrations/` alongside migration files; `directory: '.'` points to same folder
+---
+
+## 2026-03-27 - US-003
+- Created `src/repositories/rules.repository.ts` with `RulesRepository` class
+- Methods: `create`, `findAll`, `findById`, `update`, `softDelete`, `insertVersion`, `findVersion`, `activateVersion`
+- Exported types: `Rule`, `RuleVersion`, `CreateRuleInput`, `UpdateRuleInput`, `CreateVersionInput`
+- Files changed: `src/repositories/rules.repository.ts`
+- **Learnings for future iterations:**
+  - Use fully-qualified table names (`platform_automation.automation_rules`) as the Knex table argument — avoids needing to call `.withSchema()` on every query builder
+  - `this.db.fn.now()` for `updated_at` in update/softDelete calls
+  - `action_tree` is jsonb in DB — pass `JSON.stringify(data.action_tree)` on insert to ensure correct serialization
+  - `softDelete` filters by `whereNot('status', 'deleted')` before update so it returns `count === 0` if already deleted
+---
+
+## 2026-03-27 - US-005
+- Created `src/db.ts` with `createDb()` Knex factory using DATABASE_URL
+- Created `src/routes/rules.ts` with GET /rules (optional `?status=` filter) and GET /rules/:id
+- Updated `src/index.ts` to initialize db and register rulesRoutes plugin
+- Files changed: `src/db.ts`, `src/routes/rules.ts`, `src/index.ts`
+- **Learnings for future iterations:**
+  - Plugin options pattern: `FastifyPluginAsync<{ db: Knex }>` — pass db cleanly without Fastify decorator/augmentation
+  - TypeBox `Type.Any()` for timestamptz fields in response schema — `fast-json-stringify` can't coerce Date objects to strings when schema says `type: string`
+  - `Type.Optional(Type.Union([...]))` for optional query params with allowed literal values
+  - Soft-deleted rules excluded at repository layer (`whereNot('status', 'deleted')`) — routes don't need extra filtering
+---
+
+## 2026-03-27 - US-004
+- Created `src/services/rule-validator.ts` with `validateActionTree` pure function
+- Created `test/unit/rule-validator.test.ts` with 5 unit tests (all passing)
+- Files changed: `src/services/rule-validator.ts`, `test/unit/rule-validator.test.ts`
+- **Learnings for future iterations:**
+  - Vitest works with no config file in ESM projects — no `vitest.config.ts` needed
+  - Branch depth starts at 1 for the root node; check `depth >= 4` to reject depth-4 branch nodes
+  - `send_message` missing `dedup_key` is a `console.warn` only — not added to errors array
+  - Test file imports use `.js` extension on relative paths (ESM NodeNext): `../../src/services/rule-validator.js`
+---
+
+## 2026-03-27 - US-006
+- Added `createWithVersion` method to `RulesRepository` — wraps rule + version inserts in a Knex transaction
+- Added `CreateRuleWithVersionInput` interface to the repository
+- Added POST /rules route with TypeBox body schema and validateActionTree check (422 on invalid)
+- Added DELETE /rules/:id route returning 204 on success, 404 if not found
+- Files changed: `src/repositories/rules.repository.ts`, `src/routes/rules.ts`
+- **Learnings for future iterations:**
+  - `this.db.transaction(async (trx) => { ... })` for atomic multi-table inserts — no changes needed to existing repo methods
+  - TypeBox `Type.Null()` needed for 204 response schema entry — otherwise Fastify/TS infers `reply.status(204)` as a type error since the schema map only contains `404`
+  - Import `validateActionTree` at the top of the routes file; call it before any DB operation
+---
