@@ -1,0 +1,17 @@
+# Ralph Progress Log
+Started: Fri Mar 27 2026
+---
+
+## Codebase Patterns
+- Use `const SCHEMA = 'platform_automation'` + template literals for table names
+- Knex bulk insert: `this.db(TABLE).insert(rowsArray)` — no `.returning()` needed when return value is void
+- Worker pattern: `createXxxProcessor(repo, queue, fetchFn?)` returning `(job: Job<ActionJobData>) => Promise<void>`
+- Active hours check occurs BEFORE `updateStepStatus('running')` — if delaying, step stays 'pending' until window opens
+- Use `job.moveToDelayed(Date.now() + delay, job.token)` to delay a BullMQ job from inside the processor
+- `resolveParams(action_params, event, exec_ctx)` handles all field interpolation; routing keys (`_next_step_id`, etc.) survive as literal UUIDs
+- `send_message`/`send_email` construct HTTP payload manually from extracted fields — no need to strip routing keys from body
+- Use `process.env[ENV_CONSTANT]` bracket notation (with exported constant) so tests can stub via `process.env`
+- Inject `fetchFn = globalThis.fetch` as last parameter to all workers that make HTTP calls — enables clean test mocking
+- Branch worker: does NOT call `updateExecutionStatus` — responsibility of the final action worker in the chain
+- `active_hours` flows through the entire action chain via `ActionJobData` — all workers must propagate it when enqueuing next steps
+- `JobCanceller.cancelDelayedJobsForRule(ruleId)` uses `queue.getDelayed()` + filter by `job.data.exec_ctx.rule_id`
