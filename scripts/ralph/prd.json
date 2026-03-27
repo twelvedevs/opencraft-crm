@@ -108,7 +108,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "POST creates both the rule group row and the first version row atomically (use a Knex transaction). active_version stays NULL on creation — rule is draft until explicitly activated."
     },
     {

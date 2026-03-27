@@ -1,4 +1,7 @@
 ## Codebase Patterns
+- For transactional multi-table inserts (e.g., rule + version), add a dedicated method to the repository that calls `this.db.transaction(async (trx) => { ... })` — keeps route handlers clean
+- TypeBox `Type.Null()` as the 204 response schema allows `reply.status(204).send()` without TypeScript errors — omitting it causes TS2345 since Fastify infers reply types from the schema response map
+
 - Knex db instance created via `createDb()` in `src/db.ts`; injected into Fastify plugins via plugin options (`FastifyPluginAsync<{ db: Knex }>`)
 - Use `Type.Any()` for timestamptz date fields in TypeBox response schemas — avoids fast-json-stringify coercion issues with JS Date objects
 - Fastify v5 route plugin pattern: `const plugin: FastifyPluginAsync<Opts> = async (fastify, opts) => {}; export default plugin`
@@ -70,4 +73,16 @@ Started: Fri Mar 27 15:46:31 +03 2026
   - Branch depth starts at 1 for the root node; check `depth >= 4` to reject depth-4 branch nodes
   - `send_message` missing `dedup_key` is a `console.warn` only — not added to errors array
   - Test file imports use `.js` extension on relative paths (ESM NodeNext): `../../src/services/rule-validator.js`
+---
+
+## 2026-03-27 - US-006
+- Added `createWithVersion` method to `RulesRepository` — wraps rule + version inserts in a Knex transaction
+- Added `CreateRuleWithVersionInput` interface to the repository
+- Added POST /rules route with TypeBox body schema and validateActionTree check (422 on invalid)
+- Added DELETE /rules/:id route returning 204 on success, 404 if not found
+- Files changed: `src/repositories/rules.repository.ts`, `src/routes/rules.ts`
+- **Learnings for future iterations:**
+  - `this.db.transaction(async (trx) => { ... })` for atomic multi-table inserts — no changes needed to existing repo methods
+  - TypeBox `Type.Null()` needed for 204 response schema entry — otherwise Fastify/TS infers `reply.status(204)` as a type error since the schema map only contains `404`
+  - Import `validateActionTree` at the top of the routes file; call it before any DB operation
 ---
