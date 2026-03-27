@@ -1,0 +1,18 @@
+## Codebase Patterns
+- Tests use Vitest with `vi.fn()` for mocks; import from `vitest` directly (not jest)
+- All imports use `.js` extension (ESM module resolution, even for `.ts` source files)
+- `RulesRepository` lives in `src/repositories/rules.repository.ts` — extend it in place, do not create new repo files
+- `Date.now()` can be spied on with `vi.spyOn(Date, 'now')` to advance TTL in tests
+- TypeBox: use `Value.Check(schema, val)` for boolean validation; `Value.Errors(schema, val)` for error details (spread into array); import `Value` from `@sinclair/typebox/value`
+- EventBridge envelope: only `detail` field matters — all other envelope fields (id, source, time, region) are ignored
+- To mock a module in Vitest: use `vi.mock('../../src/services/condition-evaluator.js', () => ({ evaluate: vi.fn() }))` then `import { evaluate } from '...'` after the mock — hoisting handles the ordering
+- SCHEMA constant pattern: `const SCHEMA = 'platform_automation'`; table refs: `${SCHEMA}.automation_executions`
+- BullMQ Queue is typed: `Queue<ActionJobData>` — always pass the job data type parameter
+- BullMQ workers are mocked with `vi.mock('bullmq')` in unit tests — Worker constructor requires real Redis otherwise
+- Worker processor functions are created via factory closures (not classes) to inject dependencies: `createBranchProcessor(repo, queue) => (job) => Promise<void>`
+- Routing metadata in action_params uses `_` prefix: `_next_step_id`, `_if_true_step_id`, `_if_false_step_id`, `_if_true_subtree_ids`, `_if_false_subtree_ids` — strip these before any outbound HTTP/EventBridge call
+---
+
+# Ralph Progress Log
+Started: Fri Mar 27 2026 — Phase 4
+---

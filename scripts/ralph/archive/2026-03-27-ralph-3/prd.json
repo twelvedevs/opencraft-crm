@@ -27,7 +27,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": "Use Knex bulk insert pattern: `this.db(STEPS_TABLE).insert(rows)` — Knex accepts an array for bulk insert. For `updateStepStatus` extras, build the update object dynamically: only include a key if the extras value is not `undefined`. Do NOT use `.returning('*')` on bulk inserts unless you need the return value — `insertSteps` returns void so skip it. Follow the same Knex patterns already established in `RulesRepository`."
     },
     {
@@ -49,7 +49,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": "The `_if_true_subtree_ids` and `_if_false_subtree_ids` arrays include the root step of each subtree — so `_if_true_step_id === _if_true_subtree_ids[0]`. This allows the branch worker to mark ALL steps in the losing subtree (including the losing root) as 'skipped' with a single `updateManyStepsStatus` call. `params` on RegularActionNode may be undefined in practice — use `node.params ?? {}` as the spread source. The function has no I/O — it's synchronous and pure except for `randomUUID` calls."
     },
     {
@@ -66,7 +66,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": "The `connection` parameter is typed as `object` to remain compatible with both a plain `{ host, port }` config object and an IORedis instance — BullMQ 5 accepts both. `attempts: 5` means 1 initial attempt + 4 retries. `backoff: { type: 'custom' }` tells BullMQ to use the `backoffStrategy` registered on the Worker (defined in the worker factory story). `removeOnComplete/removeOnFail` counts prevent Redis memory bloat over time."
     },
     {
@@ -92,7 +92,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": "The `ExecutionManager` does NOT update `execution.status` to 'running' explicitly — `insertExecution` defaults status to 'running'. It also does NOT mark it 'completed' at this stage — that is the responsibility of the last action worker in the chain. The only exception is the empty-tree guard (step 3), which immediately completes the execution. `QUEUE_NAME` is imported but not used directly in `queue.add` — BullMQ's `Queue` instance already targets the named queue. `queue.add(jobName, data)` where jobName is the action_type string."
     },
     {
@@ -119,7 +119,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": "BullMQ's `backoffStrategy` in `settings` receives `attemptsMade` (number of attempts already made, starting at 1 for the first retry). So `RETRY_DELAYS[attemptsMade - 1]` maps attempt 1→5000ms, attempt 2→30000ms, etc. The `'failed'` event fires on EVERY failed attempt, not just the last. The final-failure check (`attemptsMade >= opts.attempts`) distinguishes DLQ-worthy failures from normal retries. The `Worker` mock in tests: capture the `on` calls by storing them in a map, then call them manually to test the handler. Alternatively, call the backoffStrategy function extracted from the `new Worker(...)` args directly."
     },
     {
@@ -150,7 +150,7 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": "The `evaluate` import must be mocked — call `vi.mock('../../services/condition-evaluator.js', () => ({ evaluate: vi.fn() }))` then `import { evaluate } from '../../services/condition-evaluator.js'` after the mock. Cast `evaluate` to `vi.MockedFunction` for `mockReturnValue`. The branch step itself does NOT check for `_next_step_id` — branches are always terminal on their own; the continuation is encoded in the winning child's params. `exec_ctx` passed to `queue.add` is the same exec_ctx from the job (preserves event_id, execution_id, rule_id, rule_version across the whole chain)."
     },
     {
@@ -185,7 +185,7 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": "Use `process.env[ENROLL_SEQUENCE_URL_ENV]` (bracket notation with the exported constant) — not a hardcoded string — so tests can set `process.env.NURTURING_ENGINE_URL`. Remember to `delete process.env.NURTURING_ENGINE_URL` in the missing-env-var test (or use `vi.stubEnv`). The `fetchFn` injection makes HTTP mocking trivial in tests without patching globalThis. `resolveParams` already handles nested objects recursively — no need to recurse manually."
     },
     {
@@ -231,7 +231,7 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": true,
+      "passes": false,
       "notes": "For the `ebClient.send` test: `PutEventsCommand` is a class — mock `@aws-sdk/client-eventbridge` with `vi.mock('@aws-sdk/client-eventbridge', () => ({ EventBridgeClient: vi.fn().mockImplementation(() => ({ send: vi.fn() })), PutEventsCommand: vi.fn().mockImplementation((input) => input) }))`. The `Detail` field on the EventBridge entry is a JSON string (not an object) — always `JSON.stringify(resolvedPayload)`. In `index.ts`, remove the now-unused `executionManagerStub` object literal and `ExecutionManagerPort` type import (the import comes from `event-consumer.ts` which still exports it — just remove the usage of the stub). Do NOT remove the `ExecutionManagerPort` export from `event-consumer.ts`."
     }
   ]
