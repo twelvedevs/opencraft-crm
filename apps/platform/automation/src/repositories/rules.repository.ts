@@ -1,5 +1,15 @@
 import type { Knex } from 'knex';
 
+export interface ActiveRule {
+  rule_id: string;
+  rule_name: string;
+  rule_version: number;
+  trigger_event_type: string;
+  condition: unknown | null;
+  active_hours: unknown | null;
+  action_tree: unknown;
+}
+
 export interface Rule {
   id: string;
   name: string;
@@ -219,6 +229,25 @@ export class RulesRepository {
 
       return (updated as Rule) ?? null;
     });
+  }
+
+  async findActiveByEventType(eventType: string): Promise<ActiveRule[]> {
+    const rows = await this.db(`${RULES_TABLE} as r`)
+      .join(`${VERSIONS_TABLE} as rv`, function () {
+        this.on('rv.rule_id', '=', 'r.id').andOn('rv.version', '=', 'r.active_version');
+      })
+      .where('r.status', 'active')
+      .where('rv.trigger_event_type', eventType)
+      .select(
+        'r.id as rule_id',
+        'r.name as rule_name',
+        'rv.version as rule_version',
+        'rv.trigger_event_type',
+        'rv.condition',
+        'rv.active_hours',
+        'rv.action_tree',
+      );
+    return rows as ActiveRule[];
   }
 
   async updateStatus(id: string, status: string): Promise<Rule | null> {
