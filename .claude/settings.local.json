@@ -8,7 +8,11 @@
       "Bash(curl -s http://localhost:53390)",
       "Skill(update-config)",
       "Read(//Users/andrey/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.5/**)",
-      "Bash(bash scripts/start-server.sh --project-dir /Users/andrey/dev/pre-sale/ortho)"
+      "Bash(bash scripts/start-server.sh --project-dir /Users/andrey/dev/pre-sale/ortho)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//Users/andrey/dev/pre-sale/ortho/**)",
+      "Bash(done)"
     ]
   }
 }

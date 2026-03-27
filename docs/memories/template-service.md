@@ -1,0 +1,4 @@
+
+### Template Service — Key API Decisions
+
+`POST /templates/render` accepts `template_id` (uuid) + `context` object → returns rendered `body_text` (SMS) or `subject` + `body_html` + `body_text` (email). Always renders `active_version` — returns `404` if `active_version IS NULL` or `status = disabled`. Merge tag syntax: `{{key}}` with dot-notation support. Missing tags → empty string + log. In-memory cache 30s TTL; `POST /templates/:id/disable` eagerly evicts cache. Email templates store pre-rendered HTML (Unlayer export) + Unlayer JSON (for re-editing); SMS templates store plain text. Two-table versioning: `templates` group + `template_versions`. **Call chain:** Automation Engine and Nurturing Engine workers call `POST /templates/render` first, then pass pre-rendered body to Messaging/Email Service — Messaging Service never calls Template Service. **Pending:** Automation Engine spec (Section 6) and Nurturing Engine spec need amendments to reflect this call chain.

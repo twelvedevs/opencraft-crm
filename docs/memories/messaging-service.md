@@ -1,0 +1,4 @@
+
+### Messaging Service — Key API Decisions
+
+`POST /messages/send` accepts `template` (string) + `context`, or pre-rendered `body`. Callers embed the template string inline — the Messaging Service does not store templates by ID. Duplicate `dedup_key` returns `200` with the original `message_id` (not `409`). Events published: `inbound_message.received` (includes `message_type`: `normal`|`stop`|`unstop`), `message.delivered`, `message.failed`, `opt_out.received`, `opt_out.removed`. Event payloads: `opt_out.received` = `{ phone_number, opted_out_at, source }`, `opt_out.removed` = `{ phone_number, removed_at }`, `message.delivered`/`message.failed` = `{ message_id, twilio_sid, to_number, from_number, ... }`, `inbound_message.received` = `{ message_id, from_number, to_number, body, media_urls, received_at, message_type }`. No `lead_id` in any Messaging Service event — domain-agnostic.
