@@ -80,6 +80,7 @@ Archived and merged-away leads remain queryable via `GET /leads/:id` — soft de
 | `phone` | varchar | normalized E.164 |
 | `email` | varchar nullable | |
 | `treatment_interest` | varchar nullable | e.g. braces, Invisalign |
+| `date_of_birth` | date nullable | used for 5-tier match logic in Data Import Service |
 | `channel` | enum | `website_form \| google_ads \| facebook_ads \| call_tracking \| referral \| walk_in \| chat \| google_business_profile \| csv_import` |
 | `contact_status` | enum | `active \| sms_opted_out \| email_invalid \| fully_unreachable` |
 | `current_pipeline` | enum | `new_patient \| in_treatment \| in_retention \| none` — denormalized cache; default `none` at creation |
@@ -107,6 +108,8 @@ Archived and merged-away leads remain queryable via `GET /leads/:id` — soft de
 | `first_touch_device` | varchar nullable |
 | `call_tracking_number` | varchar nullable |
 | `referrer_id` | uuid nullable |
+| `referrer_type` | varchar nullable | `patient` or `doctor` — type of referrer; set when `referrer_id` is non-null |
+| `referral_code` | varchar nullable | the referral link code used by the prospective patient on the intake form |
 | `ad_platform_lead_id` | varchar nullable |
 | `created_by_location` | uuid nullable |
 
@@ -213,7 +216,7 @@ All routes require a valid JWT via `@ortho/auth-middleware`. Location scoping en
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | `POST /leads` | Create lead | Any staff | Runs dedup check inline. Returns `201` with lead + `duplicate_status` if flagged. |
-| `GET /leads` | List leads | Any staff | Filter: `location_id`, `pipeline`, `stage`, `contact_status`, `channel`, `tag_id[]`, `q` (trigram search), `include_archived` (default false), `sort` (`score\|created_at\|last_activity_at`). Paginated (cursor). |
+| `GET /leads` | List leads | Any staff | Filter: `location_id`, `pipeline`, `stage`, `status` (active\|archived, default active), `contact_status`, `channel`, `tag_id[]`, `q` (trigram search), `include_archived` (default false), `sort` (`score\|created_at\|last_activity_at`). Bulk lookup: `phones[]` (array of normalized phone numbers, returns all matches), `emails[]` (array, returns all matches), `ids[]` (array of UUIDs, batch fetch by primary key — up to 500 per call). Paginated (cursor). When `location_id` is omitted, results are scoped to caller's assigned locations (marketing/super_admin roles see all). |
 | `GET /leads/:id` | Get lead | Any staff | Full record: attribution, current tags, score, current appointments. Returns archived and merged-away leads. |
 | `PATCH /leads/:id` | Update mutable fields | Coordinator role for name/phone/email/treatment_interest; Manager+ for `location_id` reassignment | Accepts: `first_name`, `last_name`, `phone`, `email`, `treatment_interest`. `location_id` reassignment restricted to `call_center_manager` or higher; publishes `lead.updated` with `changed_fields: ["location_id"]`; appointments keep their original `location_id`. Rejects attribution fields with `400`. |
 | `DELETE /leads/:id` | Archive lead | Manager+ | Soft delete — sets `archived_at`. |
@@ -242,6 +245,7 @@ All routes require a valid JWT via `@ortho/auth-middleware`. Location scoping en
 |---|---|---|
 | `POST /leads/:id/appointments` | Create appointment | Sets initial `status = scheduled`. Publishes `appointment.updated` with `status: "scheduled"`. |
 | `PATCH /leads/:id/appointments/:appt_id` | Update appointment | Status changes (`completed`, `no_show`, `cancelled`) publish `appointment.updated` with the new status. |
+| `DELETE /leads/:id/appointments/:appt_id` | Delete appointment | Hard delete. Used by Data Import Service undo phase to reverse exam_scheduled transitions. Does not publish `appointment.updated`. |
 | `GET /leads/:id/appointments` | List appointments for lead | |
 
 ### 4.5 Activity Timeline
@@ -264,7 +268,7 @@ All routes require a valid JWT via `@ortho/auth-middleware`. Location scoping en
 
 | Event | Trigger | Key Payload Fields |
 |---|---|---|
-| `lead.created` | New lead created | `lead_id`, `location_id`, `channel`, `current_pipeline: "none"`, `current_stage: null` |
+| `lead.created` | New lead created | `lead_id`, `location_id`, `channel`, `current_pipeline: "none"`, `current_stage: null`, `referrer_id?`, `referrer_type?`, `referral_code?` |
 | `lead.updated` | Mutable fields changed | `lead_id`, `location_id`, `changed_fields[]` |
 | `lead.merged` | Merge completed | `surviving_lead_id`, `merged_lead_id`, `location_id` |
 | `lead.archived` | Lead archived | `lead_id`, `location_id` |
@@ -277,7 +281,8 @@ Each handler documents the expected incoming payload shape and the resulting sta
 | Event | Source | Expected Payload Fields | State Update | Timeline Entry |
 |---|---|---|---|---|
 | `ad_lead.received` | Integration Hub | `platform`, `external_lead_id`, `campaign_id`, `ad_set_id?`, `ad_id?`, `form_id?`, `location_id`, `fields: { full_name, phone_number, email }` | Create lead. Idempotency: check `ad_platform_lead_id` index first — if exists, skip creation (SQS at-least-once delivery). Also run standard phone/email dedup check. | yes — `lead.created` activity |
-| `lead.stage_changed` | Pipeline Engine | `lead_id`, `location_id`, `pipeline`, `stage_to`, `stage_from` — **Pipeline Engine spec dependency:** spec must also define a `reason` field (`manual\|timeout\|no_show\|converted\|import\|archived`) and handle `stage_to: null` for archival transitions | Update `current_pipeline = pipeline`, `current_stage = stage_to` (null on archival); recalculate score | yes |
+| `lead.stage_changed` | Pipeline Engine | `lead_id`, `location_id`, `pipeline`, `stage_to`, `stage_from`, `reason`, `time_in_stage_seconds`, `response_time_seconds?` | Update `current_pipeline = pipeline`, `current_stage = stage_to`; recalculate score | yes |
+| `lead.archived` | Pipeline Engine | `lead_id`, `location_id` | Clear `current_pipeline = null`, `current_stage = null`; recalculate score | yes |
 | `lead.converted` | Pipeline Engine | `lead_id`, `location_id`, `channel` | Set `current_pipeline = none`, `current_stage = null` as a **transient intermediate state** — Pipeline Engine immediately follows with a `lead.stage_changed` for the new pipeline's initial stage enrollment, which will overwrite these values | yes |
 | `opt_out.received` | Messaging Service | `phone_number`, `opted_out_at`, `source: 'stop_reply'` — handler resolves lead via `leads.phone` lookup (see note below) | Set `contact_status` → `sms_opted_out` or `fully_unreachable` (if email already invalid); recalculate score | yes |
 | `opt_out.removed` | Messaging Service | `phone_number`, `removed_at` — handler resolves lead via `leads.phone` lookup | Restore `contact_status` → `active` or `email_invalid`; recalculate score | yes |
@@ -291,7 +296,7 @@ Each handler documents the expected incoming payload shape and the resulting sta
 
 **Note on phone-based lookup:** Messaging Service is domain-agnostic and never carries `lead_id`. Handlers resolve leads by normalizing the phone number and querying `leads.phone`. If no match is found, the handler logs a warning and skips — the phone may belong to an archived or never-imported lead. Phone numbers on `message.delivered`/`message.failed` are in `to_number`; on `inbound_message.received` use `from_number`; on opt-out events use `phone_number`.
 
-**Pending amendment:** Messaging Service spec currently lists `message.delivered`, `message.failed`, and `inbound_message.received` as consumed by Conversation Service and Analytics only. The spec must be amended to add Lead Service as a subscriber to all three events for activity timeline purposes.
+**Note:** Messaging Service spec has been amended to add Lead Service as a subscriber to `message.delivered`, `message.failed`, and `inbound_message.received` for activity timeline purposes.
 
 **Note on `lead.stage_timeout`:** Pipeline Engine also publishes `lead.stage_timeout` for non-archival timeouts. Lead Service intentionally does not subscribe — `lead.stage_changed` (which Pipeline Engine emits alongside or instead of `lead.stage_timeout`) is sufficient for cache updates.
 
@@ -397,6 +402,7 @@ apps/crm/lead/
 │   │   └── handlers/
 │   │       ├── ad-lead-received.ts
 │   │       ├── stage-changed.ts
+│   │       ├── lead-archived.ts
 │   │       ├── lead-converted.ts
 │   │       ├── opt-out-received.ts
 │   │       ├── opt-out-removed.ts

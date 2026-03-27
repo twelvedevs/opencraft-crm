@@ -118,6 +118,8 @@ POST /emails/campaigns/send
 {
   "job_ref": "campaign_456",           // caller's reference ID — idempotency key
   "location_id": "loc_123",
+  "entity_type": "campaign",           // optional — passed through to EventBridge engagement events
+  "entity_id": "campaign-uuid",        // optional — the Campaign Service campaign ID
   "template_id": "post-exam-email",
   "subject_template": "{{first_name}}, your treatment plan is ready",
   "recipients": [
@@ -250,6 +252,8 @@ email_campaign_jobs (
   id                uuid PRIMARY KEY,
   job_ref           text UNIQUE,           -- caller idempotency key
   location_id       text NOT NULL,
+  entity_type       text,                  -- optional correlation field from caller (e.g. "campaign")
+  entity_id         text,                  -- optional correlation field from caller (e.g. Campaign Service campaign ID)
   template_id       text NOT NULL,
   subject_template  text NOT NULL,
   domain_id         uuid REFERENCES email_sending_domains NOT NULL,
@@ -366,11 +370,13 @@ All events use the standard `@ortho/event-bus` envelope: `{ event_id, event_type
 | `email.delivered` | SendGrid confirms delivery to inbox | `email_id`, `to_email`, `location_id`, `entity_type?`, `entity_id?`, `campaign_job_id?` |
 | `email.opened` | Campaign recipient opens email (pixel) | `email_id`, `to_email`, `location_id`, `entity_type?`, `entity_id?`, `campaign_job_id?` |
 | `email.clicked` | Recipient clicks a tracked link | `email_id`, `to_email`, `url`, `location_id`, `entity_type?`, `entity_id?`, `campaign_job_id?` |
-| `email.bounced` | Hard bounce (SendGrid `bounce` event) | `email_id`, `to_email`, `location_id`, `bounce_type: "hard"`, `campaign_job_id?` |
+| `email.bounced` | Hard bounce (SendGrid `bounce` event) | `email_id`, `to_address`, `location_id`, `bounce_type: "hard"`, `campaign_job_id?` |
 | `email.unsubscribed` | Recipient clicks unsubscribe | `to_email`, `location_id` |
 | `email.spam_reported` | Recipient marks as spam | `to_email`, `location_id` |
 | `email.failed` | Max retries exceeded (transactional) | `email_id`, `to_email`, `location_id`, `entity_type?`, `entity_id?`, `dedup_key`, `error` |
 | `email.campaign_completed` | Campaign job reaches terminal state | `job_id`, `job_ref`, `status`, `total_recipients`, `sent_count`, `failed_count`, `location_id` |
+
+**Campaign engagement correlation:** When `entity_type: "campaign"` and `entity_id: "<campaign_id>"` are set on the job (via `POST /emails/campaigns/send`), these values are included in `email.opened` and `email.clicked` events. Analytics Service uses `entity_id` as the campaign dimension for engagement rollups (`metrics_campaigns_daily.opened`, `.clicked`). When `entity_type`/`entity_id` are absent (e.g., transactional sends), the events still publish but without campaign attribution.
 
 **Subscribers:**
 - `email.bounced` → Lead Service (flags lead email as undeliverable)
@@ -383,7 +389,7 @@ All events use the standard `@ortho/event-bus` envelope: `{ event_id, event_type
 
 | SendGrid Event | Classification | Email Service Action |
 |---|---|---|
-| `bounce` with `type = "bounce"` | Hard (permanent) | Status → `bounced`, `bounced_at` set, publish `email.bounced { bounce_type: "hard" }`. Does not affect job `failed_count` — post-delivery bounce is engagement data, not a delivery failure. |
+| `bounce` with `type = "bounce"` | Hard (permanent) | Status → `bounced`, `bounced_at` set, publish `email.bounced { to_address, bounce_type: "hard" }`. Does not affect job `failed_count` — post-delivery bounce is engagement data, not a delivery failure. |
 | `bounce` with `type = "blocked"` | Blocked (temporary) | No status change, no event published. Treated as temporary suppression — may resolve on retry. |
 | `deferred` | Soft (temporary) | No status change, no event published — SendGrid retries automatically |
 | `spamreport` | Spam | Campaign recipient: status → `spam_reported`, publish `email.spam_reported`. Transactional send: status → `bounced`, `bounced_at` set, publish `email.spam_reported`. Neither increments job `failed_count`. |

@@ -19,7 +19,7 @@ The AI Service (`apps/platform/ai`) is a **thin Claude API gateway**. It is full
 
 **Callers:**
 - Automation Engine `call_ai` worker → `POST /ai/complete`
-- Conversation Service → `POST /ai/complete` (smart reply drafts, conversation summaries)
+- Conversation Service → `POST /ai/complete` (reply drafts, objection handling, agent replies, conversation summaries)
 
 **Out of scope:**
 - AI Agent autonomous mode (conversation management, escalation logic) — product layer (Conversation Service)
@@ -150,6 +150,11 @@ The asymmetry in ID format is intentional — it reflects the actual Anthropic A
 | `conversation-summary` | `haiku` | Summarize a long conversation thread into a 3-sentence briefing |
 | `follow-up-timing` | `haiku` | Suggest optimal next follow-up timing based on lead behavior |
 | `lead-scoring-commentary` | `haiku` | Explain why a lead is scored high or low |
+| `conversation-reply-drafts` | `haiku` | Generate 2–3 draft reply options for a coordinator, given the full conversation thread and lead context. Used by Conversation Service for the AI draft strip above the composer. |
+| `conversation-objection-handling` | `sonnet` | Suggest strategies for handling patient objections or concerns in an SMS conversation (e.g., cost concerns, scheduling hesitation). Returns structured suggestions. |
+| `conversation-agent-reply` | `haiku` | Generate a single autonomous reply for AI Agent mode. Returns `{ text: string, escalate: boolean }` as JSON — `escalate: true` triggers human handoff. Parse failure by caller treated as escalation. |
+
+**`conversation-agent-reply` structured output:** This prompt is designed to return a JSON object `{ "text": "<reply>", "escalate": <boolean> }`. The system prompt instructs the model to always respond in this JSON format. Conversation Service parses the response as JSON; any parse failure is treated as `escalate: true` (human handoff). The AI Service itself does not parse or validate the JSON — it returns the raw `text` string from Claude.
 
 ---
 
@@ -255,7 +260,10 @@ apps/platform/ai/
 │   │   ├── objection-handling.ts
 │   │   ├── conversation-summary.ts
 │   │   ├── follow-up-timing.ts
-│   │   └── lead-scoring-commentary.ts
+│   │   ├── lead-scoring-commentary.ts
+│   │   ├── conversation-reply-drafts.ts
+│   │   ├── conversation-objection-handling.ts
+│   │   └── conversation-agent-reply.ts
 │   ├── repositories/
 │   │   └── completions.ts           # ai_completions table (platform_ai schema only)
 │   └── index.ts                     # Fastify server, Arize Phoenix setup

@@ -165,8 +165,8 @@ A value matching neither form is used as a literal string.
 
 | Type | Description | Respects `active_hours` |
 |---|---|---|
-| `send_message` | SMS/MMS via Messaging Service (`POST /messages/send`) | Yes |
-| `send_email` | Email via Email Service (`POST /emails/send`) | Yes |
+| `send_message` | SMS/MMS — worker calls `POST /templates/render` first (with `template_id` + enrollment context), then passes the pre-rendered body to Messaging Service `POST /messages/send`. Messaging Service never calls Template Service. | Yes |
+| `send_email` | Email — worker calls `POST /templates/render` first (with `template_id` + enrollment context), then passes the pre-rendered `subject` + `body_html` + `body_text` to Email Service `POST /emails/send`. Email Service never calls Template Service. | Yes |
 | `call_ai` | Generate AI draft via AI Service (`POST /ai/complete`). Output stored in `step_executions.output`. When `auto_send: false` (default), the step completes and the Nurturing Engine publishes `nurturing.step_output_ready` carrying `enrollment_id`, `step_id`, `entity_type`, `entity_id`. The **Conversation Service** subscribes (via its own dedicated SQS queue), then pushes a real-time alert to the coordinator's browser via the Notification Service WebSocket. The coordinator UI then polls `GET /sequences/:id/enrollments/:eid/steps/:sid/output` to retrieve the draft. When `auto_send: true` (requires explicit manager config), the worker chains immediately into a `send_message` call using the AI output as the message body. | No |
 | `emit_event` | Publish event to EventBridge. Primary mechanism for product-layer side effects without importing product types. | No |
 
@@ -669,8 +669,9 @@ apps/platform/nurturing/
 | PostgreSQL (`platform_nurturing` schema) | Sequence definitions, enrollments, step executions |
 | Redis / ElastiCache | BullMQ delayed job queue |
 | AWS SQS (dedicated queue) | EventBridge subscription for `opt_out.received` |
-| Messaging Service | `send_message` action handler |
-| Email Service | `send_email` action handler |
+| Template Service | `send_message` + `send_email` action handlers — `POST /templates/render` called first to get pre-rendered body |
+| Messaging Service | `send_message` action handler — receives pre-rendered body from worker |
+| Email Service | `send_email` action handler — receives pre-rendered subject + body from worker |
 | AI Service | `call_ai` action handler |
 | AWS EventBridge | `emit_event` action + publishing `nurturing.*` events |
 
@@ -716,8 +717,9 @@ apps/platform/nurturing/
 ### Contract Tests
 
 **Outbound** — verify calls to platform services match expected API shape:
-- `POST /messages/send` — required fields, `dedup_key` present
-- `POST /emails/send` — required fields, context format
+- `POST /templates/render` — `template_id` + context, called before send actions
+- `POST /messages/send` — pre-rendered `body` (not `template_id`), `dedup_key` present
+- `POST /emails/send` — pre-rendered `subject` + `body_html` + `body_text` (not `template_id`), required fields
 - `POST /ai/complete` — `prompt_id`, context, model routing
 - EventBridge `nurturing.*` events — payload shape against `@ortho/event-bus` schema
 

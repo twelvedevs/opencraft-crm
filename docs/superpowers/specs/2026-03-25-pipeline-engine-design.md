@@ -176,11 +176,12 @@ previous_stage            varchar      NULL                 -- stage before curr
 last_transition_override  boolean      NOT NULL DEFAULT false
 closed_at                 timestamptz  NULL
 closed_reason             varchar      NULL
-                          CHECK (closed_reason IN ('converted', 'archived', 'manual', 'import'))
+                          CHECK (closed_reason IN ('converted', 'archived', 'manual', 'import', 'import_undo'))
                           -- 'converted': moved to another pipeline via /convert
                           -- 'archived': lost stage timed out after 30 days
                           -- 'manual': manually closed by coordinator
                           -- 'import': closed via Data Import Service
+                          -- 'import_undo': membership closed as part of a Data Import undo operation
 created_at                timestamptz  NOT NULL DEFAULT now()
 updated_at                timestamptz  NOT NULL DEFAULT now()
 ```
@@ -206,7 +207,7 @@ stage_from       varchar      NULL        -- NULL on initial enrollment
 stage_to         varchar      NOT NULL    -- always a valid stage name; archival writes a dedicated lead.archived event, not a history row with null stage_to
 override         boolean      NOT NULL DEFAULT false
 triggered_by     uuid         NULL        -- user_id; NULL for automated transitions
-reason           varchar      NULL        -- manual|timeout|no_show|converted|import
+reason           varchar      NULL        -- manual|timeout|no_show|converted|import|import_undo
 transitioned_at  timestamptz  NOT NULL DEFAULT now()
 ```
 
@@ -260,7 +261,7 @@ Move a lead to a new stage within the same pipeline.
   "stage":        "contacted",
   "override":     false,
   "triggered_by": "user-uuid",   // null for automated transitions
-  "reason":       "manual",      // manual|timeout|no_show|import
+  "reason":       "manual",      // manual|timeout|no_show|import|import_undo
   "timeout_at":   "..."          // required when transitioning to recall_due
 }
 ```
@@ -310,6 +311,26 @@ Valid `channel` values (must match exactly — `400` otherwise): `google_ads` | 
 
 ---
 
+### `POST /pipeline/memberships/:id/close`
+Directly close an active membership without transitioning to another pipeline. Used exclusively by the Data Import Service undo flow.
+
+**Request:**
+```json
+{
+  "triggered_by": "user-uuid",
+  "closed_reason": "import_undo"
+}
+```
+
+**Responses:**
+- `200` — updated membership object (`status: "closed"`, `closed_reason: "import_undo"`)
+- `400` — missing `triggered_by`
+- `409` — membership is not `active`
+
+**Behaviour:** Sets `pipeline_memberships.status = 'closed'`, `closed_reason = 'import_undo'`, `closed_at = NOW()`. Does NOT insert a `pipeline_stage_history` row — no stage transition occurred. Does NOT publish any EventBridge event — the undo caller (Data Import Service) handles any necessary downstream notifications. RBAC is enforced at the CRM API Gateway; only the Data Import Service (via API key) may call this endpoint.
+
+---
+
 ### Query endpoints
 
 | Method | Path | Query params | Response |
@@ -343,14 +364,20 @@ Published on every stage transition, including initial enrollment (`stage_from: 
     "pipeline":        "new_patient",
     "stage_from":      "new_lead",
     "stage_to":        "contacted",
-    "override":        false,
-    "triggered_by":    "user-uuid",
-    "reason":          "manual",
-    "timeout_at":      "...",
-    "transitioned_at": "..."
+    "override":               false,
+    "triggered_by":           "user-uuid",
+    "reason":                 "manual",
+    "timeout_at":             "...",
+    "transitioned_at":        "...",
+    "time_in_stage_seconds":  7200,
+    "response_time_seconds":  3600
   }
 }
 ```
+
+**`time_in_stage_seconds`** — always present when `stage_from` is not null. Computed as `transitioned_at - entered_stage_at` (time spent in the previous stage). Null on initial enrollment (`stage_from: null`).
+
+**`response_time_seconds`** — present only when `stage_to = 'contacted'` AND `stage_from` is not null AND `triggered_by` is non-null (coordinator-initiated). Computed as `transitioned_at - membership.created_at` (time from lead creation to first contact attempt). Null in all other cases.
 
 **Subscribers:** Lead Service (cache sync), Automation Engine (rule evaluation), Analytics Service (pipeline metrics).
 
@@ -531,7 +558,7 @@ EventBridge publish mocked via HTTP interceptor:
 ### Contract Tests
 
 Verify published event payloads against `@ortho/event-bus` schema:
-- `lead.stage_changed` — all required fields present: `location_id`, `pipeline`, `stage_to`, `reason`
+- `lead.stage_changed` — all required fields present: `location_id`, `pipeline`, `stage_to`, `reason`; `time_in_stage_seconds` present when `stage_from` is not null; `response_time_seconds` present when `stage_to = 'contacted'` AND `triggered_by` is non-null
 - `lead.converted` — `location_id` + `channel` present (required by Analytics Service)
 - `lead.stage_timeout` — `timed_out_stage` + `new_stage` present
 - `lead.archived` — `lead_id`, `location_id`, `pipeline` present

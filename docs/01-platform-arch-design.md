@@ -34,7 +34,7 @@ Domain-agnostic. No Ortho CRM concepts. Each service is separately deployed and 
 | **Nurturing Engine** | Generic drip/lifecycle sequence runtime. Define steps (action type, delay, conditions), schedule execution, branching, A/B splits. No domain knowledge — entities enrolled by type + ID. Ships `@platform/sequence-ui` React component. | `platform_nurturing` |
 | **Automation Engine** | Event-driven workflow runtime. Subscribes to domain events from EventBridge, evaluates trigger conditions, executes action chains (send message, update field, call webhook, branch). Ships `@platform/automation-ui` React component. | `platform_automation` |
 | **Audience Engine** | Schema-agnostic segment filter evaluation. Define filter criteria against any entity type, evaluate membership, create audience snapshots for campaigns. Ships `@platform/audience-ui` React component. | `platform_audience` |
-| **AI Service** | Claude API gateway. Prompt management, model routing (Claude Sonnet 4.6 for complex, Haiku 4.5 for high-volume), context injection, streaming, usage metering, response caching. | `platform_ai` |
+| **AI Service** | Claude API gateway. Prompt management, model routing (Claude Sonnet 4.6 for complex, Haiku 4.5 for high-volume), context injection, response caching. No streaming, no usage metering. | `platform_ai` |
 | **Analytics Service** | Event ingestion pipeline. Metric aggregation, time-series storage, flexible query API. Domain-agnostic — any product publishes events and queries metrics. | `platform_analytics` |
 | **Integration Hub** | External API connectors. OAuth credential storage, webhook ingestion + routing, polling jobs. Initial adapters: Google Ads API, Meta Marketing API. | `platform_integrations` |
 | **Identity Service** | Authentication via Supabase Auth / Auth0. RBAC, multi-location scoping, SSO, API key management, session tokens. Shared across all products in a deployment. | `platform_identity` |
@@ -47,7 +47,7 @@ Ortho-specific. Consume platform services via REST and events. Each independentl
 | Service | Responsibility | DB Schema |
 |---|---|---|
 | **Lead Service** | Lead records, attribution model (immutable first-touch), deduplication + merge logic, activity timeline, custom tags. Core entity store. | `crm_leads` |
-| **Pipeline Engine** | State machine for 3 pipelines / 13 stages. Validates transitions, enforces time limits, publishes `stage.changed` events. Never executes actions directly. | `crm_pipeline` |
+| **Pipeline Engine** | State machine for 3 pipelines / 13 stages. Validates transitions, enforces time limits, publishes `lead.stage_changed` and `lead.archived` events. Never executes actions directly. | `crm_pipeline` |
 | **Conversation Service** | SMS inbox per location. Conversation threading, agent assignment, internal notes, escalation flags, read receipts. Bridges Messaging Service ↔ Lead records. | `crm_conversations` |
 | **Campaign Service** | Email broadcast campaigns. Builder state machine, approval workflow, send orchestration. Delegates to Email + Audience + Template platform services. | `crm_campaigns` |
 | **Referral Service** | Unique referral link generation per patient/doctor. Click tracking, conversion attribution, reward event logging, doctor portal, referral leaderboard. | `crm_referrals` |
@@ -73,25 +73,32 @@ Services publish domain events when state changes. Subscribers react independent
 
 | Event | Publisher | Subscribers |
 |---|---|---|
-| `lead.created` | Lead Service | Automation Engine, Analytics |
-| `lead.stage_changed` | Pipeline Engine | Automation Engine, Analytics, Nurturing Engine |
-| `lead.converted` | Pipeline Engine | Analytics, Reporting Service |
+| `lead.created` | Lead Service | Automation Engine, Analytics, Referral Service |
+| `lead.stage_changed` | Pipeline Engine | Lead Service, Automation Engine, Analytics, Nurturing Engine, Referral Service, Campaign Service |
+| `lead.archived` | Pipeline Engine | Lead Service, Analytics |
+| `lead.converted` | Pipeline Engine | Analytics |
 | `message.received` | Conversation Service | Automation Engine, Notification Service |
 | `appointment.updated` | Lead Service | Pipeline Engine, Nurturing Engine |
 | `referral.converted` | Referral Service | Lead Service, Analytics |
+| `referrer.created` | Referral Service | Automation Engine |
 | `campaign.sent` | Campaign Service | Analytics |
 
 **Events published by the platform layer:**
 
 | Event | Publisher | Subscribers |
 |---|---|---|
-| `message.delivered` | Messaging Service | Conversation Service, Analytics |
-| `message.failed` | Messaging Service | Automation Engine |
+| `message.delivered` | Messaging Service | Conversation Service, Lead Service, Analytics |
+| `message.failed` | Messaging Service | Automation Engine, Lead Service |
+| `inbound_message.received` | Messaging Service | Conversation Service, Lead Service |
 | `opt_out.received` | Messaging Service | Lead Service, Nurturing Engine |
+| `opt_out.removed` | Messaging Service | Lead Service |
 | `email.bounced` | Email Service | Lead Service |
-| `sequence.step_completed` | Nurturing Engine | Analytics |
-| `workflow.triggered` | Automation Engine | Analytics |
+| `email.opened` | Email Service | Analytics, Campaign Service |
+| `email.clicked` | Email Service | Analytics, Campaign Service |
+| `sequence.step_completed` | Nurturing Engine | Lead Service, Analytics |
+| `workflow.triggered` | Automation Engine | Lead Service, Analytics |
 | `ad_lead.received` | Integration Hub | Lead Service |
+| `ad_spend.synced` | Integration Hub | Analytics |
 
 ### 3.2 Sync — REST (queries and immediate commands)
 
@@ -99,13 +106,22 @@ Direct HTTP calls for operations requiring an immediate response.
 
 | Call | Consumer → Provider | Purpose |
 |---|---|---|
-| `POST /templates/render` | Campaign Service, Nurturing Engine → Template Service | Merge tags, personalize content |
-| `POST /messages/send` | Automation Engine, Conversation Service → Messaging Service | Send SMS immediately |
-| `POST /emails/send` | Campaign Service, Automation Engine → Email Service | Send email immediately |
-| `POST /audiences/evaluate` | Campaign Service → Audience Engine | Resolve segment to contact list |
-| `POST /ai/complete` | Conversation Service, Automation Engine → AI Service | Draft reply, personalize message |
-| `POST /sequences/enroll` | Pipeline Engine, Automation Engine → Nurturing Engine | Enroll entity in drip sequence |
-| `GET /analytics/metrics` | Reporting Service → Analytics Service | Query aggregated metrics |
+| `POST /templates/render` | Automation Engine worker, Nurturing Engine worker → Template Service | Pre-render body before passing to Messaging/Email Service |
+| `POST /messages/send` | Automation Engine, Nurturing Engine, Conversation Service, Referral Service → Messaging Service | Send pre-rendered SMS body |
+| `POST /emails/send` | Campaign Service, Automation Engine, Nurturing Engine → Email Service | Send pre-rendered email body |
+| `POST /emails/campaigns/send` | Campaign Service → Email Service | Bulk email send for broadcast campaigns |
+| `POST /audiences/evaluate` | Campaign Service, Conversation Service → Audience Engine | Resolve segment to entity ID list |
+| `POST /audiences/segments/:id/check` | Automation Engine → Audience Engine | Single entity membership check |
+| `POST /ai/complete` | Conversation Service, Automation Engine, Lead Service → AI Service | Draft reply, personalize message, score commentary |
+| `POST /sequences/enroll` | Automation Engine, Referral Service → Nurturing Engine | Enroll entity in drip sequence |
+| `POST /notifications/publish` | Conversation Service, Notification Service callers → Notification Service | Publish in-app notification |
+| `GET /leads` | Data Import Service, Campaign Service, Conversation Service → Lead Service | Fetch leads for bulk operations |
+| `GET /pipeline/memberships` | Data Import Service → Pipeline Engine | Look up active membership before import operations |
+| `POST /pipeline/transitions` | Data Import Service, Automation Engine → Pipeline Engine (via API Gateway) | Execute stage transitions |
+| `POST /pipeline/convert` | Data Import Service → Pipeline Engine (via API Gateway) | Convert lead between pipelines |
+| `GET /analytics/metrics/*` | Reporting Service → Analytics Service | Query aggregated metrics |
+| `POST /analytics/query` | Reporting Service → Analytics Service | Ad-hoc raw event queries |
+| `POST /identity/api-keys/validate` | CRM API Gateway, Analytics Service → Identity Service | Validate ak_-prefixed service API keys |
 
 ### 3.3 Golden Rules
 
@@ -153,6 +169,7 @@ ortho/
 │   ├── @ortho/db                   # Knex/Drizzle setup, migration runner, connection pool
 │   ├── @ortho/logger               # structured JSON logging (Pino), Datadog-compatible
 │   ├── @ortho/testing              # DB fixtures, EventBridge mock, HTTP test client, factories
+│   ├── @platform/filter-engine     # Pure-function filter evaluator (shared by Automation + Audience Engine)
 │   ├── @platform/template-ui       # Template Editor React component
 │   ├── @platform/sequence-ui       # Sequence Builder React component
 │   ├── @platform/audience-ui       # Audience Builder React component

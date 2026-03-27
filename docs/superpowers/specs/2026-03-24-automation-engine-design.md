@@ -169,6 +169,21 @@ The Execution Manager snapshots the full `action_tree` from the active version i
 
 **active_hours note:** `active_hours.start` and `active_hours.end` are time-of-day values only (`HH:MM`, 24-hour). There is no day-of-week constraint. The window applies every day. The Active Hours Calculator computes the delay-until timestamp as the next occurrence of `start` time in the resolved timezone, which is always within the next 24 hours.
 
+### 3.5 Known Trigger Events
+
+The Automation Engine is generic — any event type published to EventBridge can trigger a rule. The following events are the expected triggers from the Ortho CRM product layer:
+
+| Event Type | Publisher | Notes |
+|---|---|---|
+| `lead.created` | Lead Service | `entity_type: "lead"` |
+| `lead.stage_changed` | Pipeline Engine | `entity_type: "lead"`; payload includes `stage_to`, `reason` (valid values: `manual`, `timeout`, `no_show`, `converted`, `import`, `import_undo`), `time_in_stage_seconds`, `response_time_seconds?` |
+| `lead.converted` | Pipeline Engine | `entity_type: "lead"` |
+| `lead.stage_timeout` | Pipeline Engine | `entity_type: "lead"` |
+| `lead.archived` | Pipeline Engine | `entity_type: "lead"` |
+| `appointment.updated` | Lead Service | `entity_type: "lead"` |
+| `referrer.created` | Referral Service | `entity_type: "referrer"`; payload includes `referrer_id`, `referrer_type` (`patient`\|`doctor`), `location_id`, `referral_link_id`, `referral_link_url`. Use `enroll_sequence` with `entity_type: "referrer"` + `entity_id: "payload.referrer_id"` to enroll patient referrers in post-treatment sequences. |
+| `message.received` | Conversation Service | `entity_type: "lead"` |
+
 ---
 
 ## 4. Database Schema — `platform_automation`
@@ -285,7 +300,9 @@ send_message or send_email worker picks up job
 All action types support an optional `dedup_key` param. `send_message` and `send_email` require it. For `enroll_sequence`, `call_ai`, and `call_webhook`, including a `dedup_key` is strongly recommended — the receiving service uses it to reject duplicate calls caused by BullMQ retries after a worker crash.
 
 ### `send_message`
-Sends SMS/MMS via Messaging Service (`POST /messages/send`). Template rendered by Messaging Service using `context`. Respects `active_hours`.
+Sends SMS/MMS via Messaging Service (`POST /messages/send`). Respects `active_hours`.
+
+**Worker call chain:** The `send_message` worker calls `POST /templates/render` on the Template Service first (with `template_id` + resolved `context`), receives the rendered `body_text`, then calls `POST /messages/send` on the Messaging Service with the pre-rendered `body`. The `template_id` param in the action config is consumed exclusively by the worker — it is never forwarded to the Messaging Service.
 
 ```json
 {
@@ -299,6 +316,8 @@ Sends SMS/MMS via Messaging Service (`POST /messages/send`). Template rendered b
 
 ### `send_email`
 Sends transactional email via Email Service (`POST /emails/send`). Respects `active_hours`.
+
+**Worker call chain:** The `send_email` worker calls `POST /templates/render` on the Template Service first (with `template_id` + resolved `context`), receives the rendered `subject` + `body_html` + `body_text`, then calls `POST /emails/send` on the Email Service with the pre-rendered content. The `template_id` param in the action config is consumed exclusively by the worker — it is never forwarded to the Email Service.
 
 ```json
 {
@@ -482,8 +501,9 @@ Platform service calls mocked via HTTP interceptor:
 
 ### Contract Tests
 **Outbound** — verify calls to platform services match their expected API shape:
-- `POST /messages/send` — payload shape, required fields, dedup_key
-- `POST /emails/send` — payload shape, context format
+- `POST /templates/render` — template_id + context shape; called by `send_message` and `send_email` workers before calling downstream Messaging/Email Service
+- `POST /messages/send` — payload shape (pre-rendered `body`, not `template_id`), required fields, dedup_key
+- `POST /emails/send` — payload shape (pre-rendered `subject` + `html` + `text`), context format
 - `POST /ai/complete` — prompt_id, context, model routing (haiku vs sonnet)
 - `POST /sequences/enroll` — entity_type, entity_id, sequence_id, context
 - EventBridge `automation.action_requested` — payload shape against `@ortho/event-bus` schema

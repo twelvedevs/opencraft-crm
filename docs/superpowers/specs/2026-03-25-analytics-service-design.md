@@ -98,8 +98,11 @@ date         date   NOT NULL
 location_id  text   NOT NULL
 channel      text   NOT NULL   -- google_ads, facebook_ads, referral, walk_in, organic, etc.
 count        int    NOT NULL DEFAULT 0
+archived     int    NOT NULL DEFAULT 0   -- leads archived on this date (lead.archived events)
 UNIQUE (date, location_id, channel)
 ```
+
+**Note on `lead.archived` and channel dimension:** `lead.archived` payload carries only `lead_id` and `location_id` — no channel. `LeadArchivedHandler` uses `channel = 'unknown'` as the channel dimension for the rollup row (since it cannot look up the original channel without a cross-service call). Reporting Service should query archived totals by location only, not by channel breakdown.
 
 **`metrics_pipeline_daily`**
 ```sql
@@ -157,13 +160,35 @@ clicked      int    NOT NULL DEFAULT 0
 UNIQUE (date, campaign_id, location_id)
 ```
 
+**`metrics_referrals_daily`**
+```sql
+date         date   NOT NULL
+location_id  text   NOT NULL
+count        int    NOT NULL DEFAULT 0   -- referral.converted events
+UNIQUE (date, location_id)
+```
+
+**`metrics_coordinators_daily`**
+```sql
+date                  date   NOT NULL
+location_id           text   NOT NULL
+coordinator_id        text   NOT NULL   -- triggered_by from lead.stage_changed
+response_time_sum     int    NOT NULL DEFAULT 0   -- sum of response_time_seconds (when present)
+response_time_count   int    NOT NULL DEFAULT 0   -- count of events where response_time_seconds is non-null
+time_in_stage_sum     int    NOT NULL DEFAULT 0   -- sum of time_in_stage_seconds
+time_in_stage_count   int    NOT NULL DEFAULT 0   -- count of events where triggered_by is non-null
+UNIQUE (date, location_id, coordinator_id)
+```
+
+**Incremental mean computation for coordinator metrics:** Rollup stores running sums + counts (not pre-computed averages). Reporting Service computes `response_time_sum / response_time_count` and `time_in_stage_sum / time_in_stage_count` at query time — this pattern supports correct multi-period aggregation without floating-point precision loss.
+
 **Rollup retention:** No expiry on rollup tables. Row count is bounded by `days × locations × dimensions` — negligible footprint compared to the raw event log.
 
 ---
 
 ## 4. Event Handlers
 
-Nine typed handlers. Each follows the same contract: extract dimensions from the event payload → write one row to `analytics_events` → update the relevant rollup table — all in a single DB transaction.
+Thirteen typed handlers. Each follows the same contract: extract dimensions from the event payload → write one row to `analytics_events` → update the relevant rollup table — all in a single DB transaction.
 
 All events follow the standard envelope defined in `@ortho/types`. The dimension fields extracted per event are:
 
@@ -174,13 +199,16 @@ All events follow the standard envelope defined in `@ortho/types`. The dimension
 | Event | Handler | Rollup Updated | Key Dimensions Extracted |
 |---|---|---|---|
 | `lead.created` | `LeadCreatedHandler` | `metrics_leads_daily` | `location_id`, `channel` |
-| `lead.stage_changed` | `StageChangedHandler` | `metrics_pipeline_daily` | `location_id`, `pipeline`, `stage_to` |
+| `lead.stage_changed` | `StageChangedHandler` | `metrics_pipeline_daily` + `metrics_coordinators_daily` | `location_id`, `pipeline`, `stage_to`, `triggered_by?`, `response_time_seconds?`, `time_in_stage_seconds` |
+| `lead.archived` | `LeadArchivedHandler` | `metrics_leads_daily` (archived+1, separate column — see note) | `location_id` |
 | `lead.converted` | `LeadConvertedHandler` | `metrics_conversions_daily` | `location_id`, `channel` (from attribution) |
 | `message.delivered` | `MessageDeliveredHandler` | `metrics_messages_daily` (delivered+1) | `location_id` |
 | `message.failed` | `MessageFailedHandler` | `metrics_messages_daily` (failed+1) | `location_id` |
 | `opt_out.received` | `OptOutHandler` | `metrics_messages_daily` (opt_outs+1) | `location_id` |
 | `campaign.sent` | `CampaignSentHandler` | `metrics_campaigns_daily` | `campaign_id`, `location_id` |
-| `referral.converted` | `ReferralConvertedHandler` | `metrics_conversions_daily` (channel=`referral`) | `location_id` |
+| `email.opened` | `EmailOpenedHandler` | `metrics_campaigns_daily` (opened+1) | `campaign_id`, `location_id` |
+| `email.clicked` | `EmailClickedHandler` | `metrics_campaigns_daily` (clicked+1) | `campaign_id`, `location_id` |
+| `referral.converted` | `ReferralConvertedHandler` | `metrics_referrals_daily` + `metrics_conversions_daily` (channel=`referral`) | `location_id` |
 | `ad_spend.synced` | `AdSpendSyncedHandler` | `metrics_ad_spend_daily` | `platform`, `location_id`, `campaign_id` |
 
 **`ad_spend.synced` specifics:** Integration Hub publishes one event per `(platform, location_id, date)` combination. Campaigns with no location mapping configured are not published. The payload structure is:
@@ -206,7 +234,9 @@ All events follow the standard envelope defined in `@ortho/types`. The dimension
 
 **Idempotency for `AdSpendSyncedHandler` differs from counter-increment handlers.** For all other handlers, the raw `analytics_events` insert uses `ON CONFLICT (event_id) DO NOTHING`, and if the insert is skipped the rollup update is also skipped (no double-count). For `AdSpendSyncedHandler`, this rule is relaxed: the rollup upsert always executes even if the raw `analytics_events` row already exists. This allows Integration Hub to re-publish a corrected spend figure using the same `event_id` without the correction being silently ignored. The `analytics_events` row records the first delivery only; the rollup row always reflects the latest synced figures.
 
-**Email engagement (future):** `email.opened` and `email.clicked` handler stubs exist in the registry. They will populate `metrics_campaigns_daily.opened` and `.clicked` once the Email Service is confirmed to publish these events with `campaign_id` and `location_id` in the payload. This is a cross-service dependency that requires an amendment to the Email Service spec.
+**`StageChangedHandler` — coordinator rollup logic:** On each `lead.stage_changed` event, the handler also writes to `metrics_coordinators_daily` when `triggered_by` is non-null (i.e., a human coordinator performed the transition). `time_in_stage_sum` and `time_in_stage_count` are always incremented (for all events with `triggered_by`). `response_time_sum` and `response_time_count` are incremented only when `response_time_seconds` is present in the payload (i.e., the transition was into the `contacted` stage). Events without `triggered_by` (timeout-driven, system-initiated) do not write to `metrics_coordinators_daily`.
+
+**Email engagement:** `email.opened` and `email.clicked` handlers are active. Email Service spec has been amended to publish both events with `campaign_id`, `location_id`, `entity_type`, and `entity_id` in the payload. Handlers increment `metrics_campaigns_daily.opened` and `.clicked` respectively.
 
 **Unknown event types:** Logged at `debug` level, acknowledged from SQS (no retry), not written to `analytics_events`.
 
@@ -251,6 +281,16 @@ Additional filters: `platform` (google_ads | facebook_ads), `campaign_id`.
 Returns sent, delivered, opened, and clicked counts by campaign and location.
 Additional filter: `campaign_id`.
 
+**`GET /analytics/metrics/referrals`**
+Returns referral conversion counts by location.
+Source: `metrics_referrals_daily`.
+
+**`GET /analytics/metrics/coordinators`**
+Returns coordinator activity metrics by location and coordinator.
+Additional filter: `coordinator_id`.
+Response rows include: `coordinator_id`, `response_time_sum`, `response_time_count`, `time_in_stage_sum`, `time_in_stage_count` — Reporting Service computes means at query time.
+Source: `metrics_coordinators_daily`.
+
 ### 5.3 Generic Query DSL
 
 **`POST /analytics/query`**
@@ -288,7 +328,13 @@ Response: `{ rows: [...], total: N, truncated: boolean }`
 
 ### 5.4 Auth
 
-All endpoints require a valid Identity Service JWT. The `@ortho/auth-middleware` verifies the JWT signature against the Identity Service public key and rejects expired tokens — presence of the `Authorization` header alone is not sufficient. Location-scoped access control is enforced by the Reporting Service before calling Analytics — the Analytics Service itself does not enforce location restrictions (it is domain-agnostic and unaware of which locations a caller may access).
+All endpoints support two auth methods:
+
+**JWT (standard):** Bearer token issued by Identity Service. `@ortho/auth-middleware` verifies the JWT signature against the Identity Service JWKS and rejects expired tokens.
+
+**API key (service-to-service):** When the `Authorization` header value starts with `ak_`, a **dedicated pre-middleware Fastify plugin** (`src/plugins/api-key-auth.ts`) intercepts the request before `@ortho/auth-middleware`. This plugin validates the key via `POST /identity/api-keys/validate` (VPC-only endpoint), caches the result by `SHA256(key)` for 60 seconds, and injects synthetic `X-User-Role` + `X-Api-Key-Permissions` headers so that downstream middleware sees a consistent auth context. **Do NOT modify `@ortho/auth-middleware`** — this plugin is Analytics Service-specific and registered only in this service. The Reporting Service authenticates to Analytics using `ANALYTICS_API_KEY` (an `ak_`-prefixed Identity Service API key).
+
+Location-scoped access control is enforced by the Reporting Service before calling Analytics — the Analytics Service itself does not enforce location restrictions (it is domain-agnostic and unaware of which locations a caller may access).
 
 ---
 
@@ -303,7 +349,7 @@ INSERT INTO analytics_events (...) VALUES (...)
 ON CONFLICT (event_id) DO NOTHING
 ```
 
-For all counter-increment handlers (`lead.created`, `lead.stage_changed`, `lead.converted`, `message.delivered`, `message.failed`, `opt_out.received`, `campaign.sent`, `referral.converted`): if the raw insert is skipped (duplicate), the rollup increment is also skipped in the same transaction — no double-counting.
+For all counter-increment handlers (`lead.created`, `lead.stage_changed`, `lead.archived`, `lead.converted`, `message.delivered`, `message.failed`, `opt_out.received`, `campaign.sent`, `email.opened`, `email.clicked`, `referral.converted`): if the raw insert is skipped (duplicate), the rollup increment is also skipped in the same transaction — no double-counting.
 
 **Exception — `AdSpendSyncedHandler`:** The rollup upsert always executes regardless of whether the raw insert was skipped. See Section 4 for the rationale.
 
@@ -366,13 +412,18 @@ apps/platform/analytics/
 │   ├── handlers/
 │   │   ├── lead-created.ts
 │   │   ├── stage-changed.ts
+│   │   ├── lead-archived.ts
 │   │   ├── lead-converted.ts
 │   │   ├── message-delivered.ts
 │   │   ├── message-failed.ts
 │   │   ├── opt-out-received.ts
 │   │   ├── campaign-sent.ts
+│   │   ├── email-opened.ts
+│   │   ├── email-clicked.ts
 │   │   ├── referral-converted.ts
 │   │   └── ad-spend-synced.ts
+│   ├── plugins/
+│   │   └── api-key-auth.ts   # pre-middleware ak_-prefixed key validation
 │   ├── repositories/
 │   │   ├── events.ts         # analytics_events insert + dedup
 │   │   └── rollups.ts        # per-rollup-table upsert helpers

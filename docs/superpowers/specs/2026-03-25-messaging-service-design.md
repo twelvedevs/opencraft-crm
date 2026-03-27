@@ -55,9 +55,9 @@ Automation Engine / Nurturing Engine / Conversation Service
 └──────────────────────────────────────────────────────┘
         │
         ▼  EventBridge
-  inbound_message.received → Conversation Service
-  message.delivered        → Conversation Service, Analytics
-  message.failed           → Automation Engine
+  inbound_message.received → Conversation Service, Lead Service
+  message.delivered        → Conversation Service, Analytics, Lead Service
+  message.failed           → Automation Engine, Lead Service
   opt_out.received         → Lead Service, Nurturing Engine
   opt_out.removed          → Lead Service, Nurturing Engine
 ```
@@ -252,9 +252,9 @@ SMS templates are short strings (160 chars for single SMS, up to 1600 for concat
 | Event | Trigger | Key Payload Fields |
 |---|---|---|
 | `inbound_message.received` | Inbound SMS webhook | `message_id`, `from_number`, `to_number`, `body`, `media_urls`, `received_at`, `message_type` (`'normal'`\|`'stop'`\|`'unstop'`) |
-| `message.delivered` | Twilio status callback — delivered | `message_id`, `twilio_sid`, `to_number`, `from_number`, `delivered_at` |
-| `message.failed` | Twilio status callback — failed | `message_id`, `twilio_sid`, `to_number`, `from_number`, `error_code`, `error_message` |
-| `opt_out.received` | STOP reply detected | `phone_number`, `opted_out_at`, `source: 'stop_reply'` |
+| `message.delivered` | Twilio status callback — delivered | `message_id`, `twilio_sid`, `to_number`, `from_number`, `location_id`, `delivered_at` |
+| `message.failed` | Twilio status callback — failed | `message_id`, `twilio_sid`, `to_number`, `from_number`, `location_id`, `error_code`, `error_message` |
+| `opt_out.received` | STOP reply detected | `phone_number`, `opted_out_at`, `source: 'stop_reply'`, `location_id` (nullable) |
 | `opt_out.removed` | UNSTOP/START reply detected | `phone_number`, `removed_at` |
 
 **Subscribed by Messaging Service:** None.
@@ -263,11 +263,13 @@ SMS templates are short strings (160 chars for single SMS, up to 1600 for concat
 
 | Event | Subscribers |
 |---|---|
-| `inbound_message.received` | Conversation Service |
-| `message.delivered` | Conversation Service, Analytics |
-| `message.failed` | Automation Engine |
+| `inbound_message.received` | Conversation Service, Lead Service |
+| `message.delivered` | Conversation Service, Analytics, Lead Service |
+| `message.failed` | Automation Engine, Lead Service |
 | `opt_out.received` | Lead Service, Nurturing Engine |
 | `opt_out.removed` | Lead Service, Nurturing Engine |
+
+**`location_id` resolution:** For `message.delivered` and `message.failed` events, `location_id` is resolved by looking up `from_number` (the Twilio number that sent the message) in `messaging_numbers`. For `opt_out.received` events triggered by STOP replies, `location_id` is resolved from `to_number` (the practice's Twilio number that received the STOP). Manually registered opt-outs (`source: 'manual'` or `'admin'`) set `location_id: null` — no Twilio number context is available.
 
 ---
 
