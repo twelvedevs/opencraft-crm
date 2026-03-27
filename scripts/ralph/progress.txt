@@ -39,3 +39,25 @@ Started: Fri Mar 27 18:13:31 +03 2026
   - Active hours check uses `active_hours !== null && active_hours !== undefined` — handles both explicit null and missing field
   - `send_message` extracts fields from resolved params individually (not destructuring from spread) so routing keys like `_next_step_id` stay out of HTTP bodies
 ---
+
+## 2026-03-27T18:21 - US-003
+- Created `src/services/action-workers/send-email.worker.ts` with same active hours gating, two-step render-then-send pattern as send_message, but using Email Service (`/emails/send`) and three-field template response (`subject`, `body_html`, `body_text`); no `from_field` (Email Service manages sender)
+- Created `test/unit/action-workers/send-email-worker.test.ts` with 10 tests covering all acceptance criteria (mirrors send-message test structure)
+- Files changed: `src/services/action-workers/send-email.worker.ts`, `test/unit/action-workers/send-email-worker.test.ts`
+- **Learnings for future iterations:**
+  - send_email differs from send_message in 3 ways: no `from_field`, template response has 3 fields (`subject`, `body_html`, `body_text`), endpoint is `/emails/send`
+  - `TEMPLATE_SERVICE_URL_ENV` is re-exported from send-email.worker.ts as its own constant (not re-imported from send-message.worker.ts) — duplication is intentional per spec
+  - Test helper `makeSuccessFetch()` must return all three template fields (`subject`, `body_html`, `body_text`) or the destructuring will yield `undefined` values
+---
+
+## 2026-03-27T18:25 - US-004
+- Created `src/services/job-canceller.ts` — `JobCanceller` class with `cancelDelayedJobsForRule(ruleId)` using `queue.getDelayed()` + filter by `exec_ctx.rule_id`
+- Modified `src/routes/rules.ts`: added `JobCanceller` import, extended plugin options type to `{ db: Knex; jobCanceller?: JobCanceller }`, added `opts.jobCanceller?.cancelDelayedJobsForRule(id)` in PATCH status (when disabled) and DELETE handlers
+- Modified `src/index.ts`: moved `connection`/`queue`/`jobCanceller` creation before `fastify.register(rulesRoutes, ...)`, added `send_message` and `send_email` workers to the workers array
+- Created `test/unit/job-canceller.test.ts` with 3 tests: matching jobs cancelled + count returned, no matching jobs, empty queue
+- Files changed: `src/services/job-canceller.ts` (new), `src/routes/rules.ts`, `src/index.ts`, `test/unit/job-canceller.test.ts` (new)
+- **Learnings for future iterations:**
+  - In index.ts, queue/jobCanceller must be created BEFORE `fastify.register(rulesRoutes, ...)` to pass jobCanceller at register time — but workers can still be created after `fastify.listen()`
+  - Optional chaining `opts.jobCanceller?.cancelDelayedJobsForRule(id)` keeps backward compat for tests that don't pass a jobCanceller
+  - `queue.getDelayed()` returns full Job objects with `.data` and `.remove()` — no need to import the Job class in tests, just mock the shape
+---

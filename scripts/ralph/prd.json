@@ -89,7 +89,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "send_email has no `from_field` param — Email Service manages the from address. Template render response for email has three fields (`subject`, `body_html`, `body_text`) vs one for SMS (`body_text`). Mock `fetchFn` with two `mockResolvedValueOnce` calls: first returns `{ ok: true, json: () => Promise.resolve({ subject: 'Hi', body_html: '<p>Hi</p>', body_text: 'Hi' }) }`, second returns `{ ok: true }`. Use `vi.mock` on `'../../../src/services/active-hours.js'` for `computeDelay` — same pattern as send_message tests. `TEMPLATE_SERVICE_URL_ENV` is re-exported from this file (not re-imported from send-message.worker.ts) — it's a simple string constant that can be duplicated."
     },
     {
@@ -115,7 +115,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "The optional chaining `opts.jobCanceller?.cancelDelayedJobsForRule(id)` keeps backward compatibility for tests that don't pass a jobCanceller. In index.ts, `jobCanceller` must be created AFTER `const queue = createQueue(connection)` but BEFORE `fastify.register(rulesRoutes, ...)`. However, the current index.ts creates the queue AFTER `fastify.listen(...)` while `rulesRoutes` is registered BEFORE listen. This means `jobCanceller` cannot be constructed at register time with the current code structure. The fix: move `const connection = ...` and `const queue = createQueue(connection)` and `const jobCanceller = new JobCanceller(queue)` to BEFORE `fastify.register(rulesRoutes, ...)` — ahead of the listen call. Then pass `{ db, jobCanceller }` at register time. The workers array (which also uses `queue`) is created after listen in the current code — keep workers there but create queue/jobCanceller earlier. Double-check SIGTERM handler still closes all workers. For JobCanceller tests: `vi.fn().mockResolvedValue(undefined)` on `queue.getDelayed` returning an array literal of mock job objects is sufficient — no need to import real Job class."
     }
   ]

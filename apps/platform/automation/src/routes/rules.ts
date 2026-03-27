@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { Knex } from 'knex';
 import { RulesRepository, type UpdateRuleWithVersionInput } from '../repositories/rules.repository.js';
 import { validateActionTree } from '../services/rule-validator.js';
+import type { JobCanceller } from '../services/job-canceller.js';
 
 const RuleSchema = Type.Object({
   id: Type.String(),
@@ -15,7 +16,7 @@ const RuleSchema = Type.Object({
   updated_at: Type.Any(),
 });
 
-const rulesRoutes: FastifyPluginAsync<{ db: Knex }> = async (fastify, opts) => {
+const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }> = async (fastify, opts) => {
   const repo = new RulesRepository(opts.db);
 
   fastify.get(
@@ -216,6 +217,9 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex }> = async (fastify, opts) => {
       if (!rule) {
         return reply.status(404).send({ error: 'Not found' });
       }
+      if (status === 'disabled') {
+        await opts.jobCanceller?.cancelDelayedJobsForRule(id);
+      }
       return reply.send(rule);
     },
   );
@@ -239,6 +243,7 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex }> = async (fastify, opts) => {
       if (!deleted) {
         return reply.status(404).send({ error: 'Not found' });
       }
+      await opts.jobCanceller?.cancelDelayedJobsForRule(id);
       return reply.status(204).send();
     },
   );

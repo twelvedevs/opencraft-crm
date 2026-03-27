@@ -14,6 +14,9 @@ import { createActionWorker } from './queue/worker-factory.js';
 import { createBranchProcessor } from './services/action-workers/branch.worker.js';
 import { createEnrollSequenceProcessor } from './services/action-workers/enroll-sequence.worker.js';
 import { createEmitEventProcessor } from './services/action-workers/emit-event.worker.js';
+import { createSendMessageProcessor } from './services/action-workers/send-message.worker.js';
+import { createSendEmailProcessor } from './services/action-workers/send-email.worker.js';
+import { JobCanceller } from './services/job-canceller.js';
 
 const fastify = Fastify({ logger: true });
 
@@ -25,7 +28,11 @@ fastify.get('/healthz', async () => {
 
 const db = createDb();
 
-await fastify.register(rulesRoutes, { db });
+const connection = { url: process.env['REDIS_URL'] ?? 'redis://localhost:6379' };
+const queue = createQueue(connection);
+const jobCanceller = new JobCanceller(queue);
+
+await fastify.register(rulesRoutes, { db, jobCanceller });
 
 const port = parseInt(process.env['PORT'] ?? '3000', 10);
 
@@ -35,9 +42,6 @@ try {
   fastify.log.error(err);
   process.exit(1);
 }
-
-const connection = { url: process.env['REDIS_URL'] ?? 'redis://localhost:6379' };
-const queue = createQueue(connection);
 
 const execRepo = new ExecutionRepository(db);
 const executionManager = new ExecutionManager(execRepo, queue);
@@ -51,6 +55,8 @@ const workers = [
   createActionWorker(QUEUE_NAME, connection, createBranchProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
   createActionWorker(QUEUE_NAME, connection, createEnrollSequenceProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
   createActionWorker(QUEUE_NAME, connection, createEmitEventProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
+  createActionWorker(QUEUE_NAME, connection, createSendMessageProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
+  createActionWorker(QUEUE_NAME, connection, createSendEmailProcessor(execRepo, queue), fastify.log as Pick<Console, 'error'>),
 ];
 
 const queueUrl = process.env['SQS_QUEUE_URL'] ?? '';
