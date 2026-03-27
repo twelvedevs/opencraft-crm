@@ -88,7 +88,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "The `createSecretsResolver` factory creates ONE `SecretsManagerClient` instance and reuses it across all calls — do not create a new client per call. `SecretsManagerClient({})` uses default credential chain (IAM role in ECS). The `secretsResolver` is created alongside `jobCanceller` (after `const queue = createQueue(connection)`) and before `fastify.register(rulesRoutes, ...)` — this is where the current index.ts already places queue/jobCanceller. Add `secretsResolver` on the very next line after jobCanceller for locality. The workers for call_ai and call_webhook use `execRepo` (not `repo` — `repo` is the RulesRepository; `execRepo` is ExecutionRepository) — follow the exact same pattern as send_message and send_email workers in the array. After adding the AWS SDK package, run `npm install` or equivalent to update the lockfile before typechecking."
     }
   ]

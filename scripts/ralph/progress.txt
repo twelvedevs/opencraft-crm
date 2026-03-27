@@ -42,3 +42,18 @@ Started: Fri Mar 27 18:36:36 +03 2026
   - Test gotcha: resolveParams interprets plain word strings as dot-path references — use strings with hyphens in test data (e.g. 'static-header-value')
   - 10 tests passing covering all acceptance criteria
 ---
+
+## 2026-03-27 - US-003
+- Implemented AWS Secrets Manager resolver + wired call_ai and call_webhook workers into index.ts
+- Files changed:
+  - apps/platform/automation/package.json (added @aws-sdk/client-secrets-manager dependency)
+  - apps/platform/automation/src/services/secrets-resolver.ts (created)
+  - apps/platform/automation/src/index.ts (added imports + secretsResolver + 2 new workers)
+  - apps/platform/automation/package-lock.json (updated by npm install)
+- **Learnings for future iterations:**
+  - createSecretsResolver creates ONE SecretsManagerClient instance in closure scope — reused across all calls
+  - secretsResolver placed immediately after jobCanceller (before fastify.register) for locality with other queue/worker setup
+  - call_ai uses execRepo (ExecutionRepository), not repo (RulesRepository) — same pattern as send_message/send_email
+  - npm install updates package-lock.json — must stage it alongside package.json in the commit
+  - All 184 tests pass with no changes needed to test files
+---
