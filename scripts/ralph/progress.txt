@@ -23,3 +23,15 @@ Started: Fri Mar 27 19:21:05 +03 2026
   - For route integration tests, `vi.mock` the repository module before importing the route plugin; vitest hoists the mock correctly with top-level `await import()`
   - Pass `db: {} as never` to the Fastify plugin in tests — the mock intercepts all DB calls before they reach knex
 ---
+
+## 2026-03-27 - US-003
+- Created `src/services/dry-run-walker.ts` — exports `resolveDryRunPath(tree, payload)`: walks action tree recursively; for branch nodes evaluates condition using `evaluate()` with a dummy execCtx and recurses only into the winning child (branch node itself excluded from output); for regular nodes pushes `{ action_type, action_params }` and recurses into `next`
+- Added `POST /rules/:id/test` route to `src/routes/rules.ts` — TypeBox body schema, loads rule+version via repo, evaluates top-level condition, calls `resolveDryRunPath` on action tree, returns `{ matches, would_execute }`
+- Created `test/unit/dry-run-walker.test.ts` — 5 unit tests covering: single node, chain of two, branch if_true, branch if_false, nested branch
+- Created `test/integration/rules-test.routes.test.ts` — 4 integration tests covering: 404 rule not found, condition mismatch, single action, branch winning path only
+- Files changed: `apps/platform/automation/src/services/dry-run-walker.ts` (new), `apps/platform/automation/src/routes/rules.ts`, `apps/platform/automation/test/unit/dry-run-walker.test.ts` (new), `apps/platform/automation/test/integration/rules-test.routes.test.ts` (new)
+- **Learnings for future iterations:**
+  - `evaluate()` from condition-evaluator takes 3 args: `(condition, event, execCtx)`; for dry-run use a static dummy execCtx `{ event_id: 'dry-run', execution_id: 'dry-run', rule_id: ..., rule_version: 0 }`
+  - Branch node is NOT included in would_execute output — the walker resolves only the winning leaf path
+  - When mocking RulesRepository for route integration tests, mock ALL methods the constructor exposes (not just the ones under test) to avoid `undefined is not a function` runtime errors
+---
