@@ -3,6 +3,7 @@
 - ESM throughout: `"type": "module"` in package.json, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig.json
 - Fastify v5 with `@fastify/sensible`; use `logger: true` for pino — no pino-pretty dep needed
 - `tsc --noEmit` is the typecheck command (via `npm run typecheck`)
+- Vitest runs with no config file needed; `npm run test` (vitest run) works out of the box for ESM projects
 - Knex migrations: use `withSchema('platform_automation')` on every `knex.schema` call; create schema in migration 001 with `knex.raw('CREATE SCHEMA IF NOT EXISTS platform_automation')`
 - knexfile.ts lives in `migrations/` alongside migration files; set `directory: '.'` in migrations config
 - tsconfig.json `include` only covers `src/**/*` — migration files are excluded from typecheck by design (avoids rootDir conflict)
@@ -43,4 +44,15 @@ Started: Fri Mar 27 15:46:31 +03 2026
   - `this.db.fn.now()` for `updated_at` in update/softDelete calls
   - `action_tree` is jsonb in DB — pass `JSON.stringify(data.action_tree)` on insert to ensure correct serialization
   - `softDelete` filters by `whereNot('status', 'deleted')` before update so it returns `count === 0` if already deleted
+---
+
+## 2026-03-27 - US-004
+- Created `src/services/rule-validator.ts` with `validateActionTree` pure function
+- Created `test/unit/rule-validator.test.ts` with 5 unit tests (all passing)
+- Files changed: `src/services/rule-validator.ts`, `test/unit/rule-validator.test.ts`
+- **Learnings for future iterations:**
+  - Vitest works with no config file in ESM projects — no `vitest.config.ts` needed
+  - Branch depth starts at 1 for the root node; check `depth >= 4` to reject depth-4 branch nodes
+  - `send_message` missing `dedup_key` is a `console.warn` only — not added to errors array
+  - Test file imports use `.js` extension on relative paths (ESM NodeNext): `../../src/services/rule-validator.js`
 ---
