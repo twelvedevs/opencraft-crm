@@ -1,7 +1,7 @@
 # Messaging Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Messaging Service — outbound SMS/MMS via Twilio, inbound webhook handling, delivery status tracking, phone number pool management, opt-out registry, inline template rendering, Redis rate limiting
 
 ---

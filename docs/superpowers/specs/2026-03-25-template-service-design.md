@@ -1,7 +1,7 @@
 # Template Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Template Service — template storage, draft/active versioning, merge tag rendering, `@platform/template-ui` React component (Unlayer email editor + SMS editor)
 
 ---

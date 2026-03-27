@@ -1,7 +1,7 @@
 # Lead Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Component:** `apps/crm/lead` — product layer service
 **DB Schema:** `crm_leads`
 

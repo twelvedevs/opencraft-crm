@@ -1,7 +1,7 @@
 # Referral Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Product-layer Referral Service — referral link generation, click tracking, referral lifecycle, reward logging, doctor portal, leaderboard
 
 ---

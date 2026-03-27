@@ -1,7 +1,7 @@
 # CRM API Gateway — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Product-layer CRM API Gateway — reverse proxy, JWT + API key auth, tiered rate limiting, SSE proxy, pre-forward enrichment for pipeline transitions
 
 ---

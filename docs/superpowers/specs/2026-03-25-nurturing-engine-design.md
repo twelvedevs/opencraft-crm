@@ -1,7 +1,7 @@
 # Nurturing Engine — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Nurturing Engine — time-delayed drip sequence runtime, enrollment lifecycle, unenrollment, A/B testing, `@platform/sequence-ui` React component. Includes the integration design for the "no response in 24hr/72hr → auto SMS follow-up" use case as the primary reference implementation.
 
 ---

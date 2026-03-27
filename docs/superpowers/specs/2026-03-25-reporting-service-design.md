@@ -1,7 +1,7 @@
 # Reporting Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Product-layer Reporting Service — Ortho-specific KPI computation, analytics dashboard API, report configuration, scheduled PDF/CSV delivery
 
 ---

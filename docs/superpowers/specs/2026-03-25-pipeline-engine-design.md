@@ -1,7 +1,7 @@
 # Pipeline Engine — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Product-layer Pipeline Engine — state machine for 3 pipelines / 13 stages, stage transition validation, timeout enforcement, event publishing
 
 ---

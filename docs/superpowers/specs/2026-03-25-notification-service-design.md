@@ -1,7 +1,7 @@
 # Notification Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Notification Service — real-time in-app notifications via SSE, Redis pub/sub fan-out, per-user read state, 7-day persistence
 
 ---

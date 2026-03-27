@@ -1,7 +1,7 @@
 # AI Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer AI Service — Claude API gateway, prompt registry, context injection, two-layer response cache, Arize Phoenix instrumentation
 
 ---

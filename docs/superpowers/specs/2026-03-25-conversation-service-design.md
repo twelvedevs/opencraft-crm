@@ -1,7 +1,7 @@
 # Conversation Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Product-layer Conversation Service — shared SMS inbox, conversation threading, coordinator workflow, AI features, AI Agent autonomous mode
 
 ---

@@ -1,7 +1,7 @@
 # Identity Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Identity Service — authentication, enriched JWT issuance, RBAC, user management, API key management
 
 ---

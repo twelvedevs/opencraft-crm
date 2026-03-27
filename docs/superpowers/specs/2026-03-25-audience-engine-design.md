@@ -1,7 +1,7 @@
 # Audience Engine — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Audience Engine — named segment registry, batch evaluation with caller-supplied entity data, audience snapshots, single-entity membership checks, shared `@platform/filter-engine` package, `@platform/audience-ui` React component.
 
 ---

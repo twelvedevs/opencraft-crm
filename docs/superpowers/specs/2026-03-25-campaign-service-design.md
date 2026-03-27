@@ -1,7 +1,7 @@
 # Campaign Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Product-layer Campaign Service — email broadcast campaign lifecycle, comment-based approval workflow, BullMQ send orchestration, A/B holdout testing, 7-day conversion attribution.
 
 ---

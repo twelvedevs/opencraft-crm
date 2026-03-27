@@ -1,7 +1,7 @@
 # Media / File Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Component:** `apps/platform/media` — platform layer service
 **DB Schema:** `platform_media`
 

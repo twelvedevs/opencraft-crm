@@ -1,7 +1,7 @@
 # Integration Hub — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Integration Hub — OAuth credential management, webhook ingestion, ad spend polling, historical backfill, pluggable connector model
 
 ---

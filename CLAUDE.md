@@ -12,26 +12,26 @@ This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-
 - `docs/01-platform-arch-design.md` — Platform architecture design (Draft, March 2026). Authoritative source for technical decisions.
 - `docs/superpowers/specs/` — Component-level design specs (naming: `YYYY-MM-DD-{component}-design.md`). Authoritative for their named component once status is **Approved**.
   - `2026-03-24-automation-engine-design.md` — **Approved**
-  - `2026-03-25-nurturing-engine-design.md` — Draft
-  - `2026-03-25-messaging-service-design.md` — Draft
-  - `2026-03-25-email-service-design.md` — Draft
-  - `2026-03-25-notification-service-design.md` — Draft
-  - `2026-03-25-template-service-design.md` — Draft
-  - `2026-03-25-audience-engine-design.md` — Draft
-  - `2026-03-25-ai-service-design.md` — Draft
-  - `2026-03-25-analytics-service-design.md` — Draft
-  - `2026-03-25-integration-hub-design.md` — Draft
-  - `2026-03-25-media-service-design.md` — Draft
-  - `2026-03-25-identity-service-design.md` — Draft
-  - `2026-03-25-lead-service-design.md` — Draft
-  - `2026-03-25-pipeline-engine-design.md` — Draft
-  - `2026-03-25-conversation-service-design.md` — Draft
-  - `2026-03-25-campaign-service-design.md` — Draft
-  - `2026-03-25-reporting-service-design.md` — Draft
-  - `2026-03-25-referral-service-design.md` — Draft
-  - `2026-03-25-data-import-service-design.md` — Draft
-  - `2026-03-25-crm-api-gateway-design.md` — Draft
-  - `2026-03-25-crm-web-app-design.md` — Draft
+  - `2026-03-25-nurturing-engine-design.md` — **Approved**
+  - `2026-03-25-messaging-service-design.md` — **Approved**
+  - `2026-03-25-email-service-design.md` — **Approved**
+  - `2026-03-25-notification-service-design.md` — **Approved**
+  - `2026-03-25-template-service-design.md` — **Approved**
+  - `2026-03-25-audience-engine-design.md` — **Approved**
+  - `2026-03-25-ai-service-design.md` — **Approved**
+  - `2026-03-25-analytics-service-design.md` — **Approved**
+  - `2026-03-25-integration-hub-design.md` — **Approved**
+  - `2026-03-25-media-service-design.md` — **Approved**
+  - `2026-03-25-identity-service-design.md` — **Approved**
+  - `2026-03-25-lead-service-design.md` — **Approved**
+  - `2026-03-25-pipeline-engine-design.md` — **Approved**
+  - `2026-03-25-conversation-service-design.md` — **Approved**
+  - `2026-03-25-campaign-service-design.md` — **Approved**
+  - `2026-03-25-reporting-service-design.md` — **Approved**
+  - `2026-03-25-referral-service-design.md` — **Approved**
+  - `2026-03-25-data-import-service-design.md` — **Approved**
+  - `2026-03-25-crm-api-gateway-design.md` — **Approved**
+  - `2026-03-25-crm-web-app-design.md` — **Approved**
 - `docs/memories/` — Per-component key API/design decisions distilled from spec sessions (one file per service). Read the relevant file before working on or discussing a component.
 
 ## Architecture

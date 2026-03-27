@@ -1,7 +1,7 @@
 # Email Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Email Service — transactional and bulk email delivery via SendGrid, per-recipient campaign tracking, bounce/engagement webhook processing, sending domain management
 
 ---

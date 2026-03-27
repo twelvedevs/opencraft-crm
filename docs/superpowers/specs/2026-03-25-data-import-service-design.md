@@ -1,7 +1,7 @@
 # Data Import Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Product-layer Data Import Service — Ortho2 CSV parsing, column auto-mapping, 5-tier match logic, validation preview, async job processing, import log, 2-hour bulk undo
 
 ---

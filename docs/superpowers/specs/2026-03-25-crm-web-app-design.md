@@ -1,7 +1,7 @@
 # CRM Web App Design
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** `apps/crm/web` — React SPA shell, feature modules, state management, routing, platform UI embedding, real-time notifications
 
 ---

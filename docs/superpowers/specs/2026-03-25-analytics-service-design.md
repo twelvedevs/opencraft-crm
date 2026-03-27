@@ -1,7 +1,7 @@
 # Analytics Service — Design Spec
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Approved
 **Scope:** Platform-layer Analytics Service — event ingestion pipeline, metric aggregation, time-series storage, named metric API, generic query DSL
 
 ---
