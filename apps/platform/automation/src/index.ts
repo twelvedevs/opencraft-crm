@@ -21,6 +21,7 @@ import { createCallWebhookProcessor } from './services/action-workers/call-webho
 import { JobCanceller } from './services/job-canceller.js';
 import { createSecretsResolver } from './services/secrets-resolver.js';
 import executionRoutes from './routes/executions.js';
+import { RetentionService } from './services/retention.js';
 
 const fastify = Fastify({ logger: true });
 
@@ -50,6 +51,8 @@ try {
 }
 
 const execRepo = new ExecutionRepository(db);
+const retention = new RetentionService(execRepo);
+const stopRetention = retention.start();
 const executionManager = new ExecutionManager(execRepo, queue);
 
 const repo = new RulesRepository(db);
@@ -82,6 +85,7 @@ if (!queueUrl) {
 }
 
 process.on('SIGTERM', async () => {
+  stopRetention();
   if (sqsConsumer) {
     await sqsConsumer.stop();
   }
