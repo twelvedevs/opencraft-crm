@@ -60,6 +60,18 @@ Started: Fri Mar 27 16:57:58 +03 2026
   - Logger is optional: `(logger?.error ?? console.error)(...)` pattern works cleanly
 ---
 
+## 2026-03-27T17:30:00+03 - US-006
+- Implemented `createBranchProcessor` in `src/services/action-workers/branch.worker.ts`
+- Created `test/unit/action-workers/branch-worker.test.ts` with 5 test cases covering all acceptance criteria
+- Files changed: `src/services/action-workers/branch.worker.ts`, `test/unit/action-workers/branch-worker.test.ts`
+- **Learnings for future iterations:**
+  - Created `src/services/action-workers/` and `test/unit/action-workers/` directories (did not exist yet)
+  - `vi.mock` the condition-evaluator module before importing — `vi.mocked(evaluate).mockReturnValue(true/false)` cleanly controls branch direction
+  - For call-order tests: use a `callOrder: string[]` array and push from mock implementations, then compare indices
+  - `queue.add` mock: `vi.fn().mockResolvedValue({} as never)` satisfies the Job return type
+  - Branch worker does NOT call `updateExecutionStatus` — that's the responsibility of the final action worker in the chain
+---
+
 ## 2026-03-27T17:10:00+03 - US-003
 - Implemented `createQueue` factory and `ActionJobData` interface in `src/queue/index.ts`
 - Exported `QUEUE_NAME = 'automation-actions'` constant

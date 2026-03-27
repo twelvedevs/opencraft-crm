@@ -150,7 +150,7 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "The `evaluate` import must be mocked — call `vi.mock('../../services/condition-evaluator.js', () => ({ evaluate: vi.fn() }))` then `import { evaluate } from '../../services/condition-evaluator.js'` after the mock. Cast `evaluate` to `vi.MockedFunction` for `mockReturnValue`. The branch step itself does NOT check for `_next_step_id` — branches are always terminal on their own; the continuation is encoded in the winning child's params. `exec_ctx` passed to `queue.add` is the same exec_ctx from the job (preserves event_id, execution_id, rule_id, rule_version across the whole chain)."
     },
     {
