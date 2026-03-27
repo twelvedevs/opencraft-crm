@@ -1,3 +1,16 @@
+## 2026-03-27 - US-007
+- Added `updateWithVersion` (transactional: reads current version to inherit fields, inserts new version, increments current_version), `findByIdRaw` (no deleted filter), and `updateStatus` methods to `RulesRepository`
+- Added `UpdateRuleWithVersionInput` interface to the repository
+- Added PUT /rules/:id — validates action_tree if provided, calls updateWithVersion, returns 200 or 404/422
+- Added PUT /rules/:id/versions/:v/activate — uses findByIdRaw to distinguish 404 (missing) from 409 (deleted), then findVersion → 404, then activateVersion → 200
+- Added PATCH /rules/:id/status — TypeBox Union schema handles 422 at schema level; updateStatus returns null → 404
+- Files changed: `src/repositories/rules.repository.ts`, `src/routes/rules.ts`
+- **Learnings for future iterations:**
+  - Distinguish "not found" (404) from "exists but deleted" (409) by calling `findByIdRaw` (no deleted filter) before the deleted-aware methods
+  - `updateWithVersion` must read the previous version row first to inherit trigger_event_type, condition, active_hours, action_tree when not provided by caller — these are NOT NULL or required fields in the DB
+  - TypeBox Union with Literal values in the body schema validates status at the Fastify schema layer; an explicit status check in the handler is still harmless but redundant
+---
+
 ## Codebase Patterns
 - For transactional multi-table inserts (e.g., rule + version), add a dedicated method to the repository that calls `this.db.transaction(async (trx) => { ... })` — keeps route handlers clean
 - TypeBox `Type.Null()` as the 204 response schema allows `reply.status(204).send()` without TypeScript errors — omitting it causes TS2345 since Fastify infers reply types from the schema response map

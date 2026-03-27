@@ -128,7 +128,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Activation does not re-validate the action_tree — validation happens only at save time. PATCH /rules/:id/status 'active' is allowed even if active_version is NULL (rule stays active but no version will match — this is a degenerate state the UI should prevent but the API does not block)."
     }
   ]
