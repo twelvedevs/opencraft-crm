@@ -20,7 +20,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Extend the existing `RulesRepository` class in `src/repositories/rules.repository.ts` — do not create a new repository file. The cache stores `{ rules: ActiveRule[]; cachedAt: number }` per eventType key in a `Map`. `invalidate()` is needed by tests; it is also useful for emergency cache flush in production but no HTTP endpoint is needed for it in Phase 3."
     },
     {

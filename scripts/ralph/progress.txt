@@ -1,15 +1,21 @@
 ## Codebase Patterns
-- Test files in `test/unit/` import from `../../src/services/<module>.js` (ESM `.js` extension required even for `.ts` sources)
-- The project uses `"type": "module"` + NodeNext resolution — always use `.js` extensions in imports
-- `vitest run` executes all test files under `test/`; no extra config needed
-- Pure service modules go in `src/services/`; no registration in index.ts needed for pure functions
-- DOT_PATH_RE must be checked before TEMPLATE_TOKEN_RE since dot-paths won't contain `{{}}` but template strings might match path-like patterns
-- Use `Intl.DateTimeFormat` with `hourCycle: 'h23'` for timezone-aware time-of-day extraction; no third-party library needed
-- For active-hours tests: inject a fixed `now` Date using UTC-aligned timestamps so wall-clock time == UTC clock time; avoids test flakiness
-- TypeBox schemas use `import { Type } from '@sinclair/typebox'`; runtime checks use `import { Value } from '@sinclair/typebox/value'`
-- `RulesRepository` lives in `src/repositories/rules.repository.ts` — extend it for new query methods rather than creating a separate file
-- `Condition` type is in `src/services/condition-evaluator.ts`; `ActiveHoursConfig` is in `src/services/active-hours.ts`; `ExecutionContext` is in `src/services/field-interpolator.ts`
+- Tests use Vitest with `vi.fn()` for mocks; import from `vitest` directly (not jest)
+- All imports use `.js` extension (ESM module resolution, even for `.ts` source files)
+- `RulesRepository` lives in `src/repositories/rules.repository.ts` — extend it in place, do not create new repo files
+- `Date.now()` can be spied on with `vi.spyOn(Date, 'now')` to advance TTL in tests
+---
 
 # Ralph Progress Log
-Started: Fri Mar 27 16:08:49 +03 2026
+Started: Fri Mar 27 16:26:18 +03 2026
+---
+
+## 2026-03-27 - US-001
+- Implemented `ActiveRule` interface and `findActiveByEventType` query in `RulesRepository`
+- Created `src/services/rule-cache.ts` with TTL-based in-memory cache (Map<string, {rules, cachedAt}>)
+- Created `test/unit/rule-cache.test.ts` with 5 test cases (miss, hit, TTL expiry, invalidate, multi-key)
+- Files changed: `src/repositories/rules.repository.ts`, `src/services/rule-cache.ts`, `test/unit/rule-cache.test.ts`
+- **Learnings for future iterations:**
+  - `findActiveByEventType` JOINs on `rv.rule_id = r.id AND rv.version = r.active_version` — Knex join builder uses `.on().andOn()` chaining
+  - TTL check: `Date.now() - cachedAt < ttlMs` for valid, `>= ttlMs` for expired (strict inequalities)
+  - `vi.spyOn(Date, 'now').mockReturnValue(...)` works cleanly for advancing time in TTL tests
 ---
