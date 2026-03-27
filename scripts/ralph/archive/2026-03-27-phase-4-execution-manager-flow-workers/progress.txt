@@ -1,0 +1,99 @@
+# Ralph Progress Log
+Started: Fri Mar 27 16:57:58 +03 2026
+---
+
+## Codebase Patterns
+- Use `const SCHEMA = 'platform_automation'` + template literals for table names (matches RulesRepository pattern)
+- Knex bulk insert: `this.db(TABLE).insert(rowsArray)` — no `.returning()` needed when return value is void
+- For `updateStepStatus` extras: build update object dynamically, only include key if value is not `undefined`
+- Knex mock pattern: `makeQueryBuilder()` returns chainable object; `makeDb(qb)` wraps it in a `vi.fn()` with `db.fn.now` attached
+- Early-return guard for empty arrays prevents unnecessary DB calls (insertSteps, updateManyStepsStatus)
+- ActionTreeWalker: `params` on RegularActionNode may be undefined — always use `node.params ?? {}` as spread source
+- ActionTreeWalker: branch subtree arrays include the branch root itself — `_if_true_step_id === _if_true_subtree_ids[0]`
+
+## 2026-03-27T17:00:00+03 - US-001
+- Implemented `ExecutionRepository` in `src/repositories/execution.repository.ts`
+- Created `test/unit/execution.repository.test.ts` with 16 test cases covering all acceptance criteria
+- Files changed: `src/repositories/execution.repository.ts`, `test/unit/execution.repository.test.ts`
+- **Learnings for future iterations:**
+  - Knex mock builder: use a `makeQueryBuilder(overrides)` helper that returns a chainable object; wrap in `makeDb(qb)` that casts to Knex and attaches `db.fn = { now: vi.fn() }`
+  - Empty-array guards must short-circuit before calling `this.db(...)` at all — test verifies `db` itself was not called
+  - `updateStepStatus` extras uses dynamic object build — only include keys for defined values (not just truthy)
+  - Follow same SCHEMA pattern as `RulesRepository`: `const SCHEMA = 'platform_automation'` + template literal tables
+---
+
+## 2026-03-27T17:05:00+03 - US-002
+- Implemented `walkActionTree` in `src/services/action-tree-walker.ts`
+- Exported `RegularActionNode`, `BranchActionNode`, `ActionNode`, `StepRecord` types
+- Created `test/unit/action-tree-walker.test.ts` with 6 test cases covering all acceptance criteria
+- Files changed: `src/services/action-tree-walker.ts`, `test/unit/action-tree-walker.test.ts`
+- **Learnings for future iterations:**
+  - Recursive pure function: branch nodes recurse into if_true + if_false, regular nodes recurse into next if present
+  - The nested branch test in the PRD says "7 total steps" but the example structure only produces 5 (outer + inner + 2 leaves + 1 leaf); count carefully before asserting
+  - `node.params ?? {}` guard is essential — params can be undefined at the type level even though the type says `Record<string, unknown>`
+  - No mocking needed — function is fully synchronous and pure (except randomUUID)
+---
+
+## 2026-03-27T17:15:00+03 - US-004
+- Implemented `ExecutionManager` in `src/services/execution-manager.ts`
+- Created `test/unit/execution-manager.test.ts` with 3 test cases (idempotency, happy path, empty tree)
+- Files changed: `src/services/execution-manager.ts`, `test/unit/execution-manager.test.ts`
+- **Learnings for future iterations:**
+  - PRD step description (early return before insertSteps) and test spec (insertSteps called with []) were contradictory — test spec takes precedence; insertSteps is always called, then guard checks length
+  - vi.mock must be called BEFORE importing the mocked module; import the module after the mock declaration
+  - `vi.mocked(repo.findExecution).mockResolvedValue(null)` works cleanly when repo is typed as the real class; cast mocks as `unknown as ExecutionRepository`
+  - `walkActionTree` mock must return consistent `StepRecord[]` format with `status: 'pending' as const`
+---
+
+## 2026-03-27T17:20:00+03 - US-005
+- Implemented `createActionWorker` factory in `src/queue/worker-factory.ts`
+- Exported `RETRY_DELAYS = [5000, 30000, 120000, 600000]`
+- Worker created with `settings.backoffStrategy` mapping attemptsMade→delay, clamping to last value for out-of-bounds
+- Registered `'failed'` event handler: final-failure check via `attemptsMade >= (opts.attempts ?? 1)`, emits JSON alert via logger or console.error
+- Created `test/unit/worker-factory.test.ts` with 7 tests covering all acceptance criteria
+- Files changed: `src/queue/worker-factory.ts`, `test/unit/worker-factory.test.ts`
+- **Learnings for future iterations:**
+  - BullMQ Worker mock: `vi.mock('bullmq', () => ({ Worker: vi.fn().mockImplementation(() => ({ on: vi.fn() })) }))` — capture `on` calls then extract handler by event name for testing
+  - `backoffStrategy` receives `attemptsMade` (1-based) — use `RETRY_DELAYS[attemptsMade - 1]` to map attempt 1→index 0
+  - 'failed' fires on every failure — use `attemptsMade >= opts.attempts` to distinguish DLQ-worthy final failure from retryable ones
+  - `opts.attempts` may be undefined if not set — default to 1 for the check: `job.opts.attempts ?? 1`
+  - Logger is optional: `(logger?.error ?? console.error)(...)` pattern works cleanly
+---
+
+## 2026-03-27T17:30:00+03 - US-006
+- Implemented `createBranchProcessor` in `src/services/action-workers/branch.worker.ts`
+- Created `test/unit/action-workers/branch-worker.test.ts` with 5 test cases covering all acceptance criteria
+- Files changed: `src/services/action-workers/branch.worker.ts`, `test/unit/action-workers/branch-worker.test.ts`
+- **Learnings for future iterations:**
+  - Created `src/services/action-workers/` and `test/unit/action-workers/` directories (did not exist yet)
+  - `vi.mock` the condition-evaluator module before importing — `vi.mocked(evaluate).mockReturnValue(true/false)` cleanly controls branch direction
+  - For call-order tests: use a `callOrder: string[]` array and push from mock implementations, then compare indices
+  - `queue.add` mock: `vi.fn().mockResolvedValue({} as never)` satisfies the Job return type
+  - Branch worker does NOT call `updateExecutionStatus` — that's the responsibility of the final action worker in the chain
+---
+
+## 2026-03-27T17:35:00+03 - US-007
+- Implemented `createEnrollSequenceProcessor` in `src/services/action-workers/enroll-sequence.worker.ts`
+- Exported `ENROLL_SEQUENCE_URL_ENV = 'NURTURING_ENGINE_URL'` constant
+- Strips all routing metadata keys before POSTing; applies `resolveParams` for field interpolation; handles next-step enqueue or execution completion
+- Created `test/unit/action-workers/enroll-sequence-worker.test.ts` with 6 tests covering all acceptance criteria
+- Files changed: `src/services/action-workers/enroll-sequence.worker.ts`, `test/unit/action-workers/enroll-sequence-worker.test.ts`
+- **Learnings for future iterations:**
+  - `fetchFn` defaults to `globalThis.fetch` — inject mock in tests to avoid real HTTP; set env var in `beforeEach`, delete in `afterEach`
+  - Destructuring strip pattern: `const { _next_step_id: _, _if_true_step_id: _a, ... , ...callParams } = resolved` cleanly removes routing keys
+  - Use `process.env[ENROLL_SEQUENCE_URL_ENV]` (bracket notation with constant) so tests can set/delete via `process.env`
+  - Call order: updateStepStatus('running') → resolve/fetch → updateStepStatus('completed') → enqueue next OR updateExecutionStatus
+  - Test cast for fetch mock calls: `vi.mocked(fetchFn).mock.calls[0]` then `(init as RequestInit).body`
+---
+
+## 2026-03-27T17:10:00+03 - US-003
+- Implemented `createQueue` factory and `ActionJobData` interface in `src/queue/index.ts`
+- Exported `QUEUE_NAME = 'automation-actions'` constant
+- No tests required per PRD (pure factory, no logic)
+- Files changed: `src/queue/index.ts`
+- **Learnings for future iterations:**
+  - `bullmq` was already in `package.json` dependencies — no install needed
+  - `connection` typed as `object` to accept both plain config objects and IORedis instances (BullMQ 5 accepts both)
+  - `backoff: { type: 'custom' }` delegates retry delays to `backoffStrategy` on the Worker (defined in US-005)
+  - Queue lives in `src/queue/` directory — separate from services
+---
