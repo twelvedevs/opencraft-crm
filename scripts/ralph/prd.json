@@ -72,7 +72,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Import ExecutionContext and resolveValue from ./field-interpolator.js. Pure function — no DB, no I/O. The `now` optional param exists solely for test determinism; workers call computeDelay() without it (defaults to new Date()). The function does NOT schedule anything — it only returns a delay number. Workers own the BullMQ delay call."
     }
   ]
