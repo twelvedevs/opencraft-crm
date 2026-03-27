@@ -128,4 +128,49 @@ export class ExecutionRepository {
     const row = await this.db(STEPS_TABLE).where({ id: stepId }).first();
     return (row as Step) ?? null;
   }
+
+  async listExecutions(
+    filters: { rule_id?: string; entity_id?: string; status?: string; from?: Date; to?: Date },
+    pagination: { page: number; limit: number },
+  ): Promise<Array<Execution & { steps: Step[] }>> {
+    const { page, limit } = pagination;
+    const offset = (page - 1) * limit;
+
+    let execQuery = this.db(EXECUTIONS_TABLE).orderBy('started_at', 'desc').limit(limit).offset(offset);
+
+    if (filters.rule_id !== undefined) execQuery = execQuery.where('rule_id', filters.rule_id);
+    if (filters.entity_id !== undefined) execQuery = execQuery.where('entity_id', filters.entity_id);
+    if (filters.status !== undefined) execQuery = execQuery.where('status', filters.status);
+    if (filters.from !== undefined) execQuery = execQuery.where('started_at', '>=', filters.from);
+    if (filters.to !== undefined) execQuery = execQuery.where('started_at', '<=', filters.to);
+
+    const executions = (await execQuery) as Execution[];
+
+    if (executions.length === 0) return [];
+
+    const ids = executions.map((e) => e.id);
+    const steps = (await this.db(STEPS_TABLE).whereIn('execution_id', ids)) as Step[];
+
+    const stepMap = new Map<string, Step[]>();
+    for (const step of steps) {
+      const arr = stepMap.get(step.execution_id) ?? [];
+      arr.push(step);
+      stepMap.set(step.execution_id, arr);
+    }
+
+    return executions.map((e) => ({ ...e, steps: stepMap.get(e.id) ?? [] }));
+  }
+
+  async findStepOutput(executionId: string, stepId: string): Promise<{ output: unknown } | null> {
+    const row = await this.db(STEPS_TABLE).where({ id: stepId, execution_id: executionId }).first();
+    if (!row) return null;
+    return { output: (row as Step).output };
+  }
+
+  async deleteExecutionsBefore(cutoffDate: Date): Promise<number> {
+    const subQuery = this.db(EXECUTIONS_TABLE).select('id').where('completed_at', '<', cutoffDate);
+    await this.db(STEPS_TABLE).whereIn('execution_id', subQuery).delete();
+    const count = await this.db(EXECUTIONS_TABLE).where('completed_at', '<', cutoffDate).delete();
+    return count as number;
+  }
 }

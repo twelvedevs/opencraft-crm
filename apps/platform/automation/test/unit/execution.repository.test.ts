@@ -249,4 +249,247 @@ describe('ExecutionRepository', () => {
       expect(result).toBeNull();
     });
   });
+
+  describe('listExecutions', () => {
+    const execRow = {
+      id: 'exec-1',
+      rule_id: 'rule-1',
+      rule_version: 1,
+      action_tree_snapshot: '{}',
+      event_id: 'evt-1',
+      event_type: 'lead.created',
+      entity_type: null,
+      entity_id: null,
+      status: 'completed',
+      started_at: new Date('2026-01-01'),
+      completed_at: new Date('2026-01-01'),
+    };
+    const stepRow = {
+      id: 'step-1',
+      execution_id: 'exec-1',
+      action_type: 'send_message',
+      action_params: '{}',
+      output: null,
+      status: 'completed',
+      attempt: 1,
+      error: null,
+      started_at: new Date('2026-01-01'),
+      completed_at: new Date('2026-01-01'),
+    };
+
+    const makeListDb = (executions: unknown[], steps: unknown[]) => {
+      // db is called once for executions (returns executions), once for steps (returns steps)
+      let callCount = 0;
+      const execQb = {
+        orderBy: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        offset: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        then: undefined as unknown,
+      };
+      // Make execQb thenable so await works (promise-like)
+      Object.defineProperty(execQb, 'then', {
+        get() {
+          return (resolve: (v: unknown) => void) => resolve(executions);
+        },
+      });
+
+      const stepQb = {
+        whereIn: vi.fn().mockResolvedValue(steps),
+      };
+
+      const db = vi.fn().mockImplementation(() => {
+        callCount += 1;
+        return callCount === 1 ? execQb : stepQb;
+      }) as unknown as Knex;
+      (db as unknown as Record<string, unknown>)['fn'] = { now: vi.fn().mockReturnValue('NOW()') };
+
+      return { db, execQb, stepQb };
+    };
+
+    it('returns all rows with steps embedded when no filters', async () => {
+      const { db, stepQb } = makeListDb([execRow], [stepRow]);
+      const repo = new ExecutionRepository(db);
+
+      const result = await repo.listExecutions({}, { page: 1, limit: 20 });
+
+      expect(stepQb.whereIn).toHaveBeenCalledWith('execution_id', ['exec-1']);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.steps).toHaveLength(1);
+      expect(result[0]?.steps[0]?.id).toBe('step-1');
+    });
+
+    it('applies rule_id WHERE clause', async () => {
+      const { db, execQb } = makeListDb([execRow], [stepRow]);
+      const repo = new ExecutionRepository(db);
+
+      await repo.listExecutions({ rule_id: 'rule-1' }, { page: 1, limit: 20 });
+
+      expect(execQb.where).toHaveBeenCalledWith('rule_id', 'rule-1');
+    });
+
+    it('applies entity_id WHERE clause', async () => {
+      const { db, execQb } = makeListDb([execRow], [stepRow]);
+      const repo = new ExecutionRepository(db);
+
+      await repo.listExecutions({ entity_id: 'lead-42' }, { page: 1, limit: 20 });
+
+      expect(execQb.where).toHaveBeenCalledWith('entity_id', 'lead-42');
+    });
+
+    it('applies status WHERE clause', async () => {
+      const { db, execQb } = makeListDb([execRow], [stepRow]);
+      const repo = new ExecutionRepository(db);
+
+      await repo.listExecutions({ status: 'completed' }, { page: 1, limit: 20 });
+
+      expect(execQb.where).toHaveBeenCalledWith('status', 'completed');
+    });
+
+    it('applies from WHERE clause', async () => {
+      const from = new Date('2026-01-01');
+      const { db, execQb } = makeListDb([execRow], [stepRow]);
+      const repo = new ExecutionRepository(db);
+
+      await repo.listExecutions({ from }, { page: 1, limit: 20 });
+
+      expect(execQb.where).toHaveBeenCalledWith('started_at', '>=', from);
+    });
+
+    it('applies to WHERE clause', async () => {
+      const to = new Date('2026-12-31');
+      const { db, execQb } = makeListDb([execRow], [stepRow]);
+      const repo = new ExecutionRepository(db);
+
+      await repo.listExecutions({ to }, { page: 1, limit: 20 });
+
+      expect(execQb.where).toHaveBeenCalledWith('started_at', '<=', to);
+    });
+
+    it('applies LIMIT and OFFSET from pagination', async () => {
+      const { db, execQb } = makeListDb([execRow], [stepRow]);
+      const repo = new ExecutionRepository(db);
+
+      await repo.listExecutions({}, { page: 3, limit: 10 });
+
+      expect(execQb.limit).toHaveBeenCalledWith(10);
+      expect(execQb.offset).toHaveBeenCalledWith(20); // (3-1)*10
+    });
+
+    it('returns empty array and skips steps query when no executions found', async () => {
+      const { db, stepQb } = makeListDb([], []);
+      const repo = new ExecutionRepository(db);
+
+      const result = await repo.listExecutions({}, { page: 1, limit: 20 });
+
+      expect(result).toEqual([]);
+      expect(stepQb.whereIn).not.toHaveBeenCalled();
+    });
+
+    it('embeds empty steps array when execution has no steps', async () => {
+      const { db } = makeListDb([execRow], []);
+      const repo = new ExecutionRepository(db);
+
+      const result = await repo.listExecutions({}, { page: 1, limit: 20 });
+
+      expect(result[0]?.steps).toEqual([]);
+    });
+  });
+
+  describe('findStepOutput', () => {
+    it('returns output when execution_id and stepId match', async () => {
+      const step = { id: 'step-1', execution_id: 'exec-1', output: { draft: 'Hello' } };
+      const qb = makeQueryBuilder({ first: vi.fn().mockResolvedValue(step) });
+      const db = makeDb(qb);
+      const repo = new ExecutionRepository(db);
+
+      const result = await repo.findStepOutput('exec-1', 'step-1');
+
+      expect(qb.where).toHaveBeenCalledWith({ id: 'step-1', execution_id: 'exec-1' });
+      expect(result).toEqual({ output: { draft: 'Hello' } });
+    });
+
+    it('returns null when stepId not found', async () => {
+      const qb = makeQueryBuilder({ first: vi.fn().mockResolvedValue(undefined) });
+      const db = makeDb(qb);
+      const repo = new ExecutionRepository(db);
+
+      const result = await repo.findStepOutput('exec-1', 'nonexistent-step');
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null when execution_id does not match', async () => {
+      const qb = makeQueryBuilder({ first: vi.fn().mockResolvedValue(undefined) });
+      const db = makeDb(qb);
+      const repo = new ExecutionRepository(db);
+
+      const result = await repo.findStepOutput('wrong-exec', 'step-1');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('deleteExecutionsBefore', () => {
+    it('deletes steps first then executions and returns count', async () => {
+      const cutoff = new Date('2026-01-01');
+      const subQb = {
+        select: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+      };
+      const stepsQb = {
+        whereIn: vi.fn().mockReturnThis(),
+        delete: vi.fn().mockResolvedValue(5),
+      };
+      const execQb = {
+        where: vi.fn().mockReturnThis(),
+        delete: vi.fn().mockResolvedValue(2),
+      };
+
+      let callCount = 0;
+      const db = vi.fn().mockImplementation(() => {
+        callCount += 1;
+        if (callCount === 1) return subQb; // subquery for execution IDs
+        if (callCount === 2) return stepsQb; // delete steps
+        return execQb; // delete executions
+      }) as unknown as Knex;
+      (db as unknown as Record<string, unknown>)['fn'] = { now: vi.fn().mockReturnValue('NOW()') };
+
+      const repo = new ExecutionRepository(db);
+      const result = await repo.deleteExecutionsBefore(cutoff);
+
+      expect(stepsQb.delete).toHaveBeenCalled();
+      expect(execQb.delete).toHaveBeenCalled();
+      expect(result).toBe(2);
+    });
+
+    it('deletes steps before executions (steps delete is called first)', async () => {
+      const cutoff = new Date('2026-01-01');
+      const callOrder: string[] = [];
+
+      const subQb = { select: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis() };
+      const stepsQb = {
+        whereIn: vi.fn().mockReturnThis(),
+        delete: vi.fn().mockImplementation(() => { callOrder.push('steps'); return Promise.resolve(0); }),
+      };
+      const execQb = {
+        where: vi.fn().mockReturnThis(),
+        delete: vi.fn().mockImplementation(() => { callOrder.push('executions'); return Promise.resolve(0); }),
+      };
+
+      let callCount = 0;
+      const db = vi.fn().mockImplementation(() => {
+        callCount += 1;
+        if (callCount === 1) return subQb;
+        if (callCount === 2) return stepsQb;
+        return execQb;
+      }) as unknown as Knex;
+      (db as unknown as Record<string, unknown>)['fn'] = { now: vi.fn().mockReturnValue('NOW()') };
+
+      const repo = new ExecutionRepository(db);
+      await repo.deleteExecutionsBefore(cutoff);
+
+      expect(callOrder).toEqual(['steps', 'executions']);
+    });
+  });
 });
