@@ -1,23 +1,21 @@
 ## Codebase Patterns
-- For transactional multi-table inserts (e.g., rule + version), add a dedicated method to the repository that calls `this.db.transaction(async (trx) => { ... })` — keeps route handlers clean
-- TypeBox `Type.Null()` as the 204 response schema allows `reply.status(204).send()` without TypeScript errors — omitting it causes TS2345 since Fastify infers reply types from the schema response map
-- Knex db instance created via `createDb()` in `src/db.ts`; injected into Fastify plugins via plugin options (`FastifyPluginAsync<{ db: Knex }>`)
-- Use `Type.Any()` for timestamptz date fields in TypeBox response schemas — avoids fast-json-stringify coercion issues with JS Date objects
-- Fastify v5 route plugin pattern: `const plugin: FastifyPluginAsync<Opts> = async (fastify, opts) => {}; export default plugin`
-- Always add `.gitignore` with `node_modules/` and `dist/` before staging service files — `git add apps/platform/<service>/` will otherwise pull in node_modules
-- ESM throughout: `"type": "module"` in package.json, `module: NodeNext` + `moduleResolution: NodeNext` in tsconfig.json
-- Fastify v5 with `@fastify/sensible`; use `logger: true` for pino — no pino-pretty dep needed
-- `tsc --noEmit` is the typecheck command (via `npm run typecheck`)
-- Vitest runs with no config file needed; `npm run test` (vitest run) works out of the box for ESM projects
-- Knex migrations: use `withSchema('platform_automation')` on every `knex.schema` call; create schema in migration 001 with `knex.raw('CREATE SCHEMA IF NOT EXISTS platform_automation')`
-- knexfile.ts lives in `migrations/` alongside migration files; set `directory: '.'` in migrations config
-- tsconfig.json `include` only covers `src/**/*` — migration files are excluded from typecheck by design (avoids rootDir conflict)
-- Distinguish "not found" (404) from "exists but deleted" (409) by calling `findByIdRaw` (no deleted filter) before the deleted-aware methods
-- TypeBox Union with Literal values in the body schema validates status at the Fastify schema layer; an explicit status check in the handler is still harmless but redundant
-- Test file imports use `.js` extension on relative paths (ESM NodeNext): `../../src/services/rule-validator.js`
-- Branch depth starts at 1 for the root node; check `depth >= 4` to reject depth-4 branch nodes
-- `send_message` missing `dedup_key` is a `console.warn` only — not added to errors array
+- Test files in `test/unit/` import from `../../src/services/<module>.js` (ESM `.js` extension required even for `.ts` sources)
+- The project uses `"type": "module"` + NodeNext resolution — always use `.js` extensions in imports
+- `vitest run` executes all test files under `test/`; no extra config needed
+- Pure service modules go in `src/services/`; no registration in index.ts needed for pure functions
+- DOT_PATH_RE must be checked before TEMPLATE_TOKEN_RE since dot-paths won't contain `{{}}` but template strings might match path-like patterns
 
 # Ralph Progress Log
-Started: 2026-03-27 — Phase 2 (Evaluation Core)
+Started: Fri Mar 27 16:08:49 +03 2026
+---
+
+## 2026-03-27 - US-001
+- Implemented `src/services/field-interpolator.ts` with `ExecutionContext` type, `resolveValue`, and `resolveParams`
+- Implemented `test/unit/field-interpolator.test.ts` with 15 tests covering all acceptance criteria
+- Files changed: `src/services/field-interpolator.ts`, `test/unit/field-interpolator.test.ts`
+- **Learnings for future iterations:**
+  - The `TEMPLATE_TOKEN_RE` regex has state (`lastIndex`) when using `g` flag — must reset with `TEMPLATE_TOKEN_RE.lastIndex = 0` before calling `.test()` and then `.replace()`, or use a fresh regex literal in `.replace()`
+  - Test data must be carefully aligned: `'literal'` matches the dot-path regex `/^[a-zA-Z_][\w.]*$/` so use strings with spaces or hyphens for actual string literals in tests
+  - `source` is a top-level key in `eventCtx`; `payload.source` would be undefined — match your test event shape carefully
+  - All 20 tests pass (5 rule-validator + 15 field-interpolator)
 ---
