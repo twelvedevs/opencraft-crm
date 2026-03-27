@@ -72,6 +72,20 @@ Started: Fri Mar 27 16:57:58 +03 2026
   - Branch worker does NOT call `updateExecutionStatus` — that's the responsibility of the final action worker in the chain
 ---
 
+## 2026-03-27T17:35:00+03 - US-007
+- Implemented `createEnrollSequenceProcessor` in `src/services/action-workers/enroll-sequence.worker.ts`
+- Exported `ENROLL_SEQUENCE_URL_ENV = 'NURTURING_ENGINE_URL'` constant
+- Strips all routing metadata keys before POSTing; applies `resolveParams` for field interpolation; handles next-step enqueue or execution completion
+- Created `test/unit/action-workers/enroll-sequence-worker.test.ts` with 6 tests covering all acceptance criteria
+- Files changed: `src/services/action-workers/enroll-sequence.worker.ts`, `test/unit/action-workers/enroll-sequence-worker.test.ts`
+- **Learnings for future iterations:**
+  - `fetchFn` defaults to `globalThis.fetch` — inject mock in tests to avoid real HTTP; set env var in `beforeEach`, delete in `afterEach`
+  - Destructuring strip pattern: `const { _next_step_id: _, _if_true_step_id: _a, ... , ...callParams } = resolved` cleanly removes routing keys
+  - Use `process.env[ENROLL_SEQUENCE_URL_ENV]` (bracket notation with constant) so tests can set/delete via `process.env`
+  - Call order: updateStepStatus('running') → resolve/fetch → updateStepStatus('completed') → enqueue next OR updateExecutionStatus
+  - Test cast for fetch mock calls: `vi.mocked(fetchFn).mock.calls[0]` then `(init as RequestInit).body`
+---
+
 ## 2026-03-27T17:10:00+03 - US-003
 - Implemented `createQueue` factory and `ActionJobData` interface in `src/queue/index.ts`
 - Exported `QUEUE_NAME = 'automation-actions'` constant

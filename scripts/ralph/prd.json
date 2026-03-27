@@ -185,7 +185,7 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Use `process.env[ENROLL_SEQUENCE_URL_ENV]` (bracket notation with the exported constant) — not a hardcoded string — so tests can set `process.env.NURTURING_ENGINE_URL`. Remember to `delete process.env.NURTURING_ENGINE_URL` in the missing-env-var test (or use `vi.stubEnv`). The `fetchFn` injection makes HTTP mocking trivial in tests without patching globalThis. `resolveParams` already handles nested objects recursively — no need to recurse manually."
     },
     {
