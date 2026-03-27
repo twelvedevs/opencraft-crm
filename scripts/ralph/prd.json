@@ -55,7 +55,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Mock `computeDelay` from active-hours.js (not active-hours.ts) — use `.js` extension in vi.mock path. To test `job.moveToDelayed`, create `const job = { data: { ... }, token: 'test-token', attemptsMade: 0, moveToDelayed: vi.fn().mockResolvedValue(undefined) }` as the mock job. Mock `fetchFn` to return `{ ok: true, json: () => Promise.resolve({ body_text: 'Hello!' }) }` for template render and `{ ok: true }` for messaging send — use `vi.fn().mockResolvedValueOnce(...).mockResolvedValueOnce(...)` for sequencing. Set env vars in `beforeEach` and delete in `afterEach` (or use `vi.stubEnv`). The worker does NOT strip routing keys from `resolved` before constructing the HTTP bodies — it extracts specific named fields. So `_next_step_id` in `resolved` is fine; it is never included in any HTTP body."
     },
     {

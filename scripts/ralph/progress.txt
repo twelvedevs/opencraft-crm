@@ -27,3 +27,15 @@ Started: Fri Mar 27 18:13:31 +03 2026
   - The `makeJob()` fixture in tests defaults `active_hours: null`; override with a real config in the next-step assertion test to prove forwarding
   - `rule.rule.active_hours` is typed as `unknown` on `MatchedRule['rule']` — cast to `ActiveHoursConfig | null` and use `?? null`
 ---
+
+## 2026-03-27T18:19 - US-002
+- Created `src/services/action-workers/send-message.worker.ts` with active hours gating (before marking 'running'), Template Service render, Messaging Service send, and next-step chaining
+- Created `test/unit/action-workers/send-message-worker.test.ts` with 10 tests covering all acceptance criteria
+- Files changed: `src/services/action-workers/send-message.worker.ts`, `test/unit/action-workers/send-message-worker.test.ts`
+- **Learnings for future iterations:**
+  - `vi.mock` on `active-hours.js` must come before the import of `computeDelay` — vitest hoists `vi.mock` calls automatically so ordering in file doesn't matter, but `.js` extension is required in the mock path
+  - To mock `job.moveToDelayed`, add it directly to the mock job object returned by `makeJob()` — BullMQ's `Job` class doesn't need to be imported for this
+  - `makeSuccessFetch()` helper using `mockResolvedValueOnce` chains is the cleanest pattern for workers with two sequential fetch calls
+  - Active hours check uses `active_hours !== null && active_hours !== undefined` — handles both explicit null and missing field
+  - `send_message` extracts fields from resolved params individually (not destructuring from spread) so routing keys like `_next_step_id` stay out of HTTP bodies
+---
