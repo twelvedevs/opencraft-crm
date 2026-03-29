@@ -11,6 +11,7 @@ const EnvSchema = Type.Object({
     Type.Literal('redis'),
   ]),
   PORT: Type.Optional(Type.Integer()),
+  SPAM_SCORE_THRESHOLD_DEFAULT: Type.Optional(Type.Number()),
 });
 
 type Env = Static<typeof EnvSchema> & { PORT: number };
@@ -23,6 +24,9 @@ function parseEnv(): Env {
     SENDGRID_WEBHOOK_SECRET_ID: process.env['SENDGRID_WEBHOOK_SECRET_ID'],
     EVENT_BUS_DRIVER: process.env['EVENT_BUS_DRIVER'],
     PORT: process.env['PORT'] !== undefined ? parseInt(process.env['PORT'], 10) : undefined,
+    SPAM_SCORE_THRESHOLD_DEFAULT: process.env['SPAM_SCORE_THRESHOLD_DEFAULT'] !== undefined
+      ? parseFloat(process.env['SPAM_SCORE_THRESHOLD_DEFAULT'])
+      : undefined,
   };
 
   if (!Value.Check(EnvSchema, raw)) {

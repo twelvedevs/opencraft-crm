@@ -22,7 +22,8 @@
     "fastify": "^5.0.0",
     "ioredis": "^5.0.0",
     "knex": "^3.0.0",
-    "pg": "^8.0.0"
+    "pg": "^8.0.0",
+    "spamscanner": "^6.1.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
