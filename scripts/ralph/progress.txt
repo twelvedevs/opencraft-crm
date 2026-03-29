@@ -1,3 +1,21 @@
+## Codebase Patterns
+- Knex raw for COALESCE: `this.db.raw('COALESCE(col, ?)', [value])` — used for webhook forward-only timestamp updates
+- Forward-only guard pattern: use `.whereIn('status', [...allowed])` or `.whereNotIn('status', [...blocked])` before `.update()` — no separate read needed
+- New click repositories follow same constructor pattern: `constructor(private readonly db: Knex) {}` + randomUUID() for id
+- spamreport on transactional EmailSend → status becomes 'bounced' (not 'spam_reported') per spec Q7 design decision
+
 # Ralph Progress Log
-Started: Sun Mar 29 2026
+Started: Sun Mar 29 23:26:10 +03 2026
+---
+
+## 2026-03-29 - US-008
+- Added `findBySendgridMessageId`, `markDelivered`, `markOpenedFromWebhook`, `markClickedFromWebhook`, `markBouncedFromWebhook`, `markUnsubscribed`, `markSpamReported` to `EmailCampaignRecipientsRepository`
+- Added `findBySendgridMessageId`, `markDelivered`, `markOpened`, `markClicked`, `markBouncedFromWebhook`, `markUnsubscribed`, `markSpamReported` to `EmailSendsRepository`
+- Created `email-recipient-clicks-repository.ts` and `email-send-clicks-repository.ts`
+- Files changed: email-campaign-recipients-repository.ts, email-sends-repository.ts, email-recipient-clicks-repository.ts, email-send-clicks-repository.ts
+- **Learnings for future iterations:**
+  - Forward-only guards use `.whereIn` / `.whereNotIn` before update — no row fetch needed
+  - `this.db.raw('COALESCE(col, ?)', [value])` is correct Knex pattern for conditional timestamp preservation
+  - EmailSend spamreport sets status='bounced' (not 'spam_reported') — transactional sends have no spam_reported status per spec
+  - Click repos use `randomUUID()` from `node:crypto` for id generation (same as other repos)
 ---
