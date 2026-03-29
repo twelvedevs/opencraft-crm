@@ -11,6 +11,8 @@ Started: Sun Mar 29 18:18:02 +03 2026
 - Module augmentation in `src/types.d.ts` is needed to type `fastify.db` and `fastify.eventBus` decorators
 - `tsconfig.json`: no workspace base extension — standalone per service (same as event-bus package)
 - Fastify TypeBox response schemas: define ALL used status codes (including error codes like 404, 409) in the `response:` schema object — otherwise `reply.status(N)` causes TS type errors
+- `@fastify/sensible` v5 supports Fastify 4.x only — use `^6.0.0` for Fastify 5.x
+- For tests that import modules with top-level env parsing, set env vars in `vitest.config.ts` under `test.env` (not setupFiles) — they are applied before module evaluation
 
 ---
 
@@ -75,4 +77,20 @@ Started: Sun Mar 29 18:18:02 +03 2026
   - PG unique violation check: inspect `err.code === '23505'` (typeof guard required for TS)
   - Native `fetch` used for SendGrid API call — available in Node 18+, no extra lib needed
   - Route prefix in `buildApp`: `app.register(domainRoutes, { prefix: '/emails' })` → routes become `/emails/domains`, `/emails/domains/:id`
+---
+
+## Sun Mar 29 2026 - US-005
+- Implemented @ortho/event-bus lifecycle wiring unit tests
+- Files created/modified:
+  - apps/platform/email/src/app.test.ts (new — 3 unit tests using MockDriver + vi.spyOn)
+  - apps/platform/email/vitest.config.ts (added test.env with required env vars for module load)
+  - apps/platform/email/package.json (upgraded @fastify/sensible ^5.0.0 → ^6.0.0 for Fastify 5.x compat)
+  - scripts/ralph/prd.json (marked US-001 and US-005 passes: true)
+- Note: US-001 app.ts already had decorators + onReady/onClose hooks wired; this story added the test coverage
+- **Learnings for future iterations:**
+  - `@fastify/sensible` v5 → v6 required for Fastify 5.x runtime (v5 throws at registration)
+  - Use `vi.spyOn(eventBus, 'start')` / `vi.spyOn(eventBus, 'stop')` to verify lifecycle calls (MockDriver doesn't track start/stop counts)
+  - `app.ready()` triggers `onReady` hooks without binding a port — preferred over `app.listen()` for unit tests
+  - `vi.spyOn(console, 'warn').mockImplementation(() => {})` suppresses EventBus zero-subscription warning in tests
+  - `app.inject()` (Fastify's built-in HTTP injection) works without the app being in listening state
 ---
