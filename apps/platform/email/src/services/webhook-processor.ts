@@ -1,5 +1,8 @@
+import { createLogger } from '@ortho/logger';
 import type { Knex } from '../db.js';
 import type { EventBus } from '@ortho/event-bus';
+
+const log = createLogger('email-service:webhook-processor');
 import { EmailCampaignRecipientsRepository } from '../repositories/email-campaign-recipients-repository.js';
 import { EmailCampaignJobsRepository } from '../repositories/email-campaign-jobs-repository.js';
 import { EmailSendsRepository } from '../repositories/email-sends-repository.js';
@@ -40,6 +43,7 @@ export class WebhookProcessor {
     const recipient = await this.recipientsRepo.findBySendgridMessageId(event.sg_message_id);
 
     if (recipient !== null) {
+      log.debug({ sg_message_id: event.sg_message_id, event_type: event.event }, 'routing event to campaign recipient path');
       const job = await this.jobsRepo.findById(recipient.job_id);
 
       switch (event.event) {
@@ -142,11 +146,11 @@ export class WebhookProcessor {
     const send = await this.sendsRepo.findBySendgridMessageId(event.sg_message_id);
 
     if (send === null) {
-      console.warn(
-        `[WebhookProcessor] No recipient or send found for sg_message_id: ${event.sg_message_id}`,
-      );
+      log.warn({ sg_message_id: event.sg_message_id, event_type: event.event }, 'no recipient or send found for sg_message_id — dropping event');
       return;
     }
+
+    log.debug({ sg_message_id: event.sg_message_id, event_type: event.event }, 'routing event to transactional send path');
 
     switch (event.event) {
       case 'delivered':
@@ -249,7 +253,7 @@ export class WebhookProcessor {
       try {
         await this.processEvent(event);
       } catch (err) {
-        console.error('[WebhookProcessor] Error processing event', { event, err });
+        log.error({ err, event }, 'error processing sendgrid webhook event');
       }
     }
   }

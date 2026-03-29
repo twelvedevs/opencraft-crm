@@ -1,5 +1,8 @@
 import SpamScanner from 'spamscanner';
+import { createLogger } from '@ortho/logger';
 import type { DomainRepository } from '../repositories/domain-repository.js';
+
+const log = createLogger('email-service:spam-checker');
 
 export interface SpamCheckResult {
   score: number;
@@ -80,6 +83,8 @@ export class SpamCheckerService {
       });
     }
 
-    return { score, threshold, passed: score <= threshold, issues };
+    const result = { score, threshold, passed: score <= threshold, issues };
+    log.info({ location_id: opts.locationId, score, threshold, passed: result.passed }, 'spam check complete');
+    return result;
   }
 }

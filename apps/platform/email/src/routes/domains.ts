@@ -1,8 +1,11 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
+import { createLogger } from '@ortho/logger';
 import { DomainRepository, SendingDomainSchema } from '../repositories/domain-repository.js';
 import { DomainResolver } from '../services/domain-resolver.js';
 import { env } from '../env.js';
+
+const log = createLogger('email-service:domains');
 
 export async function domainRoutes(app: FastifyInstance): Promise<void> {
   const repo = new DomainRepository(app.db);
@@ -31,13 +34,17 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
       from_name: string;
       from_email: string;
     };
+    log.info({ location_id: body.location_id, domain: body.domain }, 'POST /domains received');
     try {
       const domain = await repo.create(body);
+      log.info({ domain_id: domain.id, location_id: domain.location_id }, 'domain created');
       return reply.status(201).send(domain);
     } catch (err: unknown) {
       if (isUniqueViolation(err)) {
+        log.warn({ location_id: body.location_id }, 'domain already configured for location');
         return reply.status(409).send({ error: 'location_already_configured' });
       }
+      log.error({ err, location_id: body.location_id }, 'unexpected error creating domain');
       throw err;
     }
   });

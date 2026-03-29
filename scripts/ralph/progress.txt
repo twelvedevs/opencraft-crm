@@ -1,65 +1,24 @@
 ## Codebase Patterns
-- Knex raw for COALESCE: `this.db.raw('COALESCE(col, ?)', [value])` — used for webhook forward-only timestamp updates
-- Forward-only guard pattern: use `.whereIn('status', [...allowed])` or `.whereNotIn('status', [...blocked])` before `.update()` — no separate read needed
-- New click repositories follow same constructor pattern: `constructor(private readonly db: Knex) {}` + randomUUID() for id
-- spamreport on transactional EmailSend → status becomes 'bounced' (not 'spam_reported') per spec Q7 design decision
-- AWS SDK mocking in vitest: define `mockSend = vi.fn()` outside `vi.mock()` factory, reference it from within, expose as `__mockSend`; or just define outside and close over it (simpler: put mock outside, use `vi.mock` factory that refs it)
-- `vi.resetModules()` does NOT reset mock call counts — use `mockSend.mockClear()` in `beforeEach` instead
-- vitest.config.ts `env` block must be updated when env var names change in env.ts (route tests import env.ts at module level)
-- Raw body capture for ECDSA: use `app.addContentTypeParser('application/json', { parseAs: 'string' }, ...)` within the plugin scope — stores raw body on `(req as any).rawBody`, then parses JSON manually; does not affect other routes' parsers due to plugin encapsulation
-- Fire-and-forget `void processor.processBatch(events)` works correctly in vitest: the mock call is registered synchronously even though the promise is discarded
-- Register webhook routes at root (no prefix) in buildApp: `await app.register(webhookRoutes)` so path is `/webhooks/sendgrid` not `/emails/webhooks/sendgrid`
+- @ortho/logger package: thin pino wrapper; use `createLogger('service-name:component')` — returns a Logger instance with Datadog-compatible `status` field
+- Logger import: `import { createLogger } from '@ortho/logger';` then `const log = createLogger('email-service:component');` at module scope
+- Log levels: info for request entry/completion, debug for cache hits/misses, warn for business-rule drops, error for all catch blocks (pass full `err` object as first binding)
+- Pino log format: `log.info({ context_field: value }, 'message')` — first arg is bindings object, second is message string
 
 # Ralph Progress Log
-Started: Sun Mar 29 2026 — Phase 5 (Observability & Hardening)
+Started: Sun Mar 29 23:45:14 +03 2026
 ---
 
-## Phase 4 progress archived to scripts/ralph/archive/2026-03-29-email-service-phase-4/
-
-## 2026-03-29 - US-008
-- Added `findBySendgridMessageId`, `markDelivered`, `markOpenedFromWebhook`, `markClickedFromWebhook`, `markBouncedFromWebhook`, `markUnsubscribed`, `markSpamReported` to `EmailCampaignRecipientsRepository`
-- Added `findBySendgridMessageId`, `markDelivered`, `markOpened`, `markClicked`, `markBouncedFromWebhook`, `markUnsubscribed`, `markSpamReported` to `EmailSendsRepository`
-- Created `email-recipient-clicks-repository.ts` and `email-send-clicks-repository.ts`
-- Files changed: email-campaign-recipients-repository.ts, email-sends-repository.ts, email-recipient-clicks-repository.ts, email-send-clicks-repository.ts
+## 2026-03-29 - US-012
+- Created `packages/@ortho/logger/` package: pino-based structured logger with Datadog-compatible `status` field, `createLogger(service)` factory
+- Added `@ortho/logger` dependency to `apps/platform/email/package.json`
+- Added `import { createLogger }` and `const log = createLogger('email-service:...')` to all 5 route handlers (sends, campaigns, spam-check, domains, webhooks)
+- Added logger to services: domain-resolver (cache hit/miss at debug), spam-checker (result at info), webhook-processor (routing decision at debug, dropped events at warn, batch errors at error)
+- Added logger to workers: transactional-send-worker (start/completion/failure at info/error), campaign-recipient-worker (start/completion/failure at info/error)
+- Replaced all `console.warn`/`console.error` in webhook-processor with `log.warn`/`log.error`
+- Files changed: packages/@ortho/logger/{package.json,tsconfig.json,src/index.ts}, apps/platform/email/package.json, all 5 route files, domain-resolver.ts, spam-checker.ts, webhook-processor.ts, transactional-send-worker.ts, campaign-recipient-worker.ts
 - **Learnings for future iterations:**
-  - Forward-only guards use `.whereIn` / `.whereNotIn` before update — no row fetch needed
-  - `this.db.raw('COALESCE(col, ?)', [value])` is correct Knex pattern for conditional timestamp preservation
-  - EmailSend spamreport sets status='bounced' (not 'spam_reported') — transactional sends have no spam_reported status per spec
-  - Click repos use `randomUUID()` from `node:crypto` for id generation (same as other repos)
----
-
-## 2026-03-29 - US-010
-- Created `apps/platform/email/src/services/webhook-processor.ts`: `WebhookProcessor` class with `processEvent` and `processBatch` methods; handles campaign recipient and transactional send paths for all SendGrid webhook events (delivered, open, click, bounce, deferred, spamreport, unsubscribe/group_unsubscribe); forward-only DB updates via repos, EventBridge publishing via eventBus
-- Created `apps/platform/email/src/services/webhook-processor.test.ts`: 12 tests covering all spec scenarios (a)–(l); uses vi.mock for all 5 repos and mocked EventBus
-- Files changed: webhook-processor.ts, webhook-processor.test.ts
-- **Learnings for future iterations:**
-  - Use `await import()` inside `beforeEach` after `vi.mocked(...).mockImplementation(...)` to avoid module caching issues when multiple test files import the same mocked modules
-  - `bounce` event `type === 'blocked'` is a no-op — only `type === 'bounce'` triggers DB update + event publish
-  - Campaign recipient path always fetches the parent job (once per event) for location_id/entity_type/entity_id
-  - `SendgridEvent` interface is exported so the route handler can reuse it
-  - `processBatch` catches per-event errors and logs them — one bad event must not abort the batch
----
-
-## 2026-03-29 - US-011
-- Created `apps/platform/email/src/routes/webhooks.ts`: `webhookRoutes` Fastify plugin with `POST /webhooks/sendgrid`; captures raw body via `addContentTypeParser` (plugin-scoped, doesn't affect other routes); ECDSA verification via `SendgridSignatureVerifier`; returns 403 on invalid sig; fire-and-forget `processBatch`; returns 200 with `{ received: N }`
-- Updated `apps/platform/email/src/app.ts`: registered `webhookRoutes` at root prefix
-- Created `apps/platform/email/src/routes/webhooks.test.ts`: 5 tests covering (a) valid sig → 200, (b) invalid sig → 403, (c) missing headers → empty strings → 403, (d) 3-event batch → processBatch called once, (e) verifier throws → 500
-- Files changed: webhooks.ts, webhooks.test.ts, app.ts
-- **Learnings for future iterations:**
-  - Fastify plugin-scoped `addContentTypeParser` does not bleed into sibling plugins — safe to override JSON parser in one route plugin
-  - `void fn()` registers the mock call synchronously in vitest — test assertions on call counts work without awaiting
-  - Fastify async route handlers that throw return 500 automatically — no explicit try-catch needed for test case (e)
-  - Webhook route must be registered at root (no prefix) so SendGrid's configured URL `/webhooks/sendgrid` matches
----
-
-## 2026-03-29 - US-009
-- Created `apps/platform/email/src/services/sendgrid-signature-verifier.ts`: `SendgridSignatureVerifier` class with lazy-cached ECDSA public key from AWS Secrets Manager; `verify()` uses Node.js `createVerify('SHA256')` with base64 encoding; returns false (never throws) on any error
-- Added `@aws-sdk/client-secrets-manager` to `apps/platform/email/package.json`
-- Renamed `SENDGRID_WEBHOOK_SECRET_ID` → `SENDGRID_WEBHOOK_SIGNING_KEY_SECRET_ARN` in `env.ts` and `vitest.config.ts`
-- Created `apps/platform/email/src/services/sendgrid-signature-verifier.test.ts`: 4 tests using real EC key pair + `createSign` for valid signatures, mocked SecretsManager
-- Files changed: package.json, package-lock.json, src/env.ts, vitest.config.ts, src/services/sendgrid-signature-verifier.ts, src/services/sendgrid-signature-verifier.test.ts
-- **Learnings for future iterations:**
-  - Generate real EC key pairs with `generateKeyPairSync('ec', { namedCurve: 'prime256v1', ... })` for ECDSA signature tests — do not fake signatures
-  - `vi.mock()` factory-level `vi.fn()` is shared across tests; call `mockSend.mockClear()` in `beforeEach` to reset call counts
-  - Renaming any env var in `env.ts` requires updating `vitest.config.ts` env block too — tests import `env.ts` at module load time and will fail with "Missing required env" otherwise
+  - @ortho/logger package was empty — needed to be created from scratch (pino dep, build step)
+  - Pino bindings go in first arg as object, message in second: `log.info({ field: val }, 'msg')`
+  - Pino `formatters.level` override adds `status` field Datadog expects alongside standard `level`
+  - All 73 existing tests pass with logging additions — no test changes needed
 ---

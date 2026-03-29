@@ -1,9 +1,12 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
+import { createLogger } from '@ortho/logger';
 import { DomainRepository } from '../repositories/domain-repository.js';
 import { DomainResolver } from '../services/domain-resolver.js';
 import { EmailSendsRepository } from '../repositories/email-sends-repository.js';
 import { DomainNotConfiguredError, DomainNotVerifiedError } from '../errors.js';
+
+const log = createLogger('email-service:sends');
 
 const SendEmailBodySchema = Type.Object({
   dedup_key: Type.String(),
@@ -36,23 +39,29 @@ export async function sendRoutes(app: FastifyInstance): Promise<void> {
       entity_id?: string;
     };
 
+    log.info({ location_id: body.location_id, dedup_key: body.dedup_key }, 'POST /send received');
+
     // (1) Resolve domain
     let domain;
     try {
       domain = await domainResolver.resolve(body.location_id);
     } catch (err) {
       if (err instanceof DomainNotConfiguredError) {
+        log.warn({ location_id: body.location_id }, 'domain not configured');
         return reply.status(422).send({ error: 'domain_not_configured', location_id: body.location_id });
       }
       if (err instanceof DomainNotVerifiedError) {
+        log.warn({ location_id: body.location_id }, 'domain not verified');
         return reply.status(422).send({ error: 'domain_not_verified', location_id: body.location_id });
       }
+      log.error({ err, location_id: body.location_id }, 'unexpected error resolving domain');
       throw err;
     }
 
     // (2) Check dedup
     const existing = await repo.findByDedupKey(body.dedup_key);
     if (existing) {
+      log.info({ email_id: existing.id, status: existing.status, dedup_key: body.dedup_key }, 'dedup hit — returning existing send');
       return reply.status(200).send({ email_id: existing.id, status: existing.status });
     }
 
@@ -78,6 +87,8 @@ export async function sendRoutes(app: FastifyInstance): Promise<void> {
       attempts: 5,
       backoff: { type: 'custom' },
     });
+
+    log.info({ email_id: send.id, location_id: body.location_id }, 'send queued');
 
     // (5) Return
     return reply.status(200).send({ email_id: send.id, status: 'queued' });

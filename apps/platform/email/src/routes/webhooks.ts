@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
+import { createLogger } from '@ortho/logger';
 import { SendgridSignatureVerifier } from '../services/sendgrid-signature-verifier.js';
 import { WebhookProcessor, type SendgridEvent } from '../services/webhook-processor.js';
 import { env } from '../env.js';
+
+const log = createLogger('email-service:webhooks');
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   // Override JSON parser within this plugin scope to capture raw body for ECDSA verification
@@ -26,10 +29,12 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     const isValid = await verifier.verify({ rawBody, signature, timestamp });
     if (!isValid) {
+      log.warn('POST /webhooks/sendgrid — invalid signature, rejecting');
       return reply.status(403).send({ error: 'invalid_signature' });
     }
 
     const events = request.body as SendgridEvent[];
+    log.info({ event_count: events.length }, 'POST /webhooks/sendgrid received batch');
 
     // Fire-and-forget — processBatch handles its own per-event error isolation
     void processor.processBatch(events);

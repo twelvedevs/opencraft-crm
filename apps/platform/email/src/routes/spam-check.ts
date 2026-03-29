@@ -1,8 +1,11 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
+import { createLogger } from '@ortho/logger';
 import { DomainRepository } from '../repositories/domain-repository.js';
 import { SpamCheckerService } from '../services/spam-checker.js';
 import { env } from '../env.js';
+
+const log = createLogger('email-service:spam-check');
 
 const SpamCheckBodySchema = Type.Object({
   location_id: Type.Optional(Type.String()),
@@ -22,6 +25,8 @@ export async function spamCheckRoutes(app: FastifyInstance): Promise<void> {
       text: string;
     };
 
+    log.info({ location_id: body.location_id }, 'POST /spam-check received');
+
     const checker = new SpamCheckerService(
       new DomainRepository(app.db),
       env.SPAM_SCORE_THRESHOLD_DEFAULT ?? 5.0,
@@ -34,6 +39,7 @@ export async function spamCheckRoutes(app: FastifyInstance): Promise<void> {
       text: body.text,
     });
 
+    log.info({ location_id: body.location_id, score: result.score, passed: result.passed }, 'spam check complete');
     return reply.status(200).send(result);
   });
 }

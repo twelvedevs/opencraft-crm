@@ -1,7 +1,10 @@
 import { Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
+import { createLogger } from '@ortho/logger';
 import type { Knex } from '../db.js';
 import type { EventBus } from '@ortho/event-bus';
+
+const log = createLogger('email-service:transactional-send-worker');
 import { EmailSendsRepository } from '../repositories/email-sends-repository.js';
 import { DomainRepository } from '../repositories/domain-repository.js';
 import { env } from '../env.js';
@@ -25,6 +28,8 @@ export function createTransactionalSendWorker(
   const worker = new Worker<TransactionalSendJobData>(
     'transactional-send',
     async (job) => {
+      log.info({ job_id: job.id, email_id: job.data.emailSendId, attempt: job.attemptsMade + 1 }, 'transactional-send job started');
+
       const send = await repo.findById(job.data.emailSendId);
       if (!send) return;
 
@@ -55,6 +60,7 @@ export function createTransactionalSendWorker(
 
       if (response.status === 202) {
         const sendgridMessageId = response.headers.get('X-Message-Id') ?? '';
+        log.info({ job_id: job.id, email_id: send.id, sendgrid_message_id: sendgridMessageId, attempt: job.attemptsMade + 1 }, 'transactional-send job completed');
         await repo.markSent(send.id, sendgridMessageId);
         await eventBus.publish({
           event_type: 'email.sent',
@@ -70,7 +76,9 @@ export function createTransactionalSendWorker(
         return;
       }
 
-      throw new Error(`SendGrid responded with ${response.status}`);
+      const errMsg = `SendGrid responded with ${response.status}`;
+      log.error({ job_id: job.id, email_id: send.id, status: response.status, attempt: job.attemptsMade + 1 }, errMsg);
+      throw new Error(errMsg);
     },
     {
       connection,
@@ -86,6 +94,7 @@ export function createTransactionalSendWorker(
 
   worker.on('failed', async (job, err) => {
     if (!job) return;
+    log.error({ err, job_id: job.id, email_id: job.data.emailSendId, attempt: job.attemptsMade }, 'transactional-send job failed');
     if (job.attemptsMade >= (job.opts.attempts ?? 1)) {
       const send = await repo.findById(job.data.emailSendId);
       await repo.markFailed(job.data.emailSendId, err.message);

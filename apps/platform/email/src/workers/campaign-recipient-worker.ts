@@ -1,7 +1,10 @@
 import { Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
+import { createLogger } from '@ortho/logger';
 import type { Knex } from '../db.js';
 import type { EventBus } from '@ortho/event-bus';
+
+const log = createLogger('email-service:campaign-recipient-worker');
 import { EmailCampaignJobsRepository } from '../repositories/email-campaign-jobs-repository.js';
 import { EmailCampaignRecipientsRepository } from '../repositories/email-campaign-recipients-repository.js';
 import { DomainRepository } from '../repositories/domain-repository.js';
@@ -70,6 +73,8 @@ export function createCampaignRecipientWorker(
   const worker = new Worker<CampaignRecipientJobData>(
     'campaign-recipient',
     async (job) => {
+      log.info({ job_id: job.id, recipient_id: job.data.recipientId, attempt: job.attemptsMade + 1 }, 'campaign-recipient job started');
+
       // Step 1: Fetch recipient; crash recovery guard
       const recipient = await recipientsRepo.findById(job.data.recipientId);
       if (!recipient || recipient.status !== 'pending') return;
@@ -128,6 +133,7 @@ export function createCampaignRecipientWorker(
       // Step 8: 202 success
       if (response.status === 202) {
         const sendgridMessageId = response.headers.get('X-Message-Id') ?? '';
+        log.info({ job_id: job.id, recipient_id: recipient.id, sendgrid_message_id: sendgridMessageId, attempt: job.attemptsMade + 1 }, 'campaign-recipient job completed — email sent');
         await recipientsRepo.markSent(recipient.id, sendgridMessageId);
         await jobsRepo.incrementSentCount(campaignJob.id);
         await checkCompletion(campaignJob.id);
@@ -153,7 +159,9 @@ export function createCampaignRecipientWorker(
       }
 
       // Step 10: Other non-202 → throw to trigger BullMQ retry
-      throw new Error(`SendGrid responded with ${response.status}`);
+      const errMsg = `SendGrid responded with ${response.status}`;
+      log.error({ job_id: job.id, recipient_id: recipient.id, status: response.status, attempt: job.attemptsMade + 1 }, errMsg);
+      throw new Error(errMsg);
     },
     {
       connection,

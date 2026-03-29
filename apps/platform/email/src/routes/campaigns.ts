@@ -1,5 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
+import { createLogger } from '@ortho/logger';
 import { DomainRepository } from '../repositories/domain-repository.js';
 import { DomainResolver } from '../services/domain-resolver.js';
 import { EmailCampaignJobsRepository } from '../repositories/email-campaign-jobs-repository.js';
@@ -12,6 +13,8 @@ import {
 } from '../clients/template-service-client.js';
 import { DomainNotConfiguredError, DomainNotVerifiedError } from '../errors.js';
 import { env } from '../env.js';
+
+const log = createLogger('email-service:campaigns');
 
 const CampaignSendBodySchema = Type.Object({
   job_ref: Type.String(),
@@ -50,23 +53,29 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       scheduled_for?: string;
     };
 
+    log.info({ location_id: body.location_id, job_ref: body.job_ref, recipient_count: body.recipients.length }, 'POST /campaigns/send received');
+
     // Step 1 — Domain check
     let domain;
     try {
       domain = await domainResolver.resolve(body.location_id);
     } catch (err) {
       if (err instanceof DomainNotConfiguredError) {
+        log.warn({ location_id: body.location_id }, 'domain not configured');
         return reply.status(422).send({ error: 'domain_not_configured' });
       }
       if (err instanceof DomainNotVerifiedError) {
+        log.warn({ location_id: body.location_id }, 'domain not verified');
         return reply.status(422).send({ error: 'domain_not_verified' });
       }
+      log.error({ err, location_id: body.location_id }, 'unexpected error resolving domain');
       throw err;
     }
 
     // Step 2 — Dedup
     const existing = await jobsRepo.findByJobRef(body.job_ref);
     if (existing) {
+      log.info({ job_id: existing.id, status: existing.status, job_ref: body.job_ref }, 'dedup hit — returning existing job');
       return reply.status(200).send({
         job_id: existing.id,
         status: existing.status,
@@ -136,6 +145,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     });
 
     if (!spamResult.passed) {
+      log.warn({ job_id: job.id, location_id: body.location_id, score: spamResult.score }, 'spam check failed — job blocked');
       await jobsRepo.setSpamCheckFailed(job.id, spamResult.score, spamResult.issues);
       return reply.status(422).send({
         error: 'spam_check_failed',
@@ -173,6 +183,8 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
         { delay: scheduledDelay },
       );
     }
+
+    log.info({ job_id: job.id, location_id: body.location_id, total_recipients: body.recipients.length }, 'campaign job queued for processing');
 
     return reply.status(202).send({
       job_id: job.id,
