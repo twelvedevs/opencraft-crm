@@ -5,6 +5,7 @@ import type { Knex } from './db.js';
 import type { EventBus } from '@ortho/event-bus';
 import { healthRoutes } from './routes/health.js';
 import { domainRoutes } from './routes/domains.js';
+import { sendRoutes } from './routes/sends.js';
 
 export async function buildApp(
   db: Knex,
@@ -30,6 +31,7 @@ export async function buildApp(
 
   await app.register(healthRoutes);
   await app.register(domainRoutes, { prefix: '/emails' });
+  await app.register(sendRoutes, { prefix: '/emails' });
 
   return app;
 }

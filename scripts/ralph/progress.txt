@@ -16,6 +16,19 @@ Started: Sun Mar 29 22:36:39 +03 2026
 
 ---
 
+## 2026-03-29 - US-003
+- Implemented POST /emails/send route with domain check, dedup, and enqueue
+- Files changed:
+  - `apps/platform/email/src/routes/sends.ts` (created) — `sendRoutes` Fastify plugin
+  - `apps/platform/email/src/routes/sends.test.ts` (created) — 4 unit tests via `app.inject()`
+  - `apps/platform/email/src/app.ts` — registered `sendRoutes` with prefix `/emails`
+- **Learnings for future iterations:**
+  - Use `vi.mock` for module-level mocking; import mocked class after `vi.mock` call and use `vi.mocked(ClassName).mockImplementation(() => instance)`
+  - Route tests create a real `buildApp` instance and use `app.inject()` — no need for a separate test server setup
+  - Mock the `DomainRepository` module too (even if not used directly) to prevent the route from instantiating a real one
+  - `queue.add` mock must be on the `transactionalSend` property of the queues stub passed to `buildApp`
+---
+
 ## 2026-03-29 - US-002
 - Implemented BullMQ + IORedis setup wired into Fastify lifecycle
 - Files changed:
