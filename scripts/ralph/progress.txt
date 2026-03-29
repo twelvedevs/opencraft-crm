@@ -19,6 +19,14 @@ Started: Sun Mar 29 22:36:39 +03 2026
 
 ---
 
+## 2026-03-29 - US-002
+- Added `campaignRecipient` BullMQ Queue to `createQueues()`, `FastifyInstance` types, `buildApp()` onClose hook
+- Updated `sends.test.ts` stub to include `campaignRecipient` (was missing — caused typecheck failure)
+- Files changed: `apps/platform/email/src/queue.ts`, `src/types.d.ts`, `src/app.ts`, `src/app.test.ts`, `src/routes/sends.test.ts`
+- **Learnings for future iterations:**
+  - When extending `buildApp` queues type, ALL existing test files that call `buildApp` need their stubs updated — check `sends.test.ts` in addition to `app.test.ts`
+---
+
 ## 2026-03-29 - US-001
 - Implemented `EmailCampaignJobsRepository` with full CRUD, atomic increment methods, and `attemptCompletion` via raw SQL RETURNING
 - Implemented `EmailCampaignRecipientsRepository` with bulk insert, paginated query (parallel count), and status update methods
