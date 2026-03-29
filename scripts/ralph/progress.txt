@@ -13,44 +13,8 @@ Started: Sun Mar 29 22:36:39 +03 2026
 - ioredis: use `import { Redis } from 'ioredis'` (named export) — default import `IORedis` cannot be used as a type
 - BullMQ requires `maxRetriesPerRequest: null` on the IORedis connection
 - When `buildApp` signature changes, update `app.test.ts` stubs (all 3 call sites)
+- BullMQ worker tests: use top-level `vi.mock('bullmq', () => ({ Worker: vi.fn() }))`, capture processor + failed handler in `beforeEach` by setting `Worker.mockImplementation` before calling `createWorker()`
+- Worker processor is tested by calling `capturedProcessor({ data: jobData })` directly — no real BullMQ queue needed
+- Type the `publishSpy` as `any` when using `vi.spyOn` on an EventBus method to avoid complex `MockInstance` variance errors
 
----
-
-## 2026-03-29 - US-003
-- Implemented POST /emails/send route with domain check, dedup, and enqueue
-- Files changed:
-  - `apps/platform/email/src/routes/sends.ts` (created) — `sendRoutes` Fastify plugin
-  - `apps/platform/email/src/routes/sends.test.ts` (created) — 4 unit tests via `app.inject()`
-  - `apps/platform/email/src/app.ts` — registered `sendRoutes` with prefix `/emails`
-- **Learnings for future iterations:**
-  - Use `vi.mock` for module-level mocking; import mocked class after `vi.mock` call and use `vi.mocked(ClassName).mockImplementation(() => instance)`
-  - Route tests create a real `buildApp` instance and use `app.inject()` — no need for a separate test server setup
-  - Mock the `DomainRepository` module too (even if not used directly) to prevent the route from instantiating a real one
-  - `queue.add` mock must be on the `transactionalSend` property of the queues stub passed to `buildApp`
----
-
-## 2026-03-29 - US-002
-- Implemented BullMQ + IORedis setup wired into Fastify lifecycle
-- Files changed:
-  - `apps/platform/email/package.json` — added `bullmq` and `ioredis` dependencies
-  - `apps/platform/email/src/queue.ts` (created) — `createConnection` and `createQueues` exports
-  - `apps/platform/email/src/types.d.ts` — added `queues: { transactionalSend: Queue }` to FastifyInstance
-  - `apps/platform/email/src/app.ts` — updated `buildApp` signature, added `app.decorate('queues', ...)` and queue close in `onClose` hook
-  - `apps/platform/email/src/index.ts` — wired connection/queues creation and `connection.quit()` in SIGTERM handler
-  - `apps/platform/email/src/app.test.ts` — updated all `buildApp` call sites to pass mock queues stub
-- **Learnings for future iterations:**
-  - ioredis named export `{ Redis }` must be used — default `IORedis` import can't be used as a TypeScript type
-  - `maxRetriesPerRequest: null` is mandatory on the Redis connection for BullMQ to work
-  - `app.test.ts` calls `buildApp` in 3 places — all need updating when signature changes
-  - Queue `close()` goes in the `onClose` hook (managed by Fastify); Redis `connection.quit()` goes in the SIGTERM handler (outside Fastify lifecycle)
----
-
-## 2026-03-29 - US-001
-- Implemented `EmailSendsRepository` with TypeBox schema + all `email_sends` columns
-- Methods: `findById`, `findByDedupKey`, `create`, `markSent`, `markFailed`, `incrementAttempt`
-- Files changed: `apps/platform/email/src/repositories/email-sends-repository.ts` (created)
-- **Learnings for future iterations:**
-  - Follow the same TypeBox + Knex pattern as `domain-repository.ts` exactly
-  - `increment('attempt', 1)` maps directly to `knex.increment()` — no raw SQL needed
-  - DB default handles `status = 'queued'` so `create()` does not set it explicitly
 ---

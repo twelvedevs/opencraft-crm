@@ -1,96 +1,27 @@
 # Ralph Progress Log
-Started: Sun Mar 29 18:18:02 +03 2026
+Started: Sun Mar 29 2026
 
 ## Codebase Patterns
 - Each service/package is standalone with its own node_modules (no root workspace manager)
 - Use `file:../../../packages/@ortho/<name>` for local package references in package.json
 - @ortho/event-bus must be built (`npm run build`) before dependent packages can typecheck
 - TypeBox `Value.Check` + `Value.Errors` is cleaner than `Value.Parse` for env validation with custom error messages
-- Fastify app builder pattern: `buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance>` — decorate instance, register hooks, register routes
+- Fastify app builder pattern: `buildApp(db: Knex, eventBus: EventBus, queues: {...}): Promise<FastifyInstance>` — decorate instance, register hooks, register routes
 - Register `onReady` hook (not `onStart`) to call `eventBus.start()` after Fastify is ready
-- Module augmentation in `src/types.d.ts` is needed to type `fastify.db` and `fastify.eventBus` decorators
-- `tsconfig.json`: no workspace base extension — standalone per service (same as event-bus package)
-- Fastify TypeBox response schemas: define ALL used status codes (including error codes like 404, 409) in the `response:` schema object — otherwise `reply.status(N)` causes TS type errors
+- Module augmentation in `src/types.d.ts` is needed to type `fastify.db`, `fastify.eventBus`, `fastify.queues` decorators
+- `tsconfig.json`: no workspace base extension — standalone per service
+- Fastify TypeBox response schemas: define ALL used status codes (including error codes like 404, 409, 422) in the `response:` schema object — otherwise `reply.status(N)` causes TS type errors
 - `@fastify/sensible` v5 supports Fastify 4.x only — use `^6.0.0` for Fastify 5.x
 - For tests that import modules with top-level env parsing, set env vars in `vitest.config.ts` under `test.env` (not setupFiles) — they are applied before module evaluation
+- @ortho/logger package does not exist yet — use console or pino directly
+- Native `fetch` is available in Node 18+ — no extra HTTP lib needed for SendGrid calls
+- PG unique violation check: inspect `err.code === '23505'` (typeof guard required for TS)
+- BullMQ requires `maxRetriesPerRequest: null` on the IORedis connection
+- DomainRepository and DomainResolver instantiated inside Fastify plugin functions using `app.db` decorator — no need to pass via plugin options
+- TypeBox schema for DB entities: use `Type.Number()` for numeric columns, `Type.String()` for timestamps, `Type.Union([Type.String(), Type.Null()])` for nullable text
+- `app.ready()` triggers `onReady` hooks without binding a port — preferred over `app.listen()` for unit tests
+- `app.inject()` (Fastify's built-in HTTP injection) works without the app being in listening state
+- Use `vi.spyOn(Date, 'now').mockReturnValue(n)` for time-based cache tests
+- `vi.restoreAllMocks()` in `afterEach` keeps tests isolated when using spies
 
----
-
-## Sun Mar 29 2026 - US-001
-- Implemented @platform/email service scaffold
-- Files created:
-  - apps/platform/email/package.json
-  - apps/platform/email/tsconfig.json
-  - apps/platform/email/vitest.config.ts
-  - apps/platform/email/Dockerfile
-  - apps/platform/email/src/env.ts (TypeBox env validation)
-  - apps/platform/email/src/db.ts (Knex factory)
-  - apps/platform/email/src/app.ts (buildApp with sensible, decorators, hooks)
-  - apps/platform/email/src/types.d.ts (Fastify module augmentation)
-  - apps/platform/email/src/routes/health.ts (GET /health)
-  - apps/platform/email/src/index.ts (entry point)
-  - packages/@ortho/event-bus/dist/ (built for typecheck)
-- **Learnings for future iterations:**
-  - @ortho/logger package does not exist yet — omitted from package.json, use console or pino directly
-  - @ortho/event-bus needed a `npm run build` first to generate dist/ for TypeScript to resolve types
-  - No `@types/knex` needed — knex ships its own types
-  - Fastify v5 uses `reply.send()` not returning — but returning the result also works
-  - `Value.Check` preferred over `Value.Parse` for custom error messages with field names
----
-
-## Sun Mar 29 2026 - US-002
-- Implemented DB migrations for all 5 platform_email tables + indexes
-- Files created:
-  - apps/platform/email/migrations/001_initial_schema.ts (up/down migration)
-  - apps/platform/email/src/migrate.ts (migration runner script)
-- **Learnings for future iterations:**
-  - Migration files in `migrations/` dir are NOT included in tsconfig (`rootDir: src`) — excluded from `tsc --noEmit`; matches automation service pattern
-  - Use `table.specificType('col', 'numeric')` for unconstrained numeric columns in Knex (not `table.decimal(col, null, null)`)
-  - `src/migrate.ts` reads `DATABASE_URL` directly from `process.env` — keeps migration runner minimal
-  - Indexes added inline inside `createTable()` calls: `table.index(['col'])` or `table.index(['col1','col2'])`
-  - Foreign keys: nullable FK = `.nullable()`, required FK = `.notNullable()`
----
-
-## Sun Mar 29 2026 - US-003
-- Implemented domain repository + resolver service with 60s in-memory cache
-- Files created:
-  - apps/platform/email/src/errors.ts (DomainNotConfiguredError, DomainNotVerifiedError)
-  - apps/platform/email/src/repositories/domain-repository.ts (SendingDomainSchema, DomainRepository)
-  - apps/platform/email/src/services/domain-resolver.ts (DomainResolver with TTL cache)
-  - apps/platform/email/src/services/domain-resolver.test.ts (6 unit tests)
-- **Learnings for future iterations:**
-  - Use `vi.spyOn(Date, 'now').mockReturnValue(n)` for time-based cache tests (same pattern as automation service rule-cache.test.ts)
-  - `vi.restoreAllMocks()` in `afterEach` keeps tests isolated when using spies
-  - TypeBox schema for DB entities: use `Type.Number()` for numeric columns, `Type.String()` for timestamps, `Type.Union([Type.String(), Type.Null()])` for nullable text
-  - `hasSentEmailsIn30Days` uses two separate `.first()` queries (email_sends + email_campaign_jobs) — returns true if either has a row
-  - `DomainRepository.create()` uses `.returning('*')` and returns `row as SendingDomain` (Knex returns array from returning)
----
-
-## Sun Mar 29 2026 - US-004
-- Implemented domain management REST routes (POST/GET/DELETE /emails/domains)
-- Files created/modified:
-  - apps/platform/email/src/routes/domains.ts (new — domainRoutes Fastify plugin with 4 endpoints)
-  - apps/platform/email/src/app.ts (registered domainRoutes with prefix `/emails`)
-- **Learnings for future iterations:**
-  - Fastify TypeBox response schemas require ALL used status codes in the `response:` object — e.g. `{ 201: SuccessSchema, 409: ErrorSchema }` — or TS errors on `reply.status(409)`
-  - DomainRepository and DomainResolver instantiated inside the plugin function using `app.db` decorator — no need to pass them via plugin options
-  - PG unique violation check: inspect `err.code === '23505'` (typeof guard required for TS)
-  - Native `fetch` used for SendGrid API call — available in Node 18+, no extra lib needed
-  - Route prefix in `buildApp`: `app.register(domainRoutes, { prefix: '/emails' })` → routes become `/emails/domains`, `/emails/domains/:id`
----
-
-## Sun Mar 29 2026 - US-005
-- Implemented @ortho/event-bus lifecycle wiring unit tests
-- Files created/modified:
-  - apps/platform/email/src/app.test.ts (new — 3 unit tests using MockDriver + vi.spyOn)
-  - apps/platform/email/vitest.config.ts (added test.env with required env vars for module load)
-  - apps/platform/email/package.json (upgraded @fastify/sensible ^5.0.0 → ^6.0.0 for Fastify 5.x compat)
-  - scripts/ralph/prd.json (marked US-001 and US-005 passes: true)
-- Note: US-001 app.ts already had decorators + onReady/onClose hooks wired; this story added the test coverage
-- **Learnings for future iterations:**
-  - `@fastify/sensible` v5 → v6 required for Fastify 5.x runtime (v5 throws at registration)
-  - Use `vi.spyOn(eventBus, 'start')` / `vi.spyOn(eventBus, 'stop')` to verify lifecycle calls (MockDriver doesn't track start/stop counts)
-  - `app.ready()` triggers `onReady` hooks without binding a port — preferred over `app.listen()` for unit tests
-  - `vi.spyOn(console, 'warn').mockImplementation(() => {})` suppresses EventBus zero-subscription warning in tests
-  - `app.inject()` (Fastify's built-in HTTP injection) works without the app being in listening state
 ---
