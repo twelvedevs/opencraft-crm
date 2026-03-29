@@ -3,6 +3,10 @@ Started: Sun Mar 29 16:36:35 +03 2026
 ---
 
 ## Codebase Patterns
+- ioredis named import: use `import { Redis } from 'ioredis'`; `vi.mock('ioredis', () => ({ Redis: vi.fn(() => mockRedis) }))` in tests
+- ioredis constructor: pass `{ lazyConnect: true }` to avoid eager connection in tests / factory validation
+- xpending has two forms: range (5 args: key, group, start, end, count) → delivery count per message; summary (2 args: key, group) → total pending count
+- Differentiate xpending forms in mocks via `args.length === 5` check in `mockImplementation`
 - Package structure mirrors `apps/platform/automation`: `type: module`, NodeNext module resolution, vitest for tests
 - Use `.js` extensions in imports even for `.ts` source files (NodeNext requirement)
 - `tsconfig.json` does NOT extend a workspace base — inline the full compilerOptions (no workspace tsconfig found)
@@ -40,6 +44,21 @@ Started: Sun Mar 29 16:36:35 +03 2026
   - `vi.mock.calls.find()` type annotations: use `(args[0] as { _type: string })._type` not destructured tuple types (incompatible with `any[][]`)
   - Factory test for EventBridgeDriver needs `EVENT_BRIDGE_BUS_NAME` and `SQS_QUEUE_URL` env vars set since constructor now validates them
   - try/finally in poll loop is essential — if the loop throws unexpectedly, stopResolve must still be called or `stop()` hangs forever
+---
+
+## 2026-03-29T17:02 - US-004
+- Implemented full RedisStreamsDriver using ioredis (XADD publish, XREADGROUP consume, XACK, DLQ routing, consumer-lag warning)
+- Files changed:
+  - `packages/@ortho/event-bus/src/drivers/redis-streams.ts` — full implementation replacing stub
+  - `packages/@ortho/event-bus/src/drivers/redis-streams.test.ts` — 9 unit tests (new file)
+  - `packages/@ortho/event-bus/src/factory.ts` — reads REDIS_URL + EVENT_BUS_CONSUMER_GROUP env vars for redis driver
+  - `packages/@ortho/event-bus/src/factory.test.ts` — updated redis test case to supply required env vars
+  - `packages/@ortho/event-bus/package.json` + `package-lock.json` — added ioredis dependency
+- **Learnings for future iterations:**
+  - ioredis named import: `import { Redis } from 'ioredis'` (not default import); vi.mock must export `Redis` as named export
+  - Pass `{ lazyConnect: true }` to avoid eager connection attempts that can emit async errors in tests
+  - xpending has two call signatures: range form (5 args, returns per-message delivery counts) and summary form (2 args, returns total pending count); differentiate in mocks via `args.length === 5`
+  - After switching from `import Redis from 'ioredis'` to `import { Redis } from 'ioredis'`, the vi.mock factory must be updated to use `{ Redis: vi.fn(...) }` instead of `{ default: vi.fn(...) }`
 ---
 
 ## 2026-03-29T16:42 - US-002
