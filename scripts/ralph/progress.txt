@@ -1,3 +1,29 @@
+## 2026-03-29 - US-016
+- Created `apps/platform/email/infra/api-gateway-sendgrid-rule.ts` — AWS CDK construct `SendGridWebhookListenerRule`
+- Construct attaches a dedicated ALB listener rule for POST /webhooks/sendgrid at priority 10 (higher than main catch-all)
+- Conditions: path-pattern `/webhooks/sendgrid`, HTTP method POST, source-ip restricted to SendGrid CIDR allowlist (10 CIDRs documented with reference URL)
+- Exports `description` string noting the rule is separate from the main Email Service API listener
+- Comment in file explains forwarding to same ECS target group at higher listener rule priority
+- Typecheck passes (tsconfig covers `src/**/*` only; infra/ is not included — no CDK types needed in existing tsconfig)
+- **Learnings for future iterations:**
+  - CDK infra files placed outside `src/` are not covered by the service tsconfig — typecheck passes trivially; a separate `tsconfig.infra.json` + `aws-cdk-lib` devDep would be needed to actually typecheck CDK constructs
+  - ALB listener rules support combined conditions: `pathPatterns`, `httpRequestMethods`, and `sourceIps` — all must match for the rule to fire
+  - SendGrid IP ranges should be reviewed periodically; the reference URL is documented in the construct
+---
+
+## 2026-03-29 - US-015
+- Created `apps/platform/email/datadog/dashboard.json` with a valid Datadog dashboard API v1 JSON definition
+- Dashboard title: "Email Service — Platform"
+- 6 widgets: transactional-send queue depth, campaign-recipient queue depth, campaign send rate, webhook processing lag p95, spam check failure rate, email.failed dead-letter rate
+- Markers added for all alert thresholds per acceptance criteria (>1000, >50000, p95>30s, any occurrence)
+- Typecheck passes (tsconfig only includes `src/**/*`, JSON file unaffected)
+- **Learnings for future iterations:**
+  - Datadog dashboard JSON uses `layout_type: "ordered"` with explicit `x/y/width/height` per widget under `layout`
+  - Alert thresholds in dashboard widgets are represented as `markers` (not monitor configs) — the JSON definition captures the threshold visually
+  - `per_minute(query)` formula calculates rate from a counter in Datadog timeseries widgets
+  - `aws.events.matched_events` is the standard metric for counting matched EventBridge rules in Datadog
+---
+
 ## Codebase Patterns
 - @ortho/logger package: thin pino wrapper; use `createLogger('service-name:component')` — returns a Logger instance with Datadog-compatible `status` field
 - Logger import: `import { createLogger } from '@ortho/logger';` then `const log = createLogger('email-service:component');` at module scope
