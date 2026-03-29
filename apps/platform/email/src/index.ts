@@ -5,11 +5,14 @@ import { buildApp } from './app.js';
 import { createConnection, createQueues } from './queue.js';
 import { createTransactionalSendWorker } from './workers/transactional-send-worker.js';
 import { createCampaignRecipientWorker } from './workers/campaign-recipient-worker.js';
+import { runCampaignCrashRecovery } from './workers/campaign-crash-recovery.js';
 
 const db = createDb(env.DATABASE_URL);
 const eventBus = createEventBus();
 const connection = createConnection(env.REDIS_URL);
 const queues = createQueues(connection);
+
+await runCampaignCrashRecovery(db, queues.campaignRecipient);
 
 const app = await buildApp(db, eventBus, queues);
 
