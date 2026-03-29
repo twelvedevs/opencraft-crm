@@ -3,6 +3,8 @@ Started: Sun Mar 29 22:36:39 +03 2026
 ---
 
 ## Codebase Patterns
+- spamscanner (npm) uses `scanner.scan(rfcEmailString)` not `scanner.getReport()` — build a minimal RFC 2822 string from subject/html/text; map `classification.probability * 10` to a 0–10 score
+- spamscanner ships its own TypeScript types at `dist/types/index.d.ts`; no extra @types package needed
 - Repositories follow TypeBox schema + Static type pattern: define `*Schema` with `Type.Object(...)`, export `type * = Static<typeof *Schema>`, then export the class
 - Repository constructors take `private readonly db: Knex`; all queries use `this.db('table_name')`
 - Nullable columns use `Type.Union([Type.String(), Type.Null()])` in TypeBox schemas
@@ -17,6 +19,19 @@ Started: Sun Mar 29 22:36:39 +03 2026
 - Worker processor is tested by calling `capturedProcessor({ data: jobData })` directly — no real BullMQ queue needed
 - Type the `publishSpy` as `any` when using `vi.spyOn` on an EventBus method to avoid complex `MockInstance` variance errors
 
+---
+
+## 2026-03-29 - US-003
+- Implemented `SpamCheckerService` using the real spamscanner `scan()` API (builds RFC 2822 string from subject/html/text, maps classification.probability×10 to score)
+- Added `SPAM_SCORE_THRESHOLD_DEFAULT` optional number env var to `env.ts`
+- Created `routes/spam-check.ts` — POST /emails/spam-check, mocks SpamCheckerService in tests
+- Registered `spamCheckRoutes` in `buildApp()` with prefix `/emails`
+- Files changed: `src/env.ts`, `src/app.ts`, `src/services/spam-checker.ts`, `src/routes/spam-check.ts`, `src/routes/spam-check.test.ts`, `package.json`, `package-lock.json`
+- **Learnings for future iterations:**
+  - spamscanner ships its own TypeScript types; import as `import SpamScanner from 'spamscanner'`
+  - spamscanner API: `scanner.scan(rfcString)` — not `getReport()`. The spec predates the current API version
+  - vitest.config.ts already sets all required env vars; `SPAM_SCORE_THRESHOLD_DEFAULT` is optional so no config change needed
+  - Route test pattern: `vi.mock('../services/spam-checker.js', () => ({ SpamCheckerService: vi.fn() }))` then set `.mockImplementation(() => mockInstance)` in beforeEach
 ---
 
 ## 2026-03-29 - US-002
