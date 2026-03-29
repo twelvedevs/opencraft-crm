@@ -65,6 +65,55 @@ export class EmailCampaignRecipientsRepository {
     await this.db('email_campaign_recipients').where({ id }).increment('attempt', 1);
   }
 
+  async findBySendgridMessageId(msgId: string): Promise<EmailCampaignRecipient | null> {
+    const row = await this.db('email_campaign_recipients')
+      .where({ sendgrid_message_id: msgId })
+      .first();
+    return row ?? null;
+  }
+
+  async markDelivered(id: string, ts: Date): Promise<void> {
+    await this.db('email_campaign_recipients')
+      .where({ id })
+      .whereIn('status', ['sent'])
+      .update({ status: 'delivered', delivered_at: ts });
+  }
+
+  async markOpenedFromWebhook(id: string, ts: Date): Promise<void> {
+    await this.db('email_campaign_recipients')
+      .where({ id })
+      .whereIn('status', ['sent', 'delivered'])
+      .update({ status: 'opened', opened_at: this.db.raw('COALESCE(opened_at, ?)', [ts]) });
+  }
+
+  async markClickedFromWebhook(id: string, ts: Date): Promise<void> {
+    await this.db('email_campaign_recipients')
+      .where({ id })
+      .whereIn('status', ['sent', 'delivered', 'opened'])
+      .update({ status: 'clicked', clicked_at: this.db.raw('COALESCE(clicked_at, ?)', [ts]) });
+  }
+
+  async markBouncedFromWebhook(id: string, ts: Date): Promise<void> {
+    await this.db('email_campaign_recipients')
+      .where({ id })
+      .whereNotIn('status', ['bounced', 'spam_reported', 'unsubscribed', 'failed'])
+      .update({ status: 'bounced', bounced_at: ts });
+  }
+
+  async markUnsubscribed(id: string): Promise<void> {
+    await this.db('email_campaign_recipients')
+      .where({ id })
+      .whereNotIn('status', ['unsubscribed', 'bounced'])
+      .update({ status: 'unsubscribed' });
+  }
+
+  async markSpamReported(id: string): Promise<void> {
+    await this.db('email_campaign_recipients')
+      .where({ id })
+      .whereNotIn('status', ['spam_reported', 'bounced', 'unsubscribed'])
+      .update({ status: 'spam_reported' });
+  }
+
   async findByJobIdPaginated(
     jobId: string,
     options: { status?: string; page: number; pageSize: number },

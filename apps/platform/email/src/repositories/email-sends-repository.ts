@@ -68,4 +68,51 @@ export class EmailSendsRepository {
   async incrementAttempt(id: string): Promise<void> {
     await this.db('email_sends').where({ id }).increment('attempt', 1);
   }
+
+  async findBySendgridMessageId(msgId: string): Promise<EmailSend | null> {
+    const row = await this.db('email_sends').where({ sendgrid_message_id: msgId }).first();
+    return row ?? null;
+  }
+
+  async markDelivered(id: string, ts: Date): Promise<void> {
+    await this.db('email_sends')
+      .where({ id })
+      .whereIn('status', ['sent'])
+      .update({ status: 'delivered', delivered_at: ts });
+  }
+
+  async markOpened(id: string, ts: Date): Promise<void> {
+    await this.db('email_sends')
+      .where({ id })
+      .whereIn('status', ['sent', 'delivered'])
+      .update({ status: 'opened', opened_at: this.db.raw('COALESCE(opened_at, ?)', [ts]) });
+  }
+
+  async markClicked(id: string, ts: Date): Promise<void> {
+    await this.db('email_sends')
+      .where({ id })
+      .whereIn('status', ['sent', 'delivered', 'opened'])
+      .update({ status: 'clicked', clicked_at: this.db.raw('COALESCE(clicked_at, ?)', [ts]) });
+  }
+
+  async markBouncedFromWebhook(id: string, ts: Date): Promise<void> {
+    await this.db('email_sends')
+      .where({ id })
+      .whereNotIn('status', ['bounced', 'failed'])
+      .update({ status: 'bounced', bounced_at: ts });
+  }
+
+  async markUnsubscribed(id: string): Promise<void> {
+    await this.db('email_sends')
+      .where({ id })
+      .whereNotIn('status', ['unsubscribed', 'bounced', 'failed'])
+      .update({ status: 'unsubscribed' });
+  }
+
+  async markSpamReported(id: string): Promise<void> {
+    await this.db('email_sends')
+      .where({ id })
+      .whereNotIn('status', ['bounced', 'unsubscribed', 'failed'])
+      .update({ status: 'bounced', bounced_at: this.db.fn.now() });
+  }
 }
