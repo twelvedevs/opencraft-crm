@@ -356,3 +356,185 @@ describe('POST /emails/campaigns/send', () => {
     }
   });
 });
+
+describe('GET /emails/campaigns/:jobId', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockJobsRepo: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockRecipientsRepo: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockDomainResolver: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockSpamChecker: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockTemplateClient: any;
+  let app: Awaited<ReturnType<typeof buildApp>> | undefined;
+
+  beforeEach(async () => {
+    const { EmailCampaignJobsRepository } = await import('../repositories/email-campaign-jobs-repository.js');
+    const { EmailCampaignRecipientsRepository } = await import('../repositories/email-campaign-recipients-repository.js');
+    const { DomainResolver } = await import('../services/domain-resolver.js');
+    const { SpamCheckerService } = await import('../services/spam-checker.js');
+    const { TemplateServiceClient } = await import('../clients/template-service-client.js');
+
+    mockJobsRepo = {
+      findById: vi.fn().mockResolvedValue(makeJob({ status: 'processing', total_recipients: 10, sent_count: 7, failed_count: 1 })),
+      cancel: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(EmailCampaignJobsRepository).mockImplementation(() => mockJobsRepo);
+
+    mockRecipientsRepo = {
+      findByJobIdPaginated: vi.fn().mockResolvedValue({
+        recipients: [makeRecipient()],
+        total: 1,
+      }),
+    };
+    vi.mocked(EmailCampaignRecipientsRepository).mockImplementation(() => mockRecipientsRepo);
+
+    mockDomainResolver = { resolve: vi.fn() };
+    vi.mocked(DomainResolver).mockImplementation(() => mockDomainResolver);
+
+    mockSpamChecker = { check: vi.fn() };
+    vi.mocked(SpamCheckerService).mockImplementation(() => mockSpamChecker);
+
+    mockTemplateClient = { render: vi.fn() };
+    vi.mocked(TemplateServiceClient).mockImplementation(() => mockTemplateClient);
+
+    const queues = makeQueueStub();
+    const driver = new MockDriver();
+    const eventBus = new EventBusImpl(driver);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    app = await buildApp(makeKnexStub(), eventBus, queues);
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await app.close();
+      app = undefined;
+    }
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it('(a) GET status → 200 with counts', async () => {
+    const response = await app!.inject({
+      method: 'GET',
+      url: '/emails/campaigns/job-id-1',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      job_id: 'job-id-1',
+      status: 'processing',
+      total_recipients: 10,
+      sent_count: 7,
+      failed_count: 1,
+    });
+  });
+
+  it('(b) GET status → 404 for unknown jobId', async () => {
+    mockJobsRepo.findById.mockResolvedValue(null);
+
+    const response = await app!.inject({
+      method: 'GET',
+      url: '/emails/campaigns/unknown-id',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: 'not_found' });
+  });
+
+  it('(c) GET recipients → 200 with pagination', async () => {
+    mockRecipientsRepo.findByJobIdPaginated.mockResolvedValue({
+      recipients: [makeRecipient({ id: 'r1' }), makeRecipient({ id: 'r2' })],
+      total: 2,
+    });
+
+    const response = await app!.inject({
+      method: 'GET',
+      url: '/emails/campaigns/job-id-1/recipients',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const json = response.json();
+    expect(json.total).toBe(2);
+    expect(json.page).toBe(1);
+    expect(json.page_size).toBe(100);
+    expect(json.recipients).toHaveLength(2);
+    expect(mockRecipientsRepo.findByJobIdPaginated).toHaveBeenCalledWith('job-id-1', {
+      status: undefined,
+      page: 1,
+      pageSize: 100,
+    });
+  });
+
+  it('(d) GET recipients with status filter → filtered results', async () => {
+    mockRecipientsRepo.findByJobIdPaginated.mockResolvedValue({
+      recipients: [makeRecipient({ status: 'sent' })],
+      total: 1,
+    });
+
+    const response = await app!.inject({
+      method: 'GET',
+      url: '/emails/campaigns/job-id-1/recipients?status=sent&page=2',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().page).toBe(2);
+    expect(mockRecipientsRepo.findByJobIdPaginated).toHaveBeenCalledWith('job-id-1', {
+      status: 'sent',
+      page: 2,
+      pageSize: 100,
+    });
+  });
+
+  it('(e) DELETE pending job → 200 cancelled', async () => {
+    mockJobsRepo.findById.mockResolvedValue(makeJob({ status: 'pending' }));
+
+    const response = await app!.inject({
+      method: 'DELETE',
+      url: '/emails/campaigns/job-id-1',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ job_id: 'job-id-1', status: 'cancelled' });
+    expect(mockJobsRepo.cancel).toHaveBeenCalledWith('job-id-1');
+  });
+
+  it('(f) DELETE processing job → 409', async () => {
+    mockJobsRepo.findById.mockResolvedValue(makeJob({ status: 'processing' }));
+
+    const response = await app!.inject({
+      method: 'DELETE',
+      url: '/emails/campaigns/job-id-1',
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: 'cannot_cancel', status: 'processing' });
+    expect(mockJobsRepo.cancel).not.toHaveBeenCalled();
+  });
+
+  it('(g) DELETE completed job → 409', async () => {
+    mockJobsRepo.findById.mockResolvedValue(makeJob({ status: 'completed' }));
+
+    const response = await app!.inject({
+      method: 'DELETE',
+      url: '/emails/campaigns/job-id-1',
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: 'cannot_cancel', status: 'completed' });
+  });
+
+  it('(h) DELETE unknown job → 404', async () => {
+    mockJobsRepo.findById.mockResolvedValue(null);
+
+    const response = await app!.inject({
+      method: 'DELETE',
+      url: '/emails/campaigns/unknown-id',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: 'not_found' });
+  });
+});

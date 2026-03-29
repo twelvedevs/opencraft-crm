@@ -180,4 +180,59 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       total_recipients: body.recipients.length,
     });
   });
+
+  // GET /emails/campaigns/:jobId
+  app.get('/campaigns/:jobId', async (request, reply) => {
+    const { jobId } = request.params as { jobId: string };
+    const found = await jobsRepo.findById(jobId);
+    if (!found) {
+      return reply.status(404).send({ error: 'not_found' });
+    }
+    return reply.status(200).send({
+      job_id: found.id,
+      status: found.status,
+      total_recipients: found.total_recipients,
+      sent_count: found.sent_count,
+      failed_count: found.failed_count,
+    });
+  });
+
+  // GET /emails/campaigns/:jobId/recipients
+  app.get('/campaigns/:jobId/recipients', async (request, reply) => {
+    const { jobId } = request.params as { jobId: string };
+    const query = request.query as { status?: string; page?: string };
+
+    const jobFound = await jobsRepo.findById(jobId);
+    if (!jobFound) {
+      return reply.status(404).send({ error: 'not_found' });
+    }
+
+    const page = query.page ? parseInt(query.page, 10) : 1;
+    const { recipients, total } = await recipientsRepo.findByJobIdPaginated(jobId, {
+      status: query.status,
+      page,
+      pageSize: 100,
+    });
+
+    return reply.status(200).send({
+      recipients,
+      total,
+      page,
+      page_size: 100,
+    });
+  });
+
+  // DELETE /emails/campaigns/:jobId
+  app.delete('/campaigns/:jobId', async (request, reply) => {
+    const { jobId } = request.params as { jobId: string };
+    const found = await jobsRepo.findById(jobId);
+    if (!found) {
+      return reply.status(404).send({ error: 'not_found' });
+    }
+    if (!['pending', 'spam_check_failed'].includes(found.status)) {
+      return reply.status(409).send({ error: 'cannot_cancel', status: found.status });
+    }
+    await jobsRepo.cancel(jobId);
+    return reply.status(200).send({ job_id: jobId, status: 'cancelled' });
+  });
 }
