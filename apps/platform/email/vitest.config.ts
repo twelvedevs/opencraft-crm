@@ -10,6 +10,7 @@ export default defineConfig({
       SENDGRID_API_KEY: 'SG.test-key',
       SENDGRID_WEBHOOK_SECRET_ID: 'test-secret-id',
       EVENT_BUS_DRIVER: 'redis',
+      TEMPLATE_SERVICE_URL: 'http://template-service:3000',
     },
   },
 });

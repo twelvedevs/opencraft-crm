@@ -10,6 +10,7 @@ const EnvSchema = Type.Object({
     Type.Literal('eventbridge'),
     Type.Literal('redis'),
   ]),
+  TEMPLATE_SERVICE_URL: Type.String(),
   PORT: Type.Optional(Type.Integer()),
   SPAM_SCORE_THRESHOLD_DEFAULT: Type.Optional(Type.Number()),
 });
@@ -23,6 +24,7 @@ function parseEnv(): Env {
     SENDGRID_API_KEY: process.env['SENDGRID_API_KEY'],
     SENDGRID_WEBHOOK_SECRET_ID: process.env['SENDGRID_WEBHOOK_SECRET_ID'],
     EVENT_BUS_DRIVER: process.env['EVENT_BUS_DRIVER'],
+    TEMPLATE_SERVICE_URL: process.env['TEMPLATE_SERVICE_URL'],
     PORT: process.env['PORT'] !== undefined ? parseInt(process.env['PORT'], 10) : undefined,
     SPAM_SCORE_THRESHOLD_DEFAULT: process.env['SPAM_SCORE_THRESHOLD_DEFAULT'] !== undefined
       ? parseFloat(process.env['SPAM_SCORE_THRESHOLD_DEFAULT'])
