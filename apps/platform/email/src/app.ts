@@ -8,6 +8,7 @@ import { domainRoutes } from './routes/domains.js';
 import { sendRoutes } from './routes/sends.js';
 import { spamCheckRoutes } from './routes/spam-check.js';
 import { campaignRoutes } from './routes/campaigns.js';
+import { webhookRoutes } from './routes/webhooks.js';
 
 export async function buildApp(
   db: Knex,
@@ -37,6 +38,7 @@ export async function buildApp(
   await app.register(sendRoutes, { prefix: '/emails' });
   await app.register(spamCheckRoutes, { prefix: '/emails' });
   await app.register(campaignRoutes, { prefix: '/emails' });
+  await app.register(webhookRoutes);
 
   return app;
 }
