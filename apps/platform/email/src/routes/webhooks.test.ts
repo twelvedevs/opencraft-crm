@@ -3,6 +3,7 @@ import { buildApp } from '../app.js';
 import { EventBusImpl, MockDriver } from '@ortho/event-bus';
 import type { Knex } from '../db.js';
 import type { Queue } from 'bullmq';
+import type { Redis } from 'ioredis';
 
 vi.mock('../services/sendgrid-signature-verifier.js', () => ({
   SendgridSignatureVerifier: vi.fn(),
@@ -14,6 +15,10 @@ vi.mock('../services/webhook-processor.js', () => ({
 
 function makeKnexStub(): Knex {
   return {} as unknown as Knex;
+}
+
+function makeRedisStub(): Redis {
+  return { ping: vi.fn().mockResolvedValue('PONG') } as unknown as Redis;
 }
 
 function makeQueueStub() {
@@ -60,7 +65,7 @@ describe('POST /webhooks/sendgrid', () => {
     const eventBus = new EventBusImpl(driver);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    app = await buildApp(makeKnexStub(), eventBus, queues);
+    app = await buildApp(makeKnexStub(), eventBus, queues, makeRedisStub());
   });
 
   afterEach(async () => {

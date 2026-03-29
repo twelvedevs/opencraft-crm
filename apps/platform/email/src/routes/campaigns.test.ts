@@ -3,6 +3,7 @@ import { buildApp } from '../app.js';
 import { EventBusImpl, MockDriver } from '@ortho/event-bus';
 import type { Knex } from '../db.js';
 import type { Queue } from 'bullmq';
+import type { Redis } from 'ioredis';
 import { DomainNotConfiguredError, DomainNotVerifiedError } from '../errors.js';
 import type { EmailCampaignJob } from '../repositories/email-campaign-jobs-repository.js';
 import type { EmailCampaignRecipient } from '../repositories/email-campaign-recipients-repository.js';
@@ -50,6 +51,10 @@ vi.mock('../clients/template-service-client.js', () => {
 
 function makeKnexStub(): Knex {
   return {} as unknown as Knex;
+}
+
+function makeRedisStub(): Redis {
+  return { ping: vi.fn().mockResolvedValue('PONG') } as unknown as Redis;
 }
 
 function makeQueueStub() {
@@ -192,7 +197,7 @@ describe('POST /emails/campaigns/send', () => {
     const driver = new MockDriver();
     const eventBus = new EventBusImpl(driver);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    app = await buildApp(makeKnexStub(), eventBus, queues);
+    app = await buildApp(makeKnexStub(), eventBus, queues, makeRedisStub());
   });
 
   afterEach(async () => {
@@ -404,7 +409,7 @@ describe('GET /emails/campaigns/:jobId', () => {
     const driver = new MockDriver();
     const eventBus = new EventBusImpl(driver);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    app = await buildApp(makeKnexStub(), eventBus, queues);
+    app = await buildApp(makeKnexStub(), eventBus, queues, makeRedisStub());
   });
 
   afterEach(async () => {

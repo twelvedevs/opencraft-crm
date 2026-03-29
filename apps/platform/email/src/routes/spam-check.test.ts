@@ -3,6 +3,7 @@ import { buildApp } from '../app.js';
 import { EventBusImpl, MockDriver } from '@ortho/event-bus';
 import type { Knex } from '../db.js';
 import type { Queue } from 'bullmq';
+import type { Redis } from 'ioredis';
 
 vi.mock('../services/spam-checker.js', () => ({
   SpamCheckerService: vi.fn(),
@@ -15,6 +16,10 @@ vi.mock('../repositories/domain-repository.js', () => ({
 
 function makeKnexStub(): Knex {
   return {} as unknown as Knex;
+}
+
+function makeRedisStub(): Redis {
+  return { ping: vi.fn().mockResolvedValue('PONG') } as unknown as Redis;
 }
 
 function makeQueueStub() {
@@ -53,7 +58,7 @@ describe('POST /emails/spam-check', () => {
     const driver = new MockDriver();
     const eventBus = new EventBusImpl(driver);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    app = await buildApp(makeKnexStub(), eventBus, queues);
+    app = await buildApp(makeKnexStub(), eventBus, queues, makeRedisStub());
   });
 
   afterEach(async () => {

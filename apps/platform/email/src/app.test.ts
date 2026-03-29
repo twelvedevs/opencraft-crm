@@ -3,9 +3,10 @@ import { buildApp } from './app.js';
 import { EventBusImpl, MockDriver } from '@ortho/event-bus';
 import type { Knex } from './db.js';
 import type { Queue } from 'bullmq';
+import type { Redis } from 'ioredis';
 
 function makeKnexStub(): Knex {
-  return {} as unknown as Knex;
+  return { raw: vi.fn().mockResolvedValue([]) } as unknown as Knex;
 }
 
 function makeQueuesStub(): { transactionalSend: Queue; campaignRecipient: Queue } {
@@ -13,6 +14,10 @@ function makeQueuesStub(): { transactionalSend: Queue; campaignRecipient: Queue 
     transactionalSend: { close: vi.fn() } as unknown as Queue,
     campaignRecipient: { add: vi.fn(), close: vi.fn() } as unknown as Queue,
   };
+}
+
+function makeRedisStub(): Redis {
+  return { ping: vi.fn().mockResolvedValue('PONG') } as unknown as Redis;
 }
 
 describe('buildApp', () => {
@@ -32,7 +37,7 @@ describe('buildApp', () => {
     // suppress zero-subscriptions warning
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub());
+    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub(), makeRedisStub());
     await app.ready();
 
     expect(startSpy).toHaveBeenCalledOnce();
@@ -46,7 +51,7 @@ describe('buildApp', () => {
     const stopSpy = vi.spyOn(eventBus, 'stop');
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub());
+    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub(), makeRedisStub());
     await app.ready();
     await app.close();
     app = undefined; // already closed, prevent double-close in afterEach
@@ -61,12 +66,12 @@ describe('buildApp', () => {
     const eventBus = new EventBusImpl(driver);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub());
+    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub(), makeRedisStub());
 
     const response = await app.inject({ method: 'GET', url: '/health' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: 'ok' });
+    expect(response.json()).toEqual({ status: 'ok', checks: { db: true, redis: true } });
 
     vi.restoreAllMocks();
   });

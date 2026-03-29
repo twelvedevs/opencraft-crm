@@ -14,7 +14,7 @@ const queues = createQueues(connection);
 
 await runCampaignCrashRecovery(db, queues.campaignRecipient);
 
-const app = await buildApp(db, eventBus, queues);
+const app = await buildApp(db, eventBus, queues, connection);
 
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
 
