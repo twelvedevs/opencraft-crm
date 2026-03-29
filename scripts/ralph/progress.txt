@@ -2,6 +2,17 @@
 Started: Sun Mar 29 22:36:39 +03 2026
 ---
 
+## 2026-03-29 - US-007
+- Created `src/workers/campaign-crash-recovery.ts`: exports `runCampaignCrashRecovery(db, campaignQueue)` — fetches all processing jobs, finds pending recipients per job, re-enqueues each via `campaignQueue.add('send', { recipientId }, { delay: 0 })`, logs summary
+- Updated `src/index.ts`: imports and calls `runCampaignCrashRecovery(db, queues.campaignRecipient)` BEFORE `app.listen()` so crash recovery runs before the server accepts traffic
+- Created `src/workers/campaign-crash-recovery.test.ts`: 4 test cases — (a) no processing jobs → add never called; (b) one job + two pending → add called twice with correct recipientIds; (c) multiple jobs → all recipients re-enqueued; (d) job with zero pending → add not called
+- Files changed: `src/workers/campaign-crash-recovery.ts`, `src/workers/campaign-crash-recovery.test.ts`, `src/index.ts`
+- **Learnings for future iterations:**
+  - Crash recovery module has no BullMQ Worker dependency — only uses `Queue` type; no need to mock bullmq itself
+  - Test pattern: mock both repositories via `vi.mock`, set up `mockImplementation` in `beforeEach` after dynamic import, pass `{} as Knex` and a plain `mockQueue` object
+  - `mockResolvedValueOnce` chains correctly for `findPendingByJobId` when testing multiple jobs with different recipient sets
+---
+
 ## 2026-03-29 - US-006
 - Created `src/workers/campaign-recipient-worker.ts` — BullMQ worker (concurrency: 10) on queue `campaign-recipient`
 - Worker steps: fetch recipient (crash recovery guard), increment attempt, fetch job + domain, render template (TemplateRenderError → markFailed; TemplateServiceUnavailableError → throw/retry), resolve subject (simple `{{var}}` regex replace), call SendGrid, handle 202/400/other
