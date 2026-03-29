@@ -1,0 +1,36 @@
+# Ralph Progress Log
+Started: Sun Mar 29 18:18:02 +03 2026
+
+## Codebase Patterns
+- Each service/package is standalone with its own node_modules (no root workspace manager)
+- Use `file:../../../packages/@ortho/<name>` for local package references in package.json
+- @ortho/event-bus must be built (`npm run build`) before dependent packages can typecheck
+- TypeBox `Value.Check` + `Value.Errors` is cleaner than `Value.Parse` for env validation with custom error messages
+- Fastify app builder pattern: `buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance>` — decorate instance, register hooks, register routes
+- Register `onReady` hook (not `onStart`) to call `eventBus.start()` after Fastify is ready
+- Module augmentation in `src/types.d.ts` is needed to type `fastify.db` and `fastify.eventBus` decorators
+- `tsconfig.json`: no workspace base extension — standalone per service (same as event-bus package)
+
+---
+
+## Sun Mar 29 2026 - US-001
+- Implemented @platform/email service scaffold
+- Files created:
+  - apps/platform/email/package.json
+  - apps/platform/email/tsconfig.json
+  - apps/platform/email/vitest.config.ts
+  - apps/platform/email/Dockerfile
+  - apps/platform/email/src/env.ts (TypeBox env validation)
+  - apps/platform/email/src/db.ts (Knex factory)
+  - apps/platform/email/src/app.ts (buildApp with sensible, decorators, hooks)
+  - apps/platform/email/src/types.d.ts (Fastify module augmentation)
+  - apps/platform/email/src/routes/health.ts (GET /health)
+  - apps/platform/email/src/index.ts (entry point)
+  - packages/@ortho/event-bus/dist/ (built for typecheck)
+- **Learnings for future iterations:**
+  - @ortho/logger package does not exist yet — omitted from package.json, use console or pino directly
+  - @ortho/event-bus needed a `npm run build` first to generate dist/ for TypeScript to resolve types
+  - No `@types/knex` needed — knex ships its own types
+  - Fastify v5 uses `reply.send()` not returning — but returning the result also works
+  - `Value.Check` preferred over `Value.Parse` for custom error messages with field names
+---
