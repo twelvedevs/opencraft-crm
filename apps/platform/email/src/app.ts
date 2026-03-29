@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import type { Knex } from './db.js';
 import type { EventBus } from '@ortho/event-bus';
 import { healthRoutes } from './routes/health.js';
+import { domainRoutes } from './routes/domains.js';
 
 export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
@@ -21,6 +22,7 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
   });
 
   await app.register(healthRoutes);
+  await app.register(domainRoutes, { prefix: '/emails' });
 
   return app;
 }
