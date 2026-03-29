@@ -8,8 +8,11 @@ function makeKnexStub(): Knex {
   return {} as unknown as Knex;
 }
 
-function makeQueuesStub(): { transactionalSend: Queue } {
-  return { transactionalSend: { close: vi.fn() } as unknown as Queue };
+function makeQueuesStub(): { transactionalSend: Queue; campaignRecipient: Queue } {
+  return {
+    transactionalSend: { close: vi.fn() } as unknown as Queue,
+    campaignRecipient: { add: vi.fn(), close: vi.fn() } as unknown as Queue,
+  };
 }
 
 describe('buildApp', () => {

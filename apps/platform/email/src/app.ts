@@ -10,7 +10,7 @@ import { sendRoutes } from './routes/sends.js';
 export async function buildApp(
   db: Knex,
   eventBus: EventBus,
-  queues: { transactionalSend: Queue },
+  queues: { transactionalSend: Queue; campaignRecipient: Queue },
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
 
@@ -27,6 +27,7 @@ export async function buildApp(
   app.addHook('onClose', async () => {
     await eventBus.stop();
     await queues.transactionalSend.close();
+    await queues.campaignRecipient.close();
   });
 
   await app.register(healthRoutes);

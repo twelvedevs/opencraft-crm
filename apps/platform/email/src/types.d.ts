@@ -6,6 +6,6 @@ declare module 'fastify' {
   interface FastifyInstance {
     db: Knex;
     eventBus: EventBus;
-    queues: { transactionalSend: Queue };
+    queues: { transactionalSend: Queue; campaignRecipient: Queue };
   }
 }

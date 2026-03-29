@@ -25,7 +25,10 @@ function makeKnexStub(): Knex {
 }
 
 function makeQueueStub() {
-  return { transactionalSend: { close: vi.fn(), add: vi.fn() } as unknown as Queue };
+  return {
+    transactionalSend: { close: vi.fn(), add: vi.fn() } as unknown as Queue,
+    campaignRecipient: { close: vi.fn(), add: vi.fn() } as unknown as Queue,
+  };
 }
 
 const makeDomain = (): SendingDomain => ({
