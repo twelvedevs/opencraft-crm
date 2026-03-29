@@ -24,7 +24,14 @@ describe('createEventBus', () => {
 
   it('instantiates EventBridgeDriver when EVENT_BUS_DRIVER=eventbridge', () => {
     process.env['EVENT_BUS_DRIVER'] = 'eventbridge';
-    expect(() => createEventBus()).not.toThrow();
+    process.env['EVENT_BRIDGE_BUS_NAME'] = 'test-bus';
+    process.env['SQS_QUEUE_URL'] = 'https://sqs.us-east-1.amazonaws.com/123/test.fifo';
+    try {
+      expect(() => createEventBus()).not.toThrow();
+    } finally {
+      delete process.env['EVENT_BRIDGE_BUS_NAME'];
+      delete process.env['SQS_QUEUE_URL'];
+    }
   });
 
   it('instantiates RedisStreamsDriver when EVENT_BUS_DRIVER=redis', () => {
