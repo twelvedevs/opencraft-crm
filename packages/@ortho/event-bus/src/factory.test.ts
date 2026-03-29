@@ -36,7 +36,14 @@ describe('createEventBus', () => {
 
   it('instantiates RedisStreamsDriver when EVENT_BUS_DRIVER=redis', () => {
     process.env['EVENT_BUS_DRIVER'] = 'redis';
-    expect(() => createEventBus()).not.toThrow();
+    process.env['REDIS_URL'] = 'redis://localhost:6379';
+    process.env['EVENT_BUS_CONSUMER_GROUP'] = 'test-group';
+    try {
+      expect(() => createEventBus()).not.toThrow();
+    } finally {
+      delete process.env['REDIS_URL'];
+      delete process.env['EVENT_BUS_CONSUMER_GROUP'];
+    }
   });
 
   it('throws when EVENT_BUS_DRIVER is not set', () => {

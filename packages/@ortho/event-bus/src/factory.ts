@@ -19,7 +19,11 @@ export function createEventBus(options?: EventBusOptions): EventBus {
   }
 
   if (driverName === 'redis') {
-    return new EventBusImpl(new RedisStreamsDriver());
+    const redisUrl = process.env['REDIS_URL'];
+    const consumerGroup = process.env['EVENT_BUS_CONSUMER_GROUP'];
+    if (!redisUrl) throw new Error('REDIS_URL env var is required');
+    if (!consumerGroup) throw new Error('EVENT_BUS_CONSUMER_GROUP env var is required');
+    return new EventBusImpl(new RedisStreamsDriver({ redisUrl, consumerGroup }));
   }
 
   throw new Error('EVENT_BUS_DRIVER must be set to "eventbridge" or "redis"');

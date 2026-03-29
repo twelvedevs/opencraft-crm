@@ -14,7 +14,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aws-sdk/client-sqs": "^3.1019.0"
+    "@aws-sdk/client-sqs": "^3.1019.0",
+    "ioredis": "^5.10.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
