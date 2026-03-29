@@ -8,6 +8,16 @@
 Started: Sun Mar 29 23:45:14 +03 2026
 ---
 
+## 2026-03-29 - US-014
+- Fixed SIGTERM handler order in `src/index.ts`: `app.close()` first (stop HTTP), then workers drain, then `db.destroy()`, then `connection.quit()`
+- Added ECS stop timeout comment (>= 30s) above SIGTERM handler
+- All 76 tests pass; typecheck passes
+- **Learnings for future iterations:**
+  - The SIGTERM handler already existed but had wrong shutdown order — fastify must close before workers so no new requests are accepted during drain
+  - `db.destroy()` (Knex pool) must come after workers close, since workers use the DB
+  - The ECS stop timeout comment is a required acceptance criterion — easy to miss
+---
+
 ## 2026-03-29 - US-013
 - Updated `src/types.d.ts` to add `redis: Redis` to `FastifyInstance`
 - Updated `src/app.ts` to accept `redis: Redis` as 4th param and decorate on app
