@@ -8,6 +8,9 @@ Started: Sun Mar 29 16:36:35 +03 2026
 - `tsconfig.json` does NOT extend a workspace base — inline the full compilerOptions (no workspace tsconfig found)
 - Tests live in `src/` alongside source files (e.g. `src/event-bus.test.ts`)
 - Each package has its own `package-lock.json` (standalone installs, not a workspace with hoisting)
+- Async poll loops must add `await new Promise(r => setTimeout(r, 0))` on empty-result branches to yield macrotasks; without it, immediately-resolving mocks starve timers in tests
+- Always wrap poll loops in try/finally to guarantee stop-resolve fires even on unexpected errors
+- When mocking `mockSend.mock.calls.find(...)`, cast via `(args[0] as { _type: string })._type` — destructured tuple annotations conflict with `any[][]` call types
 
 ## 2026-03-29T16:39 - US-001
 - Implemented `packages/@ortho/event-bus` package scaffold with core types and EventBus class
@@ -23,6 +26,20 @@ Started: Sun Mar 29 16:36:35 +03 2026
   - No workspace-level package.json or tsconfig exists; each package is standalone
   - `vitest run` picks up test files in `src/` without any config file needed
   - `EventBusImpl` tracks started state with a `private started` boolean; subscribe after start throws synchronously
+---
+
+## 2026-03-29T16:55 - US-003
+- Implemented full EventBridgeDriver using @aws-sdk/client-sqs (SendMessage, ReceiveMessage, DeleteMessage)
+- Files changed:
+  - `packages/@ortho/event-bus/src/drivers/eventbridge.ts` — full implementation replacing stub
+  - `packages/@ortho/event-bus/src/drivers/eventbridge.test.ts` — 8 unit tests (new file)
+  - `packages/@ortho/event-bus/src/factory.test.ts` — added required env vars for eventbridge test case
+  - `packages/@ortho/event-bus/package.json` + `package-lock.json` — added @aws-sdk/client-sqs dependency
+- **Learnings for future iterations:**
+  - Vitest mocks with `mockResolvedValueOnce` resolve immediately as microtasks; async poll loops must yield via `setTimeout(0)` on empty branches to allow macrotask timers (stop signals) to fire
+  - `vi.mock.calls.find()` type annotations: use `(args[0] as { _type: string })._type` not destructured tuple types (incompatible with `any[][]`)
+  - Factory test for EventBridgeDriver needs `EVENT_BRIDGE_BUS_NAME` and `SQS_QUEUE_URL` env vars set since constructor now validates them
+  - try/finally in poll loop is essential — if the loop throws unexpectedly, stopResolve must still be called or `stop()` hangs forever
 ---
 
 ## 2026-03-29T16:42 - US-002
