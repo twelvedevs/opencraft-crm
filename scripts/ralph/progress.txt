@@ -18,3 +18,13 @@ Started: Sun Mar 29 22:36:39 +03 2026
 - Type the `publishSpy` as `any` when using `vi.spyOn` on an EventBus method to avoid complex `MockInstance` variance errors
 
 ---
+
+## 2026-03-29 - US-001
+- Implemented `EmailCampaignJobsRepository` with full CRUD, atomic increment methods, and `attemptCompletion` via raw SQL RETURNING
+- Implemented `EmailCampaignRecipientsRepository` with bulk insert, paginated query (parallel count), and status update methods
+- Files changed: `apps/platform/email/src/repositories/email-campaign-jobs-repository.ts`, `apps/platform/email/src/repositories/email-campaign-recipients-repository.ts`
+- **Learnings for future iterations:**
+  - `attemptCompletion` uses `db.raw(...)` with positional `?` params and checks `result.rows.length > 0` for the RETURNING guard
+  - `findByJobIdPaginated` runs `query.select().limit().offset()` and `countQuery.count().first()` in `Promise.all` — both branches must be built from the same base query before either is executed
+  - `Type.Integer()` used for integer columns (total_recipients, sent_count, etc.) — consistent with spec language
+---
