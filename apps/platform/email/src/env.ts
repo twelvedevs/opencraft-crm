@@ -5,7 +5,7 @@ const EnvSchema = Type.Object({
   DATABASE_URL: Type.String(),
   REDIS_URL: Type.String(),
   SENDGRID_API_KEY: Type.String(),
-  SENDGRID_WEBHOOK_SECRET_ID: Type.String(),
+  SENDGRID_WEBHOOK_SIGNING_KEY_SECRET_ARN: Type.String(),
   EVENT_BUS_DRIVER: Type.Union([
     Type.Literal('eventbridge'),
     Type.Literal('redis'),
@@ -22,7 +22,7 @@ function parseEnv(): Env {
     DATABASE_URL: process.env['DATABASE_URL'],
     REDIS_URL: process.env['REDIS_URL'],
     SENDGRID_API_KEY: process.env['SENDGRID_API_KEY'],
-    SENDGRID_WEBHOOK_SECRET_ID: process.env['SENDGRID_WEBHOOK_SECRET_ID'],
+    SENDGRID_WEBHOOK_SIGNING_KEY_SECRET_ARN: process.env['SENDGRID_WEBHOOK_SIGNING_KEY_SECRET_ARN'],
     EVENT_BUS_DRIVER: process.env['EVENT_BUS_DRIVER'],
     TEMPLATE_SERVICE_URL: process.env['TEMPLATE_SERVICE_URL'],
     PORT: process.env['PORT'] !== undefined ? parseInt(process.env['PORT'], 10) : undefined,

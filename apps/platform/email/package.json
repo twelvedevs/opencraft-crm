@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@fastify/sensible": "^6.0.0",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
     "@sinclair/typebox": "^0.34.0",
