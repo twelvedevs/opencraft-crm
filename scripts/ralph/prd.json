@@ -1,0 +1,97 @@
+{
+  "project": "Ortho CRM — Email Service",
+  "branchName": "ralph/email-service-phase-1",
+  "description": "Email Service Phase 1 — Fastify app scaffold, env validation, Knex setup, DB migrations for all 5 tables, sending domain management API (POST/GET/DELETE /emails/domains) with 60s in-memory cache and per-location spam threshold, and @ortho/event-bus lifecycle wiring",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "App scaffold — Fastify, TypeScript, env validation, Knex setup",
+      "description": "As a developer, I need the @platform/email service skeleton so all subsequent stories have a runnable Fastify app with validated env, a DB connection factory, and a health endpoint.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/package.json`: name `@platform/email`, `type: module`, scripts `build` (tsc), `dev` (tsx watch src/index.ts), `start` (node dist/index.js), `test` (vitest run), `typecheck` (tsc --noEmit); dependencies: `fastify`, `@fastify/sensible`, `@sinclair/typebox`, `knex`, `pg`, `@ortho/logger`, `@ortho/event-bus`; devDependencies: `typescript`, `tsx`, `vitest`, `@types/node`, `@types/pg`",
+        "Create `apps/platform/email/tsconfig.json`: `module: NodeNext`, `moduleResolution: NodeNext`, `target: ES2022`, `strict: true`, `outDir: dist`, `rootDir: src`; no workspace base extension (standalone)",
+        "Create `apps/platform/email/src/env.ts`: export `env` object parsed and validated using TypeBox `Type.Object` + `Value.Parse`; required fields: `DATABASE_URL` (string), `REDIS_URL` (string), `SENDGRID_API_KEY` (string), `SENDGRID_WEBHOOK_SECRET_ID` (string — AWS Secrets Manager secret name for ECDSA signing key), `EVENT_BUS_DRIVER` (enum `'eventbridge' | 'redis'`), `PORT` (optional integer, default 3000); throw `Error('Missing required env: <field>')` on validation failure",
+        "Create `apps/platform/email/src/db.ts`: export `createDb(databaseUrl: string): Knex` factory using knex with `pg` client; export `Knex` type re-export for use in repositories",
+        "Create `apps/platform/email/src/app.ts`: export `buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance>`; register `@fastify/sensible`; register health route; decorate instance with `db` and `eventBus`",
+        "Create `apps/platform/email/src/routes/health.ts`: register `GET /health` on Fastify instance returning `200 { \"status\": \"ok\" }`",
+        "Create `apps/platform/email/src/index.ts`: entry point — validate env, create Knex instance, create EventBus instance via `createEventBus()`, call `buildApp()`, start server on `env.PORT`, register SIGTERM handler that calls `app.close()`",
+        "Create `apps/platform/email/Dockerfile`: multi-stage build — builder stage runs `tsc`, runner stage uses `node:24-alpine`, copies `dist/` and `node_modules/`, sets `CMD [\"node\", \"dist/index.js\"]`",
+        "Create `apps/platform/email/vitest.config.ts`: test environment `node`, include pattern `src/**/*.test.ts`",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "DB migrations — all 5 platform_email tables and indexes",
+      "description": "As a developer, I need Knex migrations that create the full platform_email schema so repositories and workers have the tables they depend on.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/migrations/001_initial_schema.ts`: Knex migration with `up()` and `down()`",
+        "`up()` creates `email_sending_domains` table: `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `location_id text NOT NULL UNIQUE`, `domain text NOT NULL`, `from_name text NOT NULL`, `from_email text NOT NULL`, `is_verified boolean NOT NULL DEFAULT false`, `spam_score_threshold numeric NOT NULL DEFAULT 5.0` (per-location spam threshold, Q15), `sendgrid_domain_id text` (nullable — stored when domain is registered in SendGrid, used for live verification check via GET /v3/whitelabel/domains/:id), `created_at timestamptz NOT NULL DEFAULT now()`, `updated_at timestamptz NOT NULL DEFAULT now()`",
+        "`up()` creates `email_sends` table: `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `dedup_key text UNIQUE`, `location_id text NOT NULL`, `domain_id uuid REFERENCES email_sending_domains`, `entity_type text`, `entity_id text`, `to_email text NOT NULL`, `subject text NOT NULL`, `sendgrid_message_id text`, `status text NOT NULL DEFAULT 'queued'` (queued | sent | delivered | bounced | unsubscribed | failed), `attempt integer NOT NULL DEFAULT 0`, `error text`, `created_at timestamptz NOT NULL DEFAULT now()`, `sent_at timestamptz`, `delivered_at timestamptz`, `bounced_at timestamptz`",
+        "`up()` creates `email_campaign_jobs` table: `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `job_ref text UNIQUE`, `location_id text NOT NULL`, `entity_type text`, `entity_id text`, `template_id text NOT NULL`, `subject_template text NOT NULL`, `domain_id uuid REFERENCES email_sending_domains NOT NULL`, `scheduled_for timestamptz`, `spam_score numeric`, `spam_issues jsonb`, `status text NOT NULL DEFAULT 'pending'` (pending | spam_check_failed | processing | completed | completed_with_errors | failed | cancelled), `total_recipients integer NOT NULL DEFAULT 0`, `sent_count integer NOT NULL DEFAULT 0`, `failed_count integer NOT NULL DEFAULT 0`, `created_by text`, `created_at timestamptz NOT NULL DEFAULT now()`, `started_at timestamptz`, `completed_at timestamptz`",
+        "`up()` creates `email_campaign_recipients` table: `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `job_id uuid REFERENCES email_campaign_jobs NOT NULL`, `to_email text NOT NULL`, `context jsonb NOT NULL`, `sendgrid_message_id text`, `status text NOT NULL DEFAULT 'pending'` (pending | sent | delivered | opened | clicked | bounced | spam_reported | failed | unsubscribed), `attempt integer NOT NULL DEFAULT 0`, `error text`, `sent_at timestamptz`, `delivered_at timestamptz`, `opened_at timestamptz`, `clicked_at timestamptz`, `bounced_at timestamptz`",
+        "`up()` creates `email_recipient_clicks` table: `id uuid PRIMARY KEY DEFAULT gen_random_uuid()`, `recipient_id uuid REFERENCES email_campaign_recipients NOT NULL`, `url text NOT NULL`, `clicked_at timestamptz NOT NULL DEFAULT now()`",
+        "`up()` creates all indexes: `email_sends(sendgrid_message_id)`, `email_sends(status)`, `email_sends(domain_id, created_at)`, `email_campaign_jobs(status)`, `email_campaign_jobs(location_id)`, `email_campaign_jobs(domain_id, created_at)`, `email_campaign_recipients(job_id, status)`, `email_campaign_recipients(sendgrid_message_id)`, `email_recipient_clicks(recipient_id)`",
+        "`down()` drops all tables in reverse dependency order: `email_recipient_clicks`, `email_campaign_recipients`, `email_campaign_jobs`, `email_sends`, `email_sending_domains`",
+        "Create `apps/platform/email/src/migrate.ts`: script that instantiates Knex from `DATABASE_URL`, runs `knex.migrate.latest({ directory: 'migrations' })`, logs result, then calls `knex.destroy()`",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Domain repository + resolver service with 60s in-memory cache",
+      "description": "As a developer, I need a typed Knex repository for email_sending_domains and a DomainResolver service with a 60s in-memory TTL cache so pre-send domain checks are fast without hitting the DB on every request.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/errors.ts`: export `DomainNotConfiguredError extends Error` (constructor takes `locationId: string`, message: `Domain not configured for location: ${locationId}`) and `DomainNotVerifiedError extends Error` (constructor takes `locationId: string`, message: `Domain not verified for location: ${locationId}`)",
+        "Create `apps/platform/email/src/repositories/domain-repository.ts`: export TypeBox `SendingDomainSchema` and inferred `SendingDomain` type matching `email_sending_domains` columns; export `DomainRepository` class taking a `Knex` instance with methods: `findByLocationId(locationId: string): Promise<SendingDomain | null>`, `findById(id: string): Promise<SendingDomain | null>`, `findAll(): Promise<SendingDomain[]>`, `create(data: { location_id: string; domain: string; from_name: string; from_email: string }): Promise<SendingDomain>` (inserts with `returning('*')`), `updateVerified(id: string, isVerified: boolean, sendgridDomainId?: string): Promise<void>` (updates `is_verified`, `updated_at = now()`, and `sendgrid_domain_id` if provided), `delete(id: string): Promise<void>`, `hasSentEmailsIn30Days(domainId: string): Promise<boolean>` (queries `email_sends` and `email_campaign_jobs` each for `domain_id = domainId AND created_at > now() - interval '30 days'`; returns true if any row exists in either table)",
+        "Create `apps/platform/email/src/services/domain-resolver.ts`: export `DomainResolver` class taking a `DomainRepository`; implement `resolve(locationId: string): Promise<SendingDomain>` — check in-memory cache first (`Map<string, { domain: SendingDomain; expiresAt: number }>`); on cache miss call repo; throw `DomainNotConfiguredError` if null; throw `DomainNotVerifiedError` if `is_verified = false`; on success store entry with `expiresAt = Date.now() + 60_000`; on next cache read, discard entry if `Date.now() >= expiresAt`; implement `invalidate(locationId: string): void` that deletes the cache entry",
+        "Unit tests in `apps/platform/email/src/services/domain-resolver.test.ts` with a mock `DomainRepository`: cache hit returns domain without calling repo; cache miss calls repo and stores result; TTL expiry (via `vi.useFakeTimers` + `vi.advanceTimersByTime(61_000)`) causes re-fetch; repo returns `null` → throws `DomainNotConfiguredError`; domain with `is_verified = false` → throws `DomainNotVerifiedError`; `invalidate()` removes the entry so next call hits repo again",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Domain management REST routes — POST/GET/DELETE /emails/domains",
+      "description": "As an operator, I need REST endpoints to register a sending domain per location, list all domains, sync live SendGrid verification status, and delete unused domains.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/routes/domains.ts`: export `domainRoutes` async plugin function (Fastify plugin); register all 4 domain endpoints using TypeBox schemas for request/response body validation via `schema:` route option",
+        "`POST /emails/domains`: validate body `{ location_id: string, domain: string, from_name: string, from_email: string }` (all required); call `DomainRepository.create()`; return `201` with full domain record including `is_verified: false`; catch PostgreSQL unique violation error (code `23505`) on `location_id` and return `409 { error: 'location_already_configured' }`",
+        "`GET /emails/domains`: call `DomainRepository.findAll()`; return `200 { domains: SendingDomain[] }`",
+        "`GET /emails/domains/:id`: find domain by id — return `404 { error: 'not_found' }` if missing; if `sendgrid_domain_id` is set, call SendGrid `GET https://api.sendgrid.com/v3/whitelabel/domains/:sendgridDomainId` with `Authorization: Bearer <SENDGRID_API_KEY>` header; parse `valid: boolean` from response; if `valid` differs from local `is_verified`, call `DomainRepository.updateVerified(id, valid)` and `domainResolver.invalidate(locationId)`; if `sendgrid_domain_id` is null, skip the live check and return the local record as-is; return `200` with the (possibly updated) domain record",
+        "`DELETE /emails/domains/:id`: find domain by id — return `404` if missing; call `DomainRepository.hasSentEmailsIn30Days(id)` — return `409 { error: 'domain_has_recent_sends' }` if true; call `DomainRepository.delete(id)` and call `domainResolver.invalidate(domain.location_id)` to clear cache; return `200 { ok: true }`",
+        "Register `domainRoutes` plugin in `buildApp()` in `src/app.ts` with prefix `/emails`",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Wire @ortho/event-bus into Fastify app lifecycle",
+      "description": "As a developer, I need the EventBus instance wired into the Fastify app start/stop lifecycle and typed on the FastifyInstance so Phase 2+ workers can publish events without managing bus lifecycle themselves.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/types.d.ts`: declare module augmentation `declare module 'fastify' { interface FastifyInstance { eventBus: EventBus; db: Knex } }` so `fastify.eventBus` and `fastify.db` are typed without casting anywhere in the service",
+        "In `apps/platform/email/src/app.ts`: `buildApp(db: Knex, eventBus: EventBus)` decorates the instance with `app.decorate('db', db)` and `app.decorate('eventBus', eventBus)` before registering routes",
+        "In `buildApp()`, register a Fastify `onReady` hook that calls `await eventBus.start()`; register a Fastify `onClose` hook that calls `await eventBus.stop()`",
+        "No events are subscribed or published in this story — bus is lifecycle-wired only",
+        "Unit tests in `apps/platform/email/src/app.test.ts` using `MockDriver` from `@ortho/event-bus` and a minimal Knex stub: after `app.listen()` completes, `MockDriver.started` is true (or verify `eventBus.start` was called); after `app.close()`, `MockDriver.stopped` is true (or verify `eventBus.stop` was called); `GET /health` returns `200 { status: 'ok' }`",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
