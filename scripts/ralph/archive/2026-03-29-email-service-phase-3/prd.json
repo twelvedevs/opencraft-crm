@@ -1,0 +1,162 @@
+{
+  "project": "Ortho CRM — Email Service",
+  "branchName": "ralph/email-service-phase-3",
+  "description": "Email Service Phase 3 — Spam check endpoint, campaign send route with Template Service integration and spam gate, campaign management routes, Campaign Recipient Worker with atomic completion detection, and startup crash recovery scan",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "EmailCampaignJobsRepository + EmailCampaignRecipientsRepository",
+      "description": "As a developer, I need typed Knex repositories for email_campaign_jobs and email_campaign_recipients so the campaign send route, management routes, and worker have a clean, type-safe data access layer.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/repositories/email-campaign-jobs-repository.ts`",
+        "Export TypeBox `EmailCampaignJobSchema` with all `email_campaign_jobs` columns: `id` (string), `job_ref` (nullable string), `location_id` (string), `entity_type` (nullable string), `entity_id` (nullable string), `template_id` (string), `subject_template` (string), `domain_id` (string), `scheduled_for` (nullable string), `spam_score` (nullable number), `spam_issues` (nullable unknown/Type.Any), `status` (string), `total_recipients` (number/integer), `sent_count` (number/integer), `failed_count` (number/integer), `created_by` (nullable string), `created_at` (string), `started_at` (nullable string), `completed_at` (nullable string); export inferred `EmailCampaignJob` type",
+        "Export `EmailCampaignJobsRepository` class taking `Knex` in constructor with methods: `create(data: { job_ref: string; location_id: string; entity_type?: string | null; entity_id?: string | null; template_id: string; subject_template: string; domain_id: string; scheduled_for?: string | null; created_by?: string | null }): Promise<EmailCampaignJob>` — insert with `returning('*')`",
+        "`findById(id: string): Promise<EmailCampaignJob | null>`",
+        "`findByJobRef(jobRef: string): Promise<EmailCampaignJob | null>`",
+        "`updateSpamScore(id: string, spamScore: number, spamIssues: unknown): Promise<void>` — UPDATE spam_score + spam_issues only, status unchanged; used when spam check passes",
+        "`setSpamCheckFailed(id: string, spamScore: number, spamIssues: unknown): Promise<void>` — UPDATE status='spam_check_failed', spam_score, spam_issues",
+        "`setFailed(id: string, error: string): Promise<void>` — UPDATE status='failed', error field",
+        "`setProcessing(id: string, totalRecipients: number): Promise<void>` — UPDATE status='processing', started_at=now(), total_recipients",
+        "`cancel(id: string): Promise<void>` — UPDATE status='cancelled'",
+        "`incrementSentCount(id: string): Promise<void>` — atomic `UPDATE ... SET sent_count = sent_count + 1 WHERE id = ?` (never read-modify-write)",
+        "`incrementFailedCount(id: string): Promise<void>` — atomic `UPDATE ... SET failed_count = failed_count + 1 WHERE id = ?`",
+        "`attemptCompletion(id: string, terminalStatus: string): Promise<boolean>` — runs `UPDATE email_campaign_jobs SET status = terminalStatus, completed_at = now() WHERE id = ? AND sent_count + failed_count = total_recipients AND status = 'processing' RETURNING id` using knex.raw; returns true if a row was returned (this worker won the completion race)",
+        "`findProcessingJobs(): Promise<EmailCampaignJob[]>` — SELECT WHERE status='processing', used by crash recovery startup scan",
+        "Create `apps/platform/email/src/repositories/email-campaign-recipients-repository.ts`",
+        "Export TypeBox `EmailCampaignRecipientSchema` with all `email_campaign_recipients` columns: `id` (string), `job_id` (string), `to_email` (string), `context` (Type.Any()), `sendgrid_message_id` (nullable string), `status` (string), `attempt` (integer/number), `error` (nullable string), `sent_at` (nullable string), `delivered_at` (nullable string), `opened_at` (nullable string), `clicked_at` (nullable string), `bounced_at` (nullable string); export inferred `EmailCampaignRecipient` type",
+        "Export `EmailCampaignRecipientsRepository` class taking `Knex` in constructor with methods:",
+        "`bulkInsert(rows: Array<{ job_id: string; to_email: string; context: Record<string, unknown> }>): Promise<void>` — batch insert using `knex('email_campaign_recipients').insert(rows)` (no returning needed)",
+        "`findById(id: string): Promise<EmailCampaignRecipient | null>` — crash recovery guard: check if status != 'pending' before processing",
+        "`findPendingByJobId(jobId: string): Promise<EmailCampaignRecipient[]>` — SELECT WHERE job_id=? AND status='pending', used by startup crash recovery scan",
+        "`markSent(id: string, sendgridMessageId: string): Promise<void>` — UPDATE status='sent', sendgrid_message_id, sent_at=now()",
+        "`markFailed(id: string, error: string): Promise<void>` — UPDATE status='failed', error",
+        "`markBounced(id: string): Promise<void>` — UPDATE status='bounced', bounced_at=now()",
+        "`incrementAttempt(id: string): Promise<void>` — atomic increment attempt",
+        "`findByJobIdPaginated(jobId: string, options: { status?: string; page: number; pageSize: number }): Promise<{ recipients: EmailCampaignRecipient[]; total: number }>` — SELECT with optional WHERE status=? filter, LIMIT/OFFSET pagination; run COUNT(*) query in parallel for total",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "campaign-recipient BullMQ queue wired into Fastify app",
+      "description": "As a developer, I need a campaign-recipient BullMQ queue added to the app so the campaign send route can enqueue per-recipient jobs and the queue is cleanly shut down on SIGTERM.",
+      "acceptanceCriteria": [
+        "Update `apps/platform/email/src/queue.ts`: add `campaignRecipient: Queue` to the return type of `createQueues()`; create a second BullMQ `Queue` named `'campaign-recipient'` using the same connection; return both queues",
+        "Update `apps/platform/email/src/types.d.ts` module augmentation: extend `FastifyInstance` queues decorator to `queues: { transactionalSend: Queue; campaignRecipient: Queue }`",
+        "Update `buildApp()` in `apps/platform/email/src/app.ts`: extend the `onClose` hook to also call `await queues.campaignRecipient.close()`",
+        "Update `apps/platform/email/src/app.test.ts`: add `campaignRecipient: { add: vi.fn(), close: vi.fn() }` to the mock queues stub in all `buildApp` call sites",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "SpamCheckerService + POST /emails/spam-check route",
+      "description": "As a caller (Campaign builder UI, campaign send flow), I want to check whether an email body passes the spam score threshold so I can reject campaigns before sending.",
+      "acceptanceCriteria": [
+        "Add `spamscanner` to `apps/platform/email/package.json` dependencies",
+        "Create `apps/platform/email/src/services/spam-checker.ts`: export interface `SpamCheckResult { score: number; threshold: number; passed: boolean; issues: Array<{ rule: string; description: string; score: number }> }"; export `SpamCheckerService` class with constructor taking `DomainRepository` and `defaultThreshold: number`",
+        "`SpamCheckerService.check(opts: { locationId?: string; subject: string; html: string; text: string }): Promise<SpamCheckResult>` — (1) resolve threshold: if `locationId` provided, fetch domain by location_id and use `domain.spam_score_threshold`; if no `locationId` or domain not found, use `defaultThreshold`; (2) instantiate SpamScanner and call `scanner.getReport(message)` where `message` contains subject + html + text; (3) return `{ score, threshold, passed: score <= threshold, issues }` mapping SpamScanner results to the interface",
+        "Create `apps/platform/email/src/routes/spam-check.ts`: export `spamCheckRoutes` Fastify plugin",
+        "TypeBox body schema `SpamCheckBodySchema`: `location_id: Type.Optional(Type.String())`, `subject: Type.String()`, `html: Type.String()`, `text: Type.String()`",
+        "Route `POST /emails/spam-check`: instantiate `SpamCheckerService(new DomainRepository(app.db), env.SPAM_SCORE_THRESHOLD_DEFAULT ?? 5.0)`; call `checker.check(body)`; return `200 { score, threshold, passed, issues }`",
+        "Add `SPAM_SCORE_THRESHOLD_DEFAULT` optional env var (number, default 5.0) to env validation in `src/env.ts`",
+        "Register `spamCheckRoutes` in `buildApp()` with prefix `/emails`",
+        "Unit tests in `apps/platform/email/src/routes/spam-check.test.ts` using `app.inject()` and `vi.mock` for `SpamCheckerService`: (a) no `location_id` → uses default threshold; (b) `location_id` provided → domain threshold used; (c) score above threshold → `passed: false`; (d) score at or below threshold → `passed: true`",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "POST /emails/campaigns/send route",
+      "description": "As a caller (Campaign Service), I want to submit a bulk campaign send job so the Email Service validates the domain, deduplicates via job_ref, gates on spam score, bulk-inserts recipients, and enqueues per-recipient BullMQ jobs.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/clients/template-service-client.ts`: export `TemplateServiceClient` class taking `baseUrl: string` in constructor; method `render(templateId: string, context: Record<string, unknown>): Promise<{ html: string; text?: string }>` — POST to `${baseUrl}/templates/render` with JSON body `{ template_id: templateId, context }`; on 4xx throw `TemplateRenderError` (export this class); on 5xx/timeout throw `TemplateServiceUnavailableError` (export this class)",
+        "Add `TEMPLATE_SERVICE_URL` env var to `src/env.ts` validation (required string)",
+        "Create `apps/platform/email/src/routes/campaigns.ts`: export `campaignRoutes` Fastify plugin",
+        "TypeBox body schema `CampaignSendBodySchema`: `job_ref: Type.String()`, `location_id: Type.String()`, `entity_type: Type.Optional(Type.String())`, `entity_id: Type.Optional(Type.String())`, `template_id: Type.String()`, `subject_template: Type.String()`, `recipients: Type.Array(Type.Object({ email: Type.String(), context: Type.Record(Type.String(), Type.Unknown()) }), { maxItems: 10000 })`, `scheduled_for: Type.Optional(Type.String())`",
+        "Route `POST /emails/campaigns/send` flow:",
+        "Step 1 — Domain check: resolve domain by location_id; return `422 { error: 'domain_not_configured' }` or `422 { error: 'domain_not_verified' }` on failure",
+        "Step 2 — Dedup: `jobsRepo.findByJobRef(body.job_ref)`; if found return `200 { job_id: existing.id, status: existing.status, total_recipients: existing.total_recipients }`",
+        "Step 3 — Recipient limit: if `body.recipients.length > 10000` return `422 { error: 'recipient_limit_exceeded', limit: 10000, provided: body.recipients.length }` — no job row inserted",
+        "Step 4 — Create job: `jobsRepo.create({ job_ref, location_id, entity_type, entity_id, template_id, subject_template, domain_id: domain.id, scheduled_for: body.scheduled_for ?? null, created_by: (request as any).user?.sub ?? null })`",
+        "Step 5 — Sample render: call `templateClient.render(body.template_id, body.recipients[0].context ?? {})`; on `TemplateRenderError`: call `jobsRepo.setFailed(job.id, 'template_render_failed')`, return `422 { error: 'template_render_failed', job_id: job.id }`; on `TemplateServiceUnavailableError`: call `jobsRepo.setFailed(job.id, 'template_service_unavailable')`, return `503 { error: 'template_service_unavailable', job_id: job.id }`",
+        "Step 6 — Spam check: `spamChecker.check({ locationId: body.location_id, subject: resolvedSubject, html: rendered.html, text: rendered.text ?? '' })`; if `!result.passed`: call `jobsRepo.setSpamCheckFailed(job.id, result.score, result.issues)`, return `422 { error: 'spam_check_failed', job_id: job.id, score: result.score, threshold: result.threshold, issues: result.issues }`; if passed: call `jobsRepo.updateSpamScore(job.id, result.score, result.issues)` (store but continue)",
+        "Step 7 — Bulk insert recipients: `recipientsRepo.bulkInsert(body.recipients.map(r => ({ job_id: job.id, to_email: r.email, context: r.context })))`",
+        "Step 8 — Set processing: `jobsRepo.setProcessing(job.id, body.recipients.length)`",
+        "Step 9 — Enqueue: for each recipient row (fetched after bulk insert OR use body recipients with sequential IDs), call `app.queues.campaignRecipient.add('send', { recipientId }, { delay: scheduledDelay })`; `scheduledDelay` = `body.scheduled_for` is in the future ? `Date.parse(body.scheduled_for) - Date.now()` : `0`",
+        "Return `202 { job_id: job.id, status: 'processing', total_recipients: body.recipients.length }`",
+        "Register `campaignRoutes` in `buildApp()` with prefix `/emails`",
+        "Unit tests in `apps/platform/email/src/routes/campaigns.test.ts` using `app.inject()` and `vi.mock` for all dependencies: (a) domain not configured → 422; (b) duplicate job_ref → 200 with existing status; (c) recipient count > 10000 → 422 recipient_limit_exceeded, no job created; (d) template render 4xx → 422 template_render_failed; (e) spam check fails → 422 spam_check_failed; (f) success → 202, campaignRecipient.add called once per recipient; (g) scheduled_for in past → zero delay on queue.add",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Campaign management routes — GET status, GET recipients, DELETE cancel",
+      "description": "As a caller (Campaign Service), I want to poll campaign job status, paginate through recipient results, and cancel a pending campaign so I can monitor and control in-flight sends.",
+      "acceptanceCriteria": [
+        "Add routes to `apps/platform/email/src/routes/campaigns.ts` (same plugin as POST):",
+        "`GET /emails/campaigns/:jobId` → `jobsRepo.findById(jobId)`; if not found return `404 { error: 'not_found' }`; return `200 { job_id, status, total_recipients, sent_count, failed_count }`",
+        "`GET /emails/campaigns/:jobId/recipients` — query params: `status` (optional string), `page` (optional integer, default 1); call `recipientsRepo.findByJobIdPaginated(jobId, { status: query.status, page: query.page ?? 1, pageSize: 100 })`; if job not found return `404`; return `200 { recipients: [...], total, page, page_size: 100 }`",
+        "`DELETE /emails/campaigns/:jobId` — fetch job; if not found return `404`; if `job.status` is NOT in `['pending', 'spam_check_failed']` return `409 { error: 'cannot_cancel', status: job.status }`; call `jobsRepo.cancel(jobId)`; return `200 { job_id, status: 'cancelled' }`",
+        "Unit tests in `apps/platform/email/src/routes/campaigns.test.ts` (extend existing test file): (a) GET status → 200 with counts; (b) GET status → 404 for unknown jobId; (c) GET recipients → 200 with pagination; (d) GET recipients with status filter → filtered results; (e) DELETE pending job → 200 cancelled; (f) DELETE processing job → 409; (g) DELETE completed job → 409; (h) DELETE unknown job → 404",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Campaign Recipient Worker — Template Service render, SendGrid send, atomic completion, email.campaign_completed",
+      "description": "As a developer, I need a BullMQ worker that processes campaign-recipient jobs by rendering the template per recipient, sending via SendGrid, atomically incrementing job counts, detecting job completion, and publishing email.campaign_completed.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/workers/campaign-recipient-worker.ts`",
+        "Export `createCampaignRecipientWorker(connection: IORedis, db: Knex, eventBus: EventBus): Worker`",
+        "BullMQ Worker options: `{ connection, concurrency: 10 }`; queue name: `'campaign-recipient'`",
+        "Job data type (local interface): `{ recipientId: string }`",
+        "Processor steps: (1) fetch recipient: `recipientsRepo.findById(job.data.recipientId)`; if not found or `recipient.status !== 'pending'` return early (crash recovery guard — skip already-processed recipients); (2) `recipientsRepo.incrementAttempt(recipient.id)`; (3) fetch job: `jobsRepo.findById(recipient.job_id)` for domain_id, template_id, subject_template; (4) fetch domain: `domainRepo.findById(job.domain_id)` for from_email/from_name; (5) render template: `templateClient.render(job.template_id, recipient.context)` — on `TemplateRenderError` (4xx): call `recipientsRepo.markFailed`, increment `failedCount`, run completion check, return; on `TemplateServiceUnavailableError` (5xx): throw to trigger BullMQ retry; (6) resolve subject: replace all `{{varName}}` placeholders in `job.subject_template` with values from `recipient.context` (simple string replace, no external lib); (7) call SendGrid `/v3/mail/send` with rendered HTML and resolved subject; (8) on HTTP 202: `recipientsRepo.markSent(recipient.id, sendgridMessageId ?? '')`, `jobsRepo.incrementSentCount(job.id)`, run completion check; (9) on SendGrid 400 (suppressed address): `recipientsRepo.markBounced(recipient.id)`, publish `email.bounced` event with `to_address` field, `jobsRepo.incrementFailedCount(job.id)`, run completion check; (10) on other non-202: throw to trigger BullMQ retry",
+        "Completion check helper (inline): after incrementing a count, call `jobsRepo.findById(job.id)` to get current counts; compute `terminalStatus`: if `counts.failed_count === counts.total_recipients` → `'failed'`; else if `counts.sent_count + counts.failed_count === counts.total_recipients && counts.failed_count > 0` → `'completed_with_errors'`; else → `'completed'`; call `jobsRepo.attemptCompletion(job.id, terminalStatus)`; if returned true, publish `email.campaign_completed` event",
+        "`email.campaign_completed` event shape: `eventBus.publish({ event_type: 'email.campaign_completed', entity_type: campaignJob.entity_type ?? undefined, entity_id: campaignJob.entity_id ?? undefined, payload: { job_id: campaignJob.id, job_ref: campaignJob.job_ref, status: terminalStatus, total_recipients: campaignJob.total_recipients, sent_count: campaignJob.sent_count, failed_count: campaignJob.failed_count, location_id: campaignJob.location_id } })`",
+        "Register worker in `apps/platform/email/src/index.ts`: after `await app.listen(...)`, call `createCampaignRecipientWorker(connection, db, app.eventBus)` and store as `campaignWorker`; in SIGTERM handler, add `await campaignWorker.close()` alongside existing worker closes",
+        "Unit tests in `apps/platform/email/src/workers/campaign-recipient-worker.test.ts` using same BullMQ mock pattern as transactional worker: (a) recipient status !== 'pending' → processor returns early, no SendGrid call; (b) template render 4xx → markFailed called, failed_count incremented; (c) SendGrid 202 → markSent called, sent_count incremented, email.campaign_completed published when last recipient; (d) SendGrid 400 → markBounced called, email.bounced published with to_address field, failed_count incremented; (e) SendGrid 500 → processor throws; (f) completion with mixed sent/failed → status 'completed_with_errors'; (g) all failed → status 'failed'",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Startup crash recovery — re-enqueue pending recipients for processing jobs",
+      "description": "As a developer, I need a startup hook that scans for processing campaign jobs with orphaned pending recipients and re-enqueues them so no recipients are lost on worker crash/restart.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/workers/campaign-crash-recovery.ts`: export `runCampaignCrashRecovery(db: Knex, campaignQueue: Queue): Promise<void>`",
+        "Implementation: (1) call `jobsRepo.findProcessingJobs()` to get all jobs with status='processing'; (2) for each job: call `recipientsRepo.findPendingByJobId(job.id)`; for each pending recipient: call `campaignQueue.add('send', { recipientId: recipient.id }, { delay: 0 })`; (3) log a summary: total jobs scanned, total recipients re-enqueued (use `console.log` or app logger if available)",
+        "Call `runCampaignCrashRecovery` in `apps/platform/email/src/index.ts` after creating the Redis connection and queues but BEFORE calling `app.listen()` — crash recovery runs before the server accepts traffic",
+        "Unit tests in `apps/platform/email/src/workers/campaign-crash-recovery.test.ts`: (a) no processing jobs → queue.add never called; (b) one processing job with two pending recipients → queue.add called twice with correct recipientIds; (c) multiple processing jobs → recipients from all jobs re-enqueued; (d) processing job with zero pending recipients (all already processed) → queue.add not called for that job",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
