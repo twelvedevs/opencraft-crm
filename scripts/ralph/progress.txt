@@ -8,6 +8,20 @@
 Started: Sun Mar 29 23:45:14 +03 2026
 ---
 
+## 2026-03-29 - US-013
+- Updated `src/types.d.ts` to add `redis: Redis` to `FastifyInstance`
+- Updated `src/app.ts` to accept `redis: Redis` as 4th param and decorate on app
+- Updated `src/routes/health.ts` to perform real DB (`SELECT 1`) and Redis (`PING`) checks; returns 200/503 with `checks` object
+- Updated `src/index.ts` to pass `connection` to `buildApp`
+- Created `src/routes/health.test.ts` with 3 unit tests (both pass, DB fails, Redis fails)
+- Updated `src/app.test.ts` and all 4 route test files to pass Redis stub to `buildApp`
+- All 76 tests pass
+- **Learnings for future iterations:**
+  - Adding a new param to `buildApp` requires updating all 5+ test files that call it — check with grep before committing
+  - The `Knex` stub in route tests was `{}` (empty object) — but health test needs `{ raw: vi.fn() }` so the DB check can be mocked; other route tests are fine with empty because they mock at the repository layer
+  - Fastify decorators typed in `types.d.ts` must match `app.decorate()` calls exactly or typecheck will catch the mismatch
+---
+
 ## 2026-03-29 - US-012
 - Created `packages/@ortho/logger/` package: pino-based structured logger with Datadog-compatible `status` field, `createLogger(service)` factory
 - Added `@ortho/logger` dependency to `apps/platform/email/package.json`
