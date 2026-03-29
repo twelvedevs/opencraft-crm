@@ -34,3 +34,16 @@ Started: Sun Mar 29 18:18:02 +03 2026
   - Fastify v5 uses `reply.send()` not returning — but returning the result also works
   - `Value.Check` preferred over `Value.Parse` for custom error messages with field names
 ---
+
+## Sun Mar 29 2026 - US-002
+- Implemented DB migrations for all 5 platform_email tables + indexes
+- Files created:
+  - apps/platform/email/migrations/001_initial_schema.ts (up/down migration)
+  - apps/platform/email/src/migrate.ts (migration runner script)
+- **Learnings for future iterations:**
+  - Migration files in `migrations/` dir are NOT included in tsconfig (`rootDir: src`) — excluded from `tsc --noEmit`; matches automation service pattern
+  - Use `table.specificType('col', 'numeric')` for unconstrained numeric columns in Knex (not `table.decimal(col, null, null)`)
+  - `src/migrate.ts` reads `DATABASE_URL` directly from `process.env` — keeps migration runner minimal
+  - Indexes added inline inside `createTable()` calls: `table.index(['col'])` or `table.index(['col1','col2'])`
+  - Foreign keys: nullable FK = `.nullable()`, required FK = `.notNullable()`
+---
