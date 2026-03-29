@@ -1,3 +1,41 @@
 # Ralph Progress Log
-Started: Sun Mar 29 2026
+Started: Sun Mar 29 16:36:35 +03 2026
+---
+
+## Codebase Patterns
+- Package structure mirrors `apps/platform/automation`: `type: module`, NodeNext module resolution, vitest for tests
+- Use `.js` extensions in imports even for `.ts` source files (NodeNext requirement)
+- `tsconfig.json` does NOT extend a workspace base — inline the full compilerOptions (no workspace tsconfig found)
+- Tests live in `src/` alongside source files (e.g. `src/event-bus.test.ts`)
+- Each package has its own `package-lock.json` (standalone installs, not a workspace with hoisting)
+
+## 2026-03-29T16:39 - US-001
+- Implemented `packages/@ortho/event-bus` package scaffold with core types and EventBus class
+- Files changed:
+  - `packages/@ortho/event-bus/package.json`
+  - `packages/@ortho/event-bus/tsconfig.json`
+  - `packages/@ortho/event-bus/src/types.ts` — OrthoEvent, EventHandler, EventBus, Driver interfaces
+  - `packages/@ortho/event-bus/src/event-bus.ts` — EventBusImpl class
+  - `packages/@ortho/event-bus/src/event-bus.test.ts` — 7 unit tests, all pass
+  - `packages/@ortho/event-bus/src/index.ts` — re-exports all public symbols
+- **Learnings for future iterations:**
+  - NodeNext moduleResolution requires `.js` extensions on imports in TypeScript source
+  - No workspace-level package.json or tsconfig exists; each package is standalone
+  - `vitest run` picks up test files in `src/` without any config file needed
+  - `EventBusImpl` tracks started state with a `private started` boolean; subscribe after start throws synchronously
+---
+
+## 2026-03-29T16:42 - US-002
+- Implemented `createEventBus` factory, `MockDriver`, and stub driver files
+- Files changed:
+  - `packages/@ortho/event-bus/src/factory.ts` — createEventBus factory reading EVENT_BUS_DRIVER env var
+  - `packages/@ortho/event-bus/src/factory.test.ts` — 6 unit tests covering all factory branches
+  - `packages/@ortho/event-bus/src/drivers/mock.ts` — MockDriver with public `published` array
+  - `packages/@ortho/event-bus/src/drivers/eventbridge.ts` — stub EventBridgeDriver (throws not-implemented)
+  - `packages/@ortho/event-bus/src/drivers/redis-streams.ts` — stub RedisStreamsDriver (throws not-implemented)
+  - `packages/@ortho/event-bus/src/index.ts` — added exports for createEventBus, EventBusOptions, MockDriver
+- **Learnings for future iterations:**
+  - US-003 and US-004 must replace the stub driver bodies with full implementations; stubs exist purely so typecheck and factory tests pass
+  - MockDriver is the go-to test double for service unit tests — import from `@ortho/event-bus`
+  - Factory reads EVENT_BUS_DRIVER; 'eventbridge' → EventBridgeDriver, 'redis' → RedisStreamsDriver, missing/other → throws
 ---
