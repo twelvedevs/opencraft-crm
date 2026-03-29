@@ -21,11 +21,13 @@ await app.listen({ port: env.PORT, host: '0.0.0.0' });
 const worker = createTransactionalSendWorker(connection, db, eventBus);
 const campaignWorker = createCampaignRecipientWorker(connection, db, eventBus);
 
+// NOTE: ECS stop timeout must be >= 30s to allow campaign-recipient workers to finish
+// processing in-flight batch jobs before the task exits.
 process.on('SIGTERM', async () => {
-  await worker.close();
-  await campaignWorker.close();
-  await app.close();
+  await app.close();            // stop accepting new HTTP requests first
+  await worker.close();         // wait for in-flight transactional send job to finish
+  await campaignWorker.close(); // wait for in-flight campaign recipient job to finish
+  await db.destroy();           // close Knex DB connection pool after workers drain
   await connection.quit();
-  await db.destroy();
   process.exit(0);
 });
