@@ -1,0 +1,48 @@
+# Ralph Progress Log
+Started: Fri Mar 27 19:21:05 +03 2026
+---
+
+## 2026-03-27 - US-001
+- Added `listExecutions`, `findStepOutput`, `deleteExecutionsBefore` to `ExecutionRepository`
+- Files changed: `apps/platform/automation/src/repositories/execution.repository.ts`, `apps/platform/automation/test/unit/execution.repository.test.ts`
+- **Learnings for future iterations:**
+  - `listExecutions` uses two queries (paginated executions + steps by IDs) then merges in JS — correct pagination without LIMIT distortion from JOIN
+  - For mocking two sequential `db()` calls, use a `callCount` counter in `vi.fn().mockImplementation()` to return different query builders per call
+  - Making a Knex mock thenable for `await query` requires defining a `then` getter that resolves immediately
+  - `deleteExecutionsBefore` uses a subquery passed to `whereIn` — Knex handles this as a SQL subquery automatically
+---
+
+## 2026-03-27 - US-002
+- Created `src/routes/executions.ts` — Fastify plugin with GET /executions (TypeBox querystring, pagination, filter→Date conversion) and GET /executions/:executionId/steps/:stepId/output (TypeBox params, 404 on null)
+- Registered `executionRoutes` in `src/index.ts` after `rulesRoutes`
+- Created `test/integration/executions.routes.test.ts` — 8 tests using `fastify.inject()` + `vi.mock` on ExecutionRepository; no real Postgres needed
+- Also corrected prd.json: US-001 was implemented in prior commit but `passes` flag was never flipped to `true`
+- Files changed: `apps/platform/automation/src/routes/executions.ts` (new), `apps/platform/automation/src/index.ts`, `apps/platform/automation/test/integration/executions.routes.test.ts` (new), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `@fastify/sensible` v5 is incompatible with Fastify v5.8.4 in test env (version check fails); drop `sensible` from test Fastify instances — routes don't need it
+  - For route integration tests, `vi.mock` the repository module before importing the route plugin; vitest hoists the mock correctly with top-level `await import()`
+  - Pass `db: {} as never` to the Fastify plugin in tests — the mock intercepts all DB calls before they reach knex
+---
+
+## 2026-03-27 - US-003
+- Created `src/services/dry-run-walker.ts` — exports `resolveDryRunPath(tree, payload)`: walks action tree recursively; for branch nodes evaluates condition using `evaluate()` with a dummy execCtx and recurses only into the winning child (branch node itself excluded from output); for regular nodes pushes `{ action_type, action_params }` and recurses into `next`
+- Added `POST /rules/:id/test` route to `src/routes/rules.ts` — TypeBox body schema, loads rule+version via repo, evaluates top-level condition, calls `resolveDryRunPath` on action tree, returns `{ matches, would_execute }`
+- Created `test/unit/dry-run-walker.test.ts` — 5 unit tests covering: single node, chain of two, branch if_true, branch if_false, nested branch
+- Created `test/integration/rules-test.routes.test.ts` — 4 integration tests covering: 404 rule not found, condition mismatch, single action, branch winning path only
+- Files changed: `apps/platform/automation/src/services/dry-run-walker.ts` (new), `apps/platform/automation/src/routes/rules.ts`, `apps/platform/automation/test/unit/dry-run-walker.test.ts` (new), `apps/platform/automation/test/integration/rules-test.routes.test.ts` (new)
+- **Learnings for future iterations:**
+  - `evaluate()` from condition-evaluator takes 3 args: `(condition, event, execCtx)`; for dry-run use a static dummy execCtx `{ event_id: 'dry-run', execution_id: 'dry-run', rule_id: ..., rule_version: 0 }`
+  - Branch node is NOT included in would_execute output — the walker resolves only the winning leaf path
+  - When mocking RulesRepository for route integration tests, mock ALL methods the constructor exposes (not just the ones under test) to avoid `undefined is not a function` runtime errors
+---
+
+## 2026-03-27 - US-004
+- Created `src/services/retention.ts` — `RetentionService` class with `cleanup()` (reads `EXECUTION_LOG_RETENTION_DAYS` env var defaulting to 90, computes cutoff, calls `repo.deleteExecutionsBefore`) and `start(intervalMs)` (fire-and-forget immediate cleanup + setInterval, returns stop fn)
+- Updated `src/index.ts` — imports `RetentionService`, instantiates after `execRepo`, calls `retention.start()`, calls `stopRetention()` in SIGTERM handler before closing workers
+- Created `test/unit/retention.test.ts` — 4 unit tests: default 90-day cutoff, custom env var, correct return value, stop function halts future runs
+- Files changed: `apps/platform/automation/src/services/retention.ts` (new), `apps/platform/automation/src/index.ts`, `apps/platform/automation/test/unit/retention.test.ts` (new), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `vi.runAllTilesAsync` does not exist in vitest 2.1.9 — use `await Promise.resolve()` to flush a single fire-and-forget microtask tick
+  - `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()` reliably tests interval-based services without real delays
+  - Delete `process.env['KEY']` in afterEach (not `= undefined`) to fully remove env vars set during tests
+---
