@@ -2,9 +2,14 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { buildApp } from './app.js';
 import { EventBusImpl, MockDriver } from '@ortho/event-bus';
 import type { Knex } from './db.js';
+import type { Queue } from 'bullmq';
 
 function makeKnexStub(): Knex {
   return {} as unknown as Knex;
+}
+
+function makeQueuesStub(): { transactionalSend: Queue } {
+  return { transactionalSend: { close: vi.fn() } as unknown as Queue };
 }
 
 describe('buildApp', () => {
@@ -24,7 +29,7 @@ describe('buildApp', () => {
     // suppress zero-subscriptions warning
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    app = await buildApp(makeKnexStub(), eventBus);
+    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub());
     await app.ready();
 
     expect(startSpy).toHaveBeenCalledOnce();
@@ -38,7 +43,7 @@ describe('buildApp', () => {
     const stopSpy = vi.spyOn(eventBus, 'stop');
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    app = await buildApp(makeKnexStub(), eventBus);
+    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub());
     await app.ready();
     await app.close();
     app = undefined; // already closed, prevent double-close in afterEach
@@ -53,7 +58,7 @@ describe('buildApp', () => {
     const eventBus = new EventBusImpl(driver);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    app = await buildApp(makeKnexStub(), eventBus);
+    app = await buildApp(makeKnexStub(), eventBus, makeQueuesStub());
 
     const response = await app.inject({ method: 'GET', url: '/health' });
 
