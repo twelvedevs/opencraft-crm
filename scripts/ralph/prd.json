@@ -24,7 +24,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Pure function — no imports from repositories, routes, or external packages beyond string manipulation. The `warnings` array in the ok:true result holds the original tag key strings (not the full `{{key}}` syntax) so callers can log them. The render route in US-003 will log these warnings via request.log.warn. Do NOT throw on missing keys or malformed tags — always return RenderResult. The malformed check before resolution is important: check for `{{ }}` (empty/whitespace-only tags) and after all valid `{{\\w.}}` tags are replaced, if `{{` still present in string, return error."
     },
     {
