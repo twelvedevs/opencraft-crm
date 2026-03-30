@@ -1,3 +1,15 @@
+## 2026-03-30 - US-003
+- What was implemented: NotificationsRepo class with full DB access layer
+- Files changed:
+  - apps/platform/notification/src/repositories/notifications.repo.ts (new file)
+- **Learnings for future iterations:**
+  - `andOnVal('column', value)` in Knex joinClause correctly binds a value to a JOIN ON condition — used for per-user LEFT JOIN on notification_reads
+  - Cursor pagination: encode `{created_at, id}` as base64 JSON; decode and apply `(created_at < cursor OR (created_at = cursor AND id < cursor_id))` for DESC order
+  - `totalUnread` is a separate COUNT query (no limit/before/unread filter) run in parallel with the main query
+  - `findMissed` adds `read: false` to rows since missed notifications by definition are unread from the client's perspective
+  - `onConflict(['user_id', 'notification_id']).ignore()` for idempotent upserts in notification_reads
+---
+
 ## Codebase Patterns
 - Platform services use ESM (`"type": "module"`) with NodeNext module resolution — always use `.js` extensions in imports
 - tsconfig follows automation service pattern: target ES2022, NodeNext, strict, outDir dist/, rootDir src/
