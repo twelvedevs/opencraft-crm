@@ -235,7 +235,7 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "ON DELETE CASCADE on notification_reads ensures read receipts are cleaned up automatically."
     },
     {

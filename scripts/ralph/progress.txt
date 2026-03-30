@@ -1,3 +1,15 @@
+## 2026-03-30 - US-013
+- What was implemented: BullMQ cleanup worker that runs daily at 2:00 AM UTC to delete expired notifications; wired into index.ts alongside the publish-retry worker
+- Files changed:
+  - apps/platform/notification/src/queue/cleanup.worker.ts (new file)
+  - apps/platform/notification/src/index.ts (import + start cleanup worker in non-test block)
+- **Learnings for future iterations:**
+  - Repeatable BullMQ jobs use `queue.add(name, {}, { repeat: { pattern: cron } })` — BullMQ deduplicates by internal repeat key (queue + name + pattern), so calling this from multiple ECS tasks is safe
+  - The Queue needs its own non-blocking ioredis connection (separate from the Worker's `maxRetriesPerRequest: null` connection)
+  - `queue.add()` returns a Promise — use `.catch()` to handle registration errors without blocking startup
+  - Pass `repo` directly to `createCleanupWorker` — unlike publish-retry which only needs Redis, cleanup needs the DB repo to call `deleteExpired()`
+---
+
 ## 2026-03-30 - US-012
 - What was implemented: BullMQ publish-retry worker that retries Redis PUBLISH after failure; wired into index.ts to start alongside the Fastify server
 - Files changed:
