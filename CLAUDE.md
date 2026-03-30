@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. No implementation exists yet.
+This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. Implementation is in progress; services are built one at a time using the Ralph autonomous agent loop (see below).
 
 ## Key Documents
 
@@ -74,7 +74,7 @@ ortho/
 └── infra/               # IaC (AWS CDK or Terraform)
 ```
 
-Each service follows: `src/{routes,services,repositories,events}/` + `migrations/` + `test/` + `Dockerfile`
+Each service follows: `src/{routes,services,repositories,events,queue}/` + `migrations/` + `test/{unit,integration}/` + `Dockerfile`
 
 ### Communication Patterns
 
@@ -89,12 +89,47 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 3. Pipeline Engine only manages state — emits events; Automation Engine acts.
 4. Platform UIs (`@platform/*`) call their own service's API directly from the browser (not proxied through CRM API Gateway). Auth uses the same Identity Service JWT.
 
+## Development Commands
+
+Services are standalone — there is no monorepo-level script runner yet. Run commands from inside the service directory (e.g. `apps/platform/automation/`):
+
+```bash
+npm run build        # tsc compile to dist/
+npm run dev          # tsx watch (hot reload)
+npm run typecheck    # tsc --noEmit
+npm run test         # vitest run (all tests, single pass)
+npm run test:watch   # vitest (interactive watch mode)
+```
+
+**Run a single test file:**
+```bash
+npx vitest run test/unit/condition-evaluator.test.ts
+```
+
+Tests live in `test/unit/` and `test/integration/` within each service.
+
+## Ralph Autonomous Agent Workflow
+
+Services are built via Ralph — an autonomous AI coding loop. The workflow for a new service:
+
+1. **Generate clarifying questions** (saved to `tasks/prd-questions-<feature>.md`), fill in answers.
+2. **Generate PRD** from answered questions (saved to `tasks/prd-<feature>.md`).
+3. **Convert PRD to `prd.json`** using the `ralph` skill — this is the task list Ralph executes.
+4. **Run Ralph:** `./scripts/ralph/ralph-cc.sh [max_iterations]`
+
+Ralph picks the highest-priority story where `passes: false`, implements it, runs `typecheck` + `test`, commits, marks the story done in `prd.json`, and repeats. Learnings are appended to `scripts/ralph/progress.txt`.
+
+The `run.sh` in the project root shows the pattern used for phased implementations (multiple `claude -p` invocations per phase).
+
 ## Technology Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React 18 + TypeScript, Tailwind CSS, React Query |
-| Backend | Node.js + TypeScript (Fastify) |
+| Backend | Node.js 24, TypeScript 5 (ESM — `"type": "module"`), Fastify 5 |
+| ORM / Migrations | Knex 3 + pg |
+| Schema validation | @sinclair/typebox 0.34 |
+| Testing | Vitest 2 |
 | Database | PostgreSQL (AWS RDS Multi-AZ) — shared cluster, one schema per service |
 | Auth | Supabase Auth / Auth0, RBAC, SSO with EHR |
 | SMS/Voice | Twilio |

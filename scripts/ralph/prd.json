@@ -1,0 +1,264 @@
+{
+  "project": "Ortho CRM — Notification Service",
+  "branchName": "ralph/notification-service",
+  "description": "Platform-layer real-time in-app notification delivery rail using SSE, Redis pub/sub fan-out, per-user read state, and 7-day persistence. Domain-agnostic; product services publish via REST.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffold",
+      "description": "As a developer, I need the Notification Service directory skeleton so that subsequent stories have a working base to build on.",
+      "acceptanceCriteria": [
+        "Create apps/platform/notification/ with package.json (name: @platform/notification, type: module, Node 24, Fastify 5, Knex 3, pg, @sinclair/typebox 0.34, bullmq, ioredis, jose, vitest 2)",
+        "tsconfig.json configured for ESM, strict mode, NodeNext module resolution, output to dist/",
+        "src/index.ts starts a Fastify app on port 3006, registers a GET /health route returning { status: 'ok' }, and exports the app for testing",
+        "src/config.ts reads DATABASE_URL, REDIS_URL, JWT_HMAC_SECRET, PORT (default 3006) from process.env; throws on missing required vars",
+        "Dockerfile: node:24-alpine, installs deps, copies dist/, CMD ['node', 'dist/index.js']",
+        ".env.example lists all required env vars",
+        "npm run build (tsc), npm run dev (tsx watch src/index.ts), npm run typecheck (tsc --noEmit), npm run test (vitest run) all present in package.json scripts",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Database migrations — notifications schema",
+      "description": "As a developer, I need the platform_notifications schema with correct tables and indexes so that the service can persist and query notifications.",
+      "acceptanceCriteria": [
+        "migrations/001_create_notifications.ts creates table notifications: id uuid PRIMARY KEY, seq bigserial NOT NULL UNIQUE, channel text NOT NULL, title text NOT NULL, body text, payload jsonb, expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now()",
+        "migrations/001 creates table notification_reads: user_id uuid NOT NULL, notification_id uuid REFERENCES notifications ON DELETE CASCADE NOT NULL, read_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, notification_id)",
+        "Index on notifications(channel, created_at DESC, id DESC)",
+        "Index on notifications(channel, seq)",
+        "Index on notifications(expires_at)",
+        "Index on notification_reads(notification_id)",
+        "Index on notification_reads(user_id, notification_id) WHERE read_at IS NOT NULL",
+        "Migration runs successfully against a local Postgres instance with schema search_path set to platform_notifications",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Schema: platform_notifications. Knex migration file, not raw SQL."
+    },
+    {
+      "id": "US-003",
+      "title": "Notification repository",
+      "description": "As a developer, I need a repository layer for DB access so that services and routes never write raw SQL outside the repository.",
+      "acceptanceCriteria": [
+        "src/repositories/notifications.repo.ts exports NotificationsRepo class",
+        "insert(data: { id, channel, title, body?, payload?, expires_at }): Promise<{ id, seq }> — inserts into notifications",
+        "findHistory({ channels, userId, unread?, before?, limit }): Promise<{ rows: NotificationRow[], nextCursor: string | null, totalUnread: number }> — LEFT JOINs notification_reads, applies unread filter, cursor pagination on (created_at DESC, id DESC), totalUnread count ignores limit/before",
+        "findMissed({ channels, afterSeq, limit }): Promise<{ rows: NotificationRow[], truncated: boolean }> — returns rows with seq > afterSeq ordered by seq ASC, capped at limit (200)",
+        "markRead(userId: string, notificationId: string): Promise<boolean> — upsert into notification_reads; returns false if notification not found or expired",
+        "markAllRead(userId: string, channels: string[]): Promise<{ ids: string[], count: number }> — bulk upsert for all unread in given channels; returns inserted IDs and count",
+        "deleteExpired(): Promise<number> — deletes rows WHERE expires_at < now(), returns deleted count",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Channel validator",
+      "description": "As a developer, I need strict channel pattern enforcement so that unknown or malformed channels are rejected fail-closed.",
+      "acceptanceCriteria": [
+        "src/services/channel-validator.ts exports validateChannelPattern(channel: string): boolean",
+        "Accepted patterns: location:{id}:{type} (at least 3 segments, non-empty id and type), user:{id}:{type}, global:system",
+        "Rejects: unknown:xyz, location: (missing segments), bare strings, empty string, extra colons producing empty segments",
+        "Exports validateChannelAccess(channel: string, jwtClaims: { sub: string, locations?: string[] }): boolean — for location:* checks locations array, for user:* checks sub, for global:* returns true",
+        "Exports ALL_CHANNEL_PREFIXES constant listing accepted prefixes",
+        "Unit tests in test/unit/channel-validator.test.ts covering all accept/reject cases from §9 of spec",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Rate limiter service",
+      "description": "As a developer, I need a per-channel sliding-window rate limiter in Redis so that a runaway caller cannot flood a channel.",
+      "acceptanceCriteria": [
+        "src/services/rate-limiter.ts exports RateLimiter class taking an ioredis client",
+        "checkAndIncrement(channel: string): Promise<{ allowed: boolean, retryAfterSeconds?: number }> — uses Redis INCR + EXPIRE on key ratelimit:channel:{channel}, 100 req/60s window",
+        "Uses a Lua script (or pipeline) to atomically increment and set TTL only on first call in window",
+        "Returns retryAfterSeconds (remaining TTL) when limit exceeded",
+        "Unit tests in test/unit/rate-limiter.test.ts: first 100 calls allowed, 101st returns allowed: false, after window expires counter resets (mock Redis or real Redis in unit test with setup/teardown)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Redis key: ratelimit:channel:{channel}. Sliding window via INCR + TTL."
+    },
+    {
+      "id": "US-006",
+      "title": "Publisher service",
+      "description": "As a developer, I need a publisher service that writes to the DB and fans out to Redis so that notifications are durable and delivered in real time.",
+      "acceptanceCriteria": [
+        "src/services/publisher.ts exports Publisher class",
+        "publish({ channel, title, body?, payload? }): Promise<{ notification_id: string }> — inserts DB row with expires_at = now()+7d, attempts Redis PUBLISH to notif:channel:{channel} with JSON payload {notification_id, seq, channel, title, body, payload, created_at}",
+        "On Redis PUBLISH success: returns { notification_id }",
+        "On Redis PUBLISH failure: enqueues BullMQ job in publish-retry queue with { notification_id, channel, seq, title, body, payload, created_at }, then returns { notification_id }",
+        "DB insert always commits before Redis attempt; Redis failure never causes 5xx",
+        "Unit tests in test/unit/publisher.test.ts: DB insert called with correct fields, Redis PUBLISH called with namespaced key, on Redis throw BullMQ job enqueued, notification_id returned in both paths",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Redis pub/sub key: notif:channel:{channel}. BullMQ queue name: publish-retry."
+    },
+    {
+      "id": "US-007",
+      "title": "SSE Manager",
+      "description": "As a developer, I need an SSE Manager that tracks live connections and routes Redis pub/sub messages to the correct browser clients.",
+      "acceptanceCriteria": [
+        "src/services/sse-manager.ts exports SseManager class",
+        "SseConnection type: { id: string (UUID), userId: string, channels: Set<string>, reply: FastifyReply, connectionId: string }",
+        "register(conn: SseConnection): void — adds to channelMap (channel → Set<SseConnection>) and userMap (userId → Set<SseConnection>)",
+        "deregister(conn: SseConnection): void — removes from both maps",
+        "Per-user connection limit: when the 11th connection arrives for a userId, sends event: connection-limit to oldest connection then closes it before registering the new one",
+        "Subscribes to Redis PSUBSCRIBE 'notif:*' on init; on message: routes notif:channel:* to channelMap fan-out writing event: notification SSE; routes notif:user:*:reads to userMap fan-out writing event: read or event: read-all, excluding originating_connection_id",
+        "sendKeepalive(conn): writes ': keepalive\\n\\n' comment",
+        "Unit tests in test/unit/sse-manager.test.ts covering all scenarios listed in §9 of spec (register, deregister, fan-out, read-sync, connection limit, originating connection exclusion)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "In-memory maps only. Redis PSUBSCRIBE pattern: 'notif:*'. SSE events use \\n\\n line endings."
+    },
+    {
+      "id": "US-008",
+      "title": "POST /notifications/publish route",
+      "description": "As a product service, I want to publish a notification via REST so that browser clients can be notified in real time.",
+      "acceptanceCriteria": [
+        "src/routes/publish.ts registers POST /notifications/publish on the Fastify instance",
+        "Validates Authorization: Bearer <token> as HMAC-signed JWT (secret from config); returns 401 if missing, 403 if invalid",
+        "Validates request body with TypeBox: channel (required string), title (required string), body (optional string), payload (optional object, max 4096 UTF-8 bytes); returns 400 with descriptive error on validation failure",
+        "Validates channel against channel-validator; returns 400 { error: 'invalid_channel_pattern' } if unrecognized",
+        "Checks rate limiter; returns 429 with Retry-After header if exceeded",
+        "Calls Publisher.publish(); returns 201 { notification_id }",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Service-to-service JWT validated with jose (HMAC HS256). Not exposed publicly — internal VPC only."
+    },
+    {
+      "id": "US-009",
+      "title": "GET /notifications/stream SSE route",
+      "description": "As a browser client, I want to open an SSE stream so that I receive real-time notification events.",
+      "acceptanceCriteria": [
+        "src/routes/stream.ts registers GET /notifications/stream on the Fastify instance",
+        "Validates Authorization: Bearer <token> (user JWT); extracts userId and location claims; returns 401/403 on failure",
+        "Parses ?channels= comma-separated list; returns 400 if any channel pattern invalid; returns 403 if any channel fails access control",
+        "Sets response headers: Content-Type: text/event-stream, Cache-Control: no-cache, Connection: keep-alive, X-Connection-ID: <new UUID>",
+        "Handles per-user connection limit via SseManager (evicts oldest, sends connection-limit event)",
+        "On connect: if Last-Event-ID header present, queries missed notifications (seq > last_event_id, capped at 200); if truncated sends replay-truncated event first, then replays missed events as event: notification",
+        "Registers connection in SseManager; starts 30s keepalive interval",
+        "On client disconnect: deregisters from SseManager, clears keepalive interval",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Use Fastify raw reply (reply.raw) to write SSE. fetch-event-source on client side sends Authorization header — server only does standard SSE."
+    },
+    {
+      "id": "US-010",
+      "title": "GET /notifications history endpoint",
+      "description": "As a browser client, I want to fetch paginated notification history so that I can display the notification list and unread badge count.",
+      "acceptanceCriteria": [
+        "src/routes/notifications.ts registers GET /notifications",
+        "Query params: channels (required, comma-separated), unread (optional boolean), limit (optional, default 50, max 100), before (optional cursor string)",
+        "Validates channel patterns; returns 400 on invalid; validates access control; returns 403 on failure",
+        "Calls NotificationsRepo.findHistory(); returns { notifications: [...], next_cursor: string | null }",
+        "Response includes X-Total-Count header with total unread count across requested channels for this user (ignoring pagination)",
+        "Each notification row includes: notification_id, channel, title, body, payload, read (boolean), created_at",
+        "Expired notifications not returned",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "User JWT validated for all /notifications routes. X-Total-Count: 0 when unread filter not applied."
+    },
+    {
+      "id": "US-011",
+      "title": "POST mark-read endpoints",
+      "description": "As a browser client, I want to mark notifications as read so that read state syncs across all my open tabs.",
+      "acceptanceCriteria": [
+        "POST /notifications/:id/read registered in src/routes/notifications.ts",
+        "Reads X-Connection-ID header from request",
+        "Calls NotificationsRepo.markRead(userId, notificationId); returns 404 if notification not found or expired",
+        "On success: Redis PUBLISH to notif:user:{userId}:reads with { notification_id, originating_connection_id }; returns 200 {}",
+        "POST /notifications/read-all registered in src/routes/notifications.ts",
+        "Body: { channels: string[] }; validates channel patterns and access control; returns 400/403 on failure",
+        "Calls NotificationsRepo.markAllRead(userId, channels); Redis PUBLISH single message { notification_ids: [...], originating_connection_id } to notif:user:{userId}:reads",
+        "Returns 200 { marked: <count> }",
+        "Both endpoints require user JWT; idempotent (upsert on conflict)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Redis PUBLISH key: notif:user:{userId}:reads. SseManager excludes originating connection based on originating_connection_id."
+    },
+    {
+      "id": "US-012",
+      "title": "BullMQ publish-retry worker",
+      "description": "As a developer, I need a BullMQ worker that retries Redis PUBLISH after failure so that no notification is permanently lost if Redis is temporarily unavailable.",
+      "acceptanceCriteria": [
+        "src/queue/publish-retry.worker.ts creates a BullMQ Worker on queue publish-retry",
+        "Job data: { notification_id, channel, seq, title, body, payload, created_at }",
+        "Worker attempts Redis PUBLISH to notif:channel:{channel} with the stored payload",
+        "On success: job marked complete",
+        "Retry config: 3 attempts, delays 1000ms / 5000ms / 30000ms (exponential backoff via BullMQ attempts + backoff settings)",
+        "After 3 failures job is moved to failed queue (BullMQ default)",
+        "Worker is started in src/index.ts alongside the Fastify server",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "BullMQ queue name: publish-retry. Redis client shared with pub/sub (separate ioredis connection for blocking operations)."
+    },
+    {
+      "id": "US-013",
+      "title": "BullMQ cleanup worker",
+      "description": "As a developer, I need a daily cron job that deletes expired notifications so that the database does not grow unbounded.",
+      "acceptanceCriteria": [
+        "src/queue/cleanup.worker.ts creates a BullMQ repeatable job on queue notification-cleanup with cron '0 2 * * *' (2:00 AM UTC)",
+        "Worker calls NotificationsRepo.deleteExpired(); logs count of deleted rows",
+        "BullMQ deduplication via job key ensures only one instance runs the job at a time across all ECS tasks",
+        "Worker is started in src/index.ts",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "ON DELETE CASCADE on notification_reads ensures read receipts are cleaned up automatically."
+    },
+    {
+      "id": "US-014",
+      "title": "Integration tests — publish and SSE stream",
+      "description": "As a developer, I need integration tests against real Postgres and Redis so that the end-to-end publish→stream flow is verified.",
+      "acceptanceCriteria": [
+        "test/integration/publish-stream.test.ts: publish to channel X → SSE client subscribed to X receives event: notification with correct payload; publish to channel X → SSE client subscribed to Y receives nothing",
+        "test/integration/read-sync.test.ts: mark read → notification_reads row inserted; second SSE connection for same user receives event: read; X-Connection-ID suppresses echo on originating connection; calling mark-read twice is idempotent (no error); mark read on expired/non-existent notification returns 404",
+        "test/integration/read-all.test.ts: POST /read-all marks all unread in channels; single event: read-all pushed to other connections with full notification_ids array; response includes correct marked count",
+        "test/integration/history.test.ts: GET /notifications returns history with correct read: true/false per item; unread=true filter works; X-Total-Count matches actual unread count; pagination cursor advances correctly; expired notifications not returned",
+        "test/integration/replay.test.ts: reconnect with Last-Event-ID replays missed notifications without duplicates; reconnect with > 200 missed sends replay-truncated first with correct replayed/first_seq, then 200 events",
+        "test/integration/auth.test.ts: subscribe to unauthorized channel returns 403; subscribe with unknown pattern returns 400; publish with invalid service JWT returns 401/403",
+        "test/integration/rate-limit.test.ts: 101st publish within 60s returns 429 with Retry-After header",
+        "test/integration/redis-failure.test.ts: Redis unavailable during publish → DB write succeeds, 201 returned, BullMQ retry job created → after Redis recovers worker delivers to subscribed clients",
+        "test/integration/cleanup.test.ts: cleanup worker deletes rows where expires_at < now(); notification_reads cascade-deleted",
+        "Tests use real Postgres (platform_notifications schema) and real Redis (test instance); test helpers create/teardown schema per test suite",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Use @ortho/testing helpers if available, otherwise local test fixtures. Each test file runs migrations before suite and truncates tables between tests."
+    }
+  ]
+}
