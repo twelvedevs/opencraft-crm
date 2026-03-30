@@ -20,5 +20,7 @@ export async function buildApp(db: Knex, jwtSecret: string): Promise<FastifyInst
     return reply.status(200).send({ status: 'ok' });
   });
 
+  await app.register(import('./routes/templates.js'));
+
   return app;
 }
