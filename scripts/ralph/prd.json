@@ -59,7 +59,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "No business logic in repository — only DB access. All queries scoped to platform_templates schema. updated_at is always refreshed in updateTemplateGroup even if not passed by caller."
     },
     {

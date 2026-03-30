@@ -9,6 +9,17 @@
 
 ---
 
+## 2026-03-30 - US-003
+- Implemented typed repository layer for platform_templates DB access
+- Files changed: src/repositories/templates.ts
+- **Learnings for future iterations:**
+  - Use `applyFilters` helper closure pattern to share filter logic between count and data queries
+  - `db.fn.now()` used for `updated_at` default in `updateTemplateGroup` when not explicitly provided
+  - `db.transaction(async (trx) => { ... })` pattern for multi-table inserts (create method)
+  - All queries use qualified table names `${SCHEMA}.${TABLE}` (not `.withSchema()`) for consistency
+  - `returning('*')` destructured as array: `const [row] = await ...returning('*')`
+---
+
 ## 2026-03-30 - US-002
 - Implemented database migrations for platform_templates schema
 - Files changed: migrations/knexfile.ts, migrations/001_create_templates.ts, migrations/002_create_template_versions.ts
