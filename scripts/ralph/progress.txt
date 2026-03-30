@@ -1,0 +1,31 @@
+## Codebase Patterns
+- Platform services use ESM (`"type": "module"`) with NodeNext module resolution — always use `.js` extensions in imports
+- tsconfig follows automation service pattern: target ES2022, NodeNext, strict, outDir dist/, rootDir src/
+- Fastify app is exported from index.ts; server only starts when NODE_ENV !== 'test' (allows testing without binding port)
+- config.ts uses requireEnv() helper that throws on missing required vars; PORT has default 3006
+- BullMQ and ioredis are separate dependencies (ioredis used for pub/sub, BullMQ for job queues)
+- Services run on port 3006 (notification), matches existing port allocation pattern
+
+---
+
+# Ralph Progress Log
+Started: Mon Mar 30 13:08:41 +03 2026
+---
+
+## 2026-03-30 - US-001
+- What was implemented: Full project scaffold for @platform/notification service
+- Files changed:
+  - apps/platform/notification/package.json (name: @platform/notification, all required deps)
+  - apps/platform/notification/tsconfig.json (ESM, strict, NodeNext, dist/ output)
+  - apps/platform/notification/src/config.ts (requireEnv helper, PORT default 3006)
+  - apps/platform/notification/src/index.ts (Fastify app, GET /health, exports app)
+  - apps/platform/notification/Dockerfile (node:24-alpine, npm ci --omit=dev, dist/)
+  - apps/platform/notification/.env.example (all 4 env vars)
+  - apps/platform/notification/.gitignore
+  - apps/platform/notification/package-lock.json
+- **Learnings for future iterations:**
+  - All other platform services (messaging, email, etc.) directories are empty placeholders - notification is the first to be built
+  - Used automation service as reference for package.json/tsconfig patterns
+  - config.ts throws at module load time if required env vars are missing - this means tests need env vars set (or NODE_ENV=test guard in index.ts)
+  - Typecheck passes with no issues on the scaffold
+---
