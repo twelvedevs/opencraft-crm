@@ -1,3 +1,22 @@
+## Codebase Patterns
+- Services go in `src/services/` — pure functions only, no I/O, no imports from routes/repositories
+- Test files mirror src structure under `test/unit/`
+- Use `vi.useFakeTimers()` / `vi.useRealTimers()` in beforeEach/afterEach for time-dependent tests
+
 # Ralph Progress Log
-Started: Mon Mar 30 20:08:08 +03 2026
+Started: Mon Mar 30 2026
+---
+
+## 2026-03-30 20:19 - US-001
+- Implemented pure merge-tag renderer in `src/services/template-renderer.ts`
+- Exports `RenderResult` type and `renderString(template, context)` function
+- Malformed check (empty tag, unclosed `{{`) runs before resolution
+- Case-insensitive key matching; dot-notation traversal; array indices → unknown key
+- Created `test/unit/template-renderer.test.ts` with 10 test cases; all pass
+- Files changed: `src/services/template-renderer.ts`, `test/unit/template-renderer.test.ts`
+- **Learnings for future iterations:**
+  - `src/services/` directory did not exist yet — created it for this story
+  - The `VALID_TAG_RE` regex must be constructed with `/g` flag; calling `.replace()` with it replaces all occurrences
+  - After replacing all valid tags, a second `includes('{{')` check catches any remaining malformed syntax
+  - Array index detection: `/^\d+$/.test(part)` in the dot-path traversal handles `{{appointments.0.date}}`
 ---

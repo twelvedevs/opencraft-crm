@@ -1,0 +1,39 @@
+# Ralph Progress Log
+Started: Mon Mar 30 20:17:12 +03 2026
+---
+
+## Codebase Patterns
+- lru-cache captures the global `performance` reference at module import time — `vi.useFakeTimers()` cannot advance its internal TTL clock. Use real timers with a short TTL (100ms) for TTL expiry tests instead.
+- Export `createCache(ttl?)` factory alongside the default singleton to allow test-isolated instances without fake timers.
+
+## 2026-03-30 20:17 - US-001
+- US-001 was already committed in a prior run (commit 0243702); prd.json not updated. Marked passes: true and moved on.
+- Files: apps/platform/template/src/services/template-renderer.ts, test/unit/template-renderer.test.ts
+---
+
+## 2026-03-30 20:24 - US-003
+- Added `findActiveVersionContent(id)` to TemplatesRepo (Knex join query)
+- Created `src/routes/render.ts`: POST /templates/render with requireAuth, cache-first fetch, SMS + email rendering
+- Registered render plugin in app.ts after templates plugin
+- UUID validated manually via regex (no ajv-formats in project)
+- Files changed: repositories/templates.ts, routes/render.ts, app.ts
+- **Learnings for future iterations:**
+  - No ajv-formats plugin → TypeBox `format: 'uuid'` won't validate at runtime; use manual UUID regex
+  - `app.requireAuth()` (not requireRole) used for service-to-service endpoints
+---
+
+## 2026-03-30 20:24 - US-004
+- Added `templateCache.evict(id)` in activate and disable handlers (after repo call, before reply)
+- No cache interaction in enable handler per spec
+- Files changed: routes/templates.ts
+---
+
+## 2026-03-30 20:22 - US-002
+- Implemented template-cache.ts: LRUCache singleton (500 entries, 30s TTL) with get/set/evict
+- Exported `createTemplateCache(ttl?)` factory to allow test-specific instances
+- TTL test uses real 100ms timer (lru-cache captures performance ref at import time; vi fake timers can't advance it)
+- Files changed: src/services/template-cache.ts, test/unit/template-cache.test.ts, scripts/ralph/prd.json
+- **Learnings for future iterations:**
+  - lru-cache v11 captures `performance` (or custom perf object) at module load time — fake timers won't work for TTL tests
+  - Solution: export a factory so tests can create a fresh instance with short real TTL
+---
