@@ -8,6 +8,7 @@ import { RateLimiter } from './services/rate-limiter.js';
 import { SseManager } from './services/sse-manager.js';
 import { publishRoute } from './routes/publish.js';
 import { streamRoute } from './routes/stream.js';
+import { notificationsRoute } from './routes/notifications.js';
 
 export const app = Fastify({ logger: true });
 
@@ -50,6 +51,14 @@ if (publisher && rateLimiter) {
 if (sseManager && repo) {
   await app.register(streamRoute, {
     sseManager,
+    repo,
+    jwtSecret: config.JWT_HMAC_SECRET,
+  });
+}
+
+// Register notifications history + mark-read routes
+if (repo) {
+  await app.register(notificationsRoute, {
     repo,
     jwtSecret: config.JWT_HMAC_SECRET,
   });
