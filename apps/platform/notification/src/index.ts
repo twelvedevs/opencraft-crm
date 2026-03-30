@@ -1,11 +1,48 @@
 import Fastify from 'fastify';
+import knex from 'knex';
+import { Redis } from 'ioredis';
 import { config } from './config.js';
+import { NotificationsRepo } from './repositories/notifications.repo.js';
+import { Publisher } from './services/publisher.js';
+import { RateLimiter } from './services/rate-limiter.js';
+import { SseManager } from './services/sse-manager.js';
+import { publishRoute } from './routes/publish.js';
 
 export const app = Fastify({ logger: true });
+
+// Shared DB + Redis clients (not created during test imports)
+let publisher: Publisher | undefined;
+let rateLimiter: RateLimiter | undefined;
+let sseManager: SseManager | undefined;
+
+if (process.env['NODE_ENV'] !== 'test') {
+  const db = knex({
+    client: 'pg',
+    connection: config.DATABASE_URL,
+    searchPath: ['platform_notifications'],
+  });
+
+  const redis = new Redis(config.REDIS_URL);
+  const subRedis = new Redis(config.REDIS_URL);
+
+  const repo = new NotificationsRepo(db);
+  publisher = new Publisher(repo, redis);
+  rateLimiter = new RateLimiter(redis);
+  sseManager = new SseManager(subRedis);
+}
 
 app.get('/health', async () => {
   return { status: 'ok' };
 });
+
+// Register publish route (only when dependencies are available)
+if (publisher && rateLimiter) {
+  await app.register(publishRoute, {
+    publisher,
+    rateLimiter,
+    jwtSecret: config.JWT_HMAC_SECRET,
+  });
+}
 
 if (process.env['NODE_ENV'] !== 'test') {
   try {
@@ -15,3 +52,5 @@ if (process.env['NODE_ENV'] !== 'test') {
     process.exit(1);
   }
 }
+
+export { sseManager };
