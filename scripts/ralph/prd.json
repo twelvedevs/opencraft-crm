@@ -57,7 +57,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Extract created_by for new version rows same pattern as POST: isServiceApiKey check → null; else verifyJwt → claims.sub. For Branch 2, the transaction ensures the new version row and current_version increment are atomic — use app.db.transaction(async (trx) => { await trx(...).insert(...); await trx(...).update(...) }) or pass db.transaction to the repo methods. Only include content fields in the version payload that are explicitly present in the request body (undefined means 'not provided' — use 'key in body' check, not just falsiness). Note: if ONLY name is patched with no content fields, still call updateTemplateGroup but skip the version operation."
     }
   ]
