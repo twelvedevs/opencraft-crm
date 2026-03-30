@@ -10,6 +10,7 @@ import { publishRoute } from './routes/publish.js';
 import { streamRoute } from './routes/stream.js';
 import { notificationsRoute } from './routes/notifications.js';
 import { createPublishRetryWorker } from './queue/publish-retry.worker.js';
+import { createCleanupWorker } from './queue/cleanup.worker.js';
 
 export const app = Fastify({ logger: true });
 
@@ -37,6 +38,9 @@ if (process.env['NODE_ENV'] !== 'test') {
 
   // Start publish-retry BullMQ worker (uses its own Redis connections)
   createPublishRetryWorker(config.REDIS_URL);
+
+  // Start daily cleanup worker — deletes expired notifications at 2:00 AM UTC
+  createCleanupWorker(config.REDIS_URL, repo);
 }
 
 app.get('/health', async () => {
