@@ -28,6 +28,7 @@ All specs are **Approved** unless noted otherwise.
 | [email-service-design.md](superpowers/specs/2026-03-25-email-service-design.md) | — |
 | [email-service-updated-design.md](superpowers/specs/2026-03-29-email-service-updated-design.md) | — |
 | [notification-service-design.md](superpowers/specs/2026-03-25-notification-service-design.md) | [memories/notification-service.md](memories/notification-service.md) |
+| [notification-service-updated-design.md](superpowers/specs/2026-03-30-notification-service-updated-design.md) _(supersedes above)_ | [memories/notification-service.md](memories/notification-service.md) |
 | [template-service-design.md](superpowers/specs/2026-03-25-template-service-design.md) | [memories/template-service.md](memories/template-service.md) |
 | [audience-engine-design.md](superpowers/specs/2026-03-25-audience-engine-design.md) | [memories/audience-engine.md](memories/audience-engine.md) |
 | [ai-service-design.md](superpowers/specs/2026-03-25-ai-service-design.md) | [memories/ai-service.md](memories/ai-service.md) |
