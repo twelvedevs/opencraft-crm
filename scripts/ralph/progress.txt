@@ -1,23 +1,20 @@
-## Codebase Patterns
-- Email service uses `src/env.ts`; template service uses `src/config.ts` with named export `config`
-- All services use TypeBox `Type.Object` + `Value.Check` for env validation; extract first error path for message
-- `buildApp(db, ...)` factory pattern — app does NOT call listen; `index.ts` owns the listen call
-- Guard `app.listen()` with `NODE_ENV !== 'test'` to allow test imports without binding a port
-- `src/types.d.ts` augments `declare module 'fastify'` for typed decorators
-- tsconfig: `target ESNext`, `module NodeNext`, `moduleResolution NodeNext`, `strict true`
-- `lru-cache` and `jose` are in dependencies (not devDependencies) — they're runtime deps
-- All queries use qualified table names `${SCHEMA}.${TABLE}` (not `.withSchema()`) for consistency
-- `returning('*')` destructured as array: `const [row] = await ...returning('*')`
-- `db.fn.now()` used for `updated_at` default in `updateTemplateGroup` when not explicitly provided
-- `db.transaction(async (trx) => { ... })` pattern for multi-table inserts
-- `verifyJwt` and `requireRole`/`requireAuth` throw plain objects `{ statusCode, message }` (not httpErrors) — preHandlers catch and call `reply.status().send()` directly
-- `isServiceApiKey` returns true when token after `Bearer ` starts with `ak_`
-- `requireRole` never accepts API keys — always calls `verifyJwt`
-- `requireAuth` accepts either valid user JWT OR service API key
-- `app.decorate('requireAuth', () => ...)` binds jwtSecret so routes call `app.requireAuth()` without passing secret
-- vitest imports work with `.js` extension in ESM mode even for `.ts` source files
-- CHECK constraints use `knex.raw('ALTER TABLE ... ADD CONSTRAINT ...')` after table creation
-- Named indexes use `knex.raw('CREATE INDEX ... ON ...')` for exact name control
-- Cross-schema FK references in inTable use qualified name `'platform_templates.templates'`
-- Migration files NOT included in main tsconfig (rootDir is src/); run via tsx at runtime
+# Ralph Progress Log
+Started: Mon Mar 30 19:59:24 +03 2026
+---
 
+## Codebase Patterns
+- app.register(import('./routes/foo.js')) — dynamic import used to register Fastify route plugins (ESM, .js extension required)
+- Role guard at plugin level: app.addHook('preHandler', app.requireRole('role')) — all routes in the plugin inherit it
+- PG unique violation: catch (err as { code?: string }).code === '23505'
+- created_by pattern: isServiceApiKey(auth) → null; else verifyJwt(auth, app.jwtSecret) → claims.sub
+
+## 2026-03-30 20:00 - US-001
+- Implemented templateRoutes Fastify plugin at src/routes/templates.ts
+- Added POST /templates with TypeBox schema, marketing_staff role guard, created_by logic, pg 23505 handling
+- Registered plugin in app.ts via app.register(import('./routes/templates.js'))
+- Files changed: src/routes/templates.ts (new), src/app.ts
+- **Learnings for future iterations:**
+  - Dynamic import for register: `app.register(import('./routes/templates.js'))` — Fastify 5 supports this directly
+  - TypeBox body cast: `request.body as { name: string; channel: 'sms' | 'email' }` needed since Fastify body is `unknown` by default
+  - Role guard preHandler placed at plugin top before route definitions; all routes inherit it automatically
+---

@@ -1,85 +1,64 @@
 {
   "project": "Ortho CRM — Template Service",
-  "branchName": "ralph/template-service-phase-1",
-  "description": "Template Service Phase 1 — Project scaffold, PostgreSQL schema migrations, typed repository layer, JWT+RBAC auth plugin. Backend only (apps/platform/template). No Redis, no BullMQ, no EventBridge.",
+  "branchName": "ralph/template-service-phase-2",
+  "description": "Template Service Phase 2 — Template CRUD routes: POST /templates, GET /templates (paginated list with filters), GET /templates/:id (with draft + active content), PATCH /templates/:id (three-branch draft versioning logic, content-length validation, channel field filtering). marketing_staff role guard applied at plugin level.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Project scaffold",
-      "description": "As a developer, I need the Template Service directory skeleton so subsequent stories have a working base to build on.",
+      "title": "CRUD routes plugin scaffold + POST /templates",
+      "description": "As a marketing staff member, I want to create a new template so that it can be used in messaging workflows.",
       "acceptanceCriteria": [
-        "Create apps/platform/template/ with package.json: name @platform/template, version 0.1.0, type module, engines.node >=24; dependencies: fastify@^5.0.0, @fastify/sensible@^6.0.0, knex@^3.0.0, pg@^8.0.0, @sinclair/typebox@^0.34.0, jose@^5.0.0, lru-cache@^11.0.0; devDependencies: tsx@^4.0.0, typescript@^5.0.0, @types/node@^22.0.0, @types/pg@^8.0.0, vitest@^2.0.0",
-        "scripts in package.json: build (tsc), dev (tsx watch src/index.ts), start (node dist/index.js), typecheck (tsc --noEmit), test (vitest run), test:watch (vitest)",
-        "tsconfig.json: compilerOptions target ESNext, module NodeNext, moduleResolution NodeNext, strict true, outDir ./dist, rootDir ./src, esModuleInterop true, skipLibCheck true; include [\"src/**/*\"]",
-        "src/config.ts: uses TypeBox Type.Object + Value.Check to validate env: DATABASE_URL (required string), JWT_SECRET (required string), PORT (optional integer); if Value.Check fails, extract first error path and throw Error('Missing required env: <field>'); exports typed config object with PORT defaulting to 3005",
-        "src/app.ts: exports async buildApp(db: Knex, jwtSecret: string): Promise<FastifyInstance>; registers @fastify/sensible; decorates app with db and jwtSecret; registers GET /health route returning 200 { status: 'ok' }",
-        "src/index.ts: imports buildApp and config; creates knex connection (client: 'pg', connection: config.DATABASE_URL, searchPath: ['platform_templates']); calls buildApp(db, config.JWT_SECRET); when NODE_ENV !== 'test' calls app.listen({ port: config.PORT, host: '0.0.0.0' }) and logs errors to app.log; exports app for test imports",
-        "src/types.d.ts: augments FastifyInstance interface (via declare module 'fastify') to add db: Knex and jwtSecret: string decorators; imports Knex type from 'knex'",
-        "Dockerfile: FROM node:24-alpine, WORKDIR /app, COPY package.json ., RUN npm ci --omit=dev, COPY dist/ ./dist/, CMD [\"node\", \"dist/index.js\"]",
-        ".env.example lists: DATABASE_URL, JWT_SECRET, PORT=3005",
+        "Create src/routes/templates.ts exporting async function templateRoutes(app: FastifyInstance): Promise<void> as default export — a Fastify plugin",
+        "At plugin level, register preHandler hook: app.addHook('preHandler', app.requireRole('marketing_staff')) — all routes in this file inherit this guard",
+        "POST /templates: TypeBox body schema with required fields: name (Type.String()) and channel (Type.Union([Type.Literal('sms'), Type.Literal('email')])); Fastify schema validation returns 400 on missing/invalid fields",
+        "POST /templates handler: determine created_by — if isServiceApiKey(request.headers.authorization) then created_by = null; else call verifyJwt(request.headers.authorization, app.jwtSecret) and use claims.sub",
+        "POST /templates handler: instantiate TemplatesRepo(app.db) and call repo.create({ name, channel, created_by })",
+        "On pg unique violation (error code '23505'): return reply.status(409).send({ error: 'Template name already exists' })",
+        "On success: return reply.status(201).send(templateRow)",
+        "Register templateRoutes plugin in app.ts via app.register(import('./routes/templates.js')) after the decorator setup",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "No Redis, no BullMQ, no EventBridge. Follow email service patterns: buildApp factory, TypeBox env validation, @fastify/sensible v6. PORT default 3005."
+      "notes": "isServiceApiKey and verifyJwt are exported from src/plugins/auth.ts. app.db and app.jwtSecret are decorated on the FastifyInstance (see src/types.d.ts). app.requireRole is decorated and returns a preHandler function. Catch pg errors by checking (err as NodeJS.ErrnoException & { code?: string }).code === '23505' — or cast to any and check .code."
     },
     {
       "id": "US-002",
-      "title": "Database migrations — platform_templates schema",
-      "description": "As a developer, I need the platform_templates schema with correct tables and indexes so the service can persist and query templates and their version history.",
+      "title": "GET /templates (paginated list) and GET /templates/:id",
+      "description": "As a marketing staff member, I want to list and retrieve templates so that I can view and manage them.",
       "acceptanceCriteria": [
-        "migrations/knexfile.ts: exports default Knex.Config with client 'pg', connection process.env.DATABASE_URL, searchPath ['platform_templates', 'public'], migrations.directory '.', migrations.schemaName 'platform_templates', migrations.tableName 'knex_migrations', migrations.loadExtensions ['.ts']",
-        "migrations/001_create_templates.ts: up() calls knex.raw('CREATE SCHEMA IF NOT EXISTS platform_templates'); creates table platform_templates.templates with columns: id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text NOT NULL UNIQUE, channel text NOT NULL CHECK (channel IN ('sms','email')), status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','disabled')), active_version integer, current_version integer NOT NULL DEFAULT 1, created_by uuid, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(); creates index templates_channel_idx on templates(channel); creates index templates_status_idx on templates(status); creates index templates_updated_at_idx on templates(updated_at DESC); creates index templates_created_at_idx on templates(created_at DESC)",
-        "migrations/001_create_templates.ts: down() drops table platform_templates.templates if exists",
-        "migrations/002_create_template_versions.ts: up() creates table platform_templates.template_versions with columns: id uuid PRIMARY KEY DEFAULT gen_random_uuid(), template_id uuid NOT NULL REFERENCES platform_templates.templates(id) ON DELETE CASCADE, version integer NOT NULL, body_text text, subject text, body_html text, body_unlayer jsonb, created_by uuid, created_at timestamptz NOT NULL DEFAULT now(); adds UNIQUE constraint on (template_id, version); creates index template_versions_template_id_idx on template_versions(template_id)",
-        "migrations/002_create_template_versions.ts: down() drops table platform_templates.template_versions if exists",
-        "Migrations run successfully against a Postgres instance (npx knex --knexfile migrations/knexfile.ts migrate:latest)",
+        "GET /templates: TypeBox query schema (all fields optional): channel (Type.Optional(Type.Union([Type.Literal('sms'), Type.Literal('email')]))), status (Type.Optional(Type.Union([Type.Literal('draft'), Type.Literal('active'), Type.Literal('disabled')]))), sort (Type.Optional(Type.Union([Type.Literal('created_at'), Type.Literal('updated_at')])) — default 'updated_at'), order (Type.Optional(Type.Union([Type.Literal('asc'), Type.Literal('desc')])) — default 'desc'), limit (Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 }))), offset (Type.Optional(Type.Integer({ minimum: 0, default: 0 })))",
+        "GET /templates handler: call repo.list({ channel, status, sort: sort ?? 'updated_at', order: order ?? 'desc', limit: limit ?? 20, offset: offset ?? 0 })",
+        "GET /templates returns 200 { data: TemplateRow[], total: number, limit: number, offset: number } where limit and offset are the resolved values used in the query",
+        "GET /templates/:id: call repo.findById(id); return 404 { error: 'Not found' } if null",
+        "GET /templates/:id: fetch draft content via repo.findVersionContent(template.id, template.current_version)",
+        "GET /templates/:id: fetch active content via repo.findVersionContent(template.id, template.active_version!) only when template.active_version !== null; set active_content = null otherwise",
+        "GET /templates/:id returns 200 with all TemplateRow fields plus: draft_content: { version, body_text, subject, body_html, body_unlayer } and active_content: { version, body_text, subject, body_html, body_unlayer } | null — strip id, template_id, created_by, created_at from version rows",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Use knex.raw() for CREATE SCHEMA and raw index DDL. Use knex.schema.withSchema('platform_templates') for createTable. Migrations must run in order: 001 before 002 due to FK reference."
+      "passes": false,
+      "notes": "For GET /templates/:id response shape, project only the content fields from TemplateVersionRow (version, body_text, subject, body_html, body_unlayer). Fastify coerces query string integers automatically via AJV when Type.Integer() is used in the schema. When limit/offset defaults are set in the TypeBox schema with 'default' keyword, Fastify populates them — but also apply fallback ?? in the handler for safety."
     },
     {
       "id": "US-003",
-      "title": "Templates repository",
-      "description": "As a developer, I need a typed repository layer for platform_templates DB access so routes and services never write raw SQL outside the repository.",
+      "title": "PATCH /templates/:id — draft versioning, content validation, channel filtering",
+      "description": "As a marketing staff member, I want to edit a template's draft content so that I can update messaging without disrupting active automations or in-flight sequences.",
       "acceptanceCriteria": [
-        "src/repositories/templates.ts exports TemplateRow interface matching templates table: id, name, channel, status, active_version (number | null), current_version, created_by (string | null), created_at (string), updated_at (string)",
-        "src/repositories/templates.ts exports TemplateVersionRow interface matching template_versions table: id, template_id, version, body_text (string | null), subject (string | null), body_html (string | null), body_unlayer (unknown | null), created_by (string | null), created_at (string)",
-        "Exports TemplatesRepo class taking a Knex instance in constructor; all queries use withSchema('platform_templates')",
-        "findById(id: string): Promise<TemplateRow | null> — select * from templates where id = id; return null if not found",
-        "findByName(name: string): Promise<TemplateRow | null> — select * from templates where name = name; return null if not found",
-        "list(opts: { channel?: string, status?: string, sort?: 'created_at' | 'updated_at', order?: 'asc' | 'desc', limit?: number, offset?: number }): Promise<{ rows: TemplateRow[], total: number }> — builds base query with optional channel/status filters; runs two queries: count query for total (no limit/offset), data query with orderBy(sort ?? 'updated_at', order ?? 'desc') and limit/offset applied",
-        "create(data: { name: string, channel: string, created_by?: string | null }): Promise<TemplateRow> — wraps in knex.transaction; inserts templates row returning all columns; inserts template_versions row (template_id: template.id, version: 1, all content fields null, created_by: data.created_by ?? null); returns the template row",
-        "findVersionContent(templateId: string, version: number): Promise<TemplateVersionRow | null> — select * from template_versions where template_id = templateId and version = version; return null if not found",
-        "updateVersionInPlace(templateId: string, version: number, data: Partial<Pick<TemplateVersionRow, 'body_text' | 'subject' | 'body_html' | 'body_unlayer'>>): Promise<void> — updates template_versions row at (template_id, version) with provided fields",
-        "insertNewVersion(data: { template_id: string, version: number, body_text?: string | null, subject?: string | null, body_html?: string | null, body_unlayer?: unknown | null, created_by?: string | null }): Promise<void> — inserts new template_versions row",
-        "updateTemplateGroup(id: string, data: Partial<Pick<TemplateRow, 'name' | 'status' | 'active_version' | 'current_version' | 'updated_at'>>): Promise<TemplateRow> — updates templates row with provided fields; sets updated_at to now() if not explicitly in data; returns updated row via returning('*')",
+        "PATCH /templates/:id: TypeBox body schema with all fields optional: name (Type.Optional(Type.String())), body_text (Type.Optional(Type.String())), subject (Type.Optional(Type.String())), body_html (Type.Optional(Type.String())), body_unlayer (Type.Optional(Type.Object({}, { additionalProperties: true })))",
+        "Fetch template by id via repo.findById(id); return 404 { error: 'Not found' } if null",
+        "Channel-immutable field filtering (applied before length validation): for SMS templates, drop subject, body_html, body_unlayer from the content payload silently — they are not stored and no error is returned; for email templates, accept all content fields",
+        "Content-length validation (applied after channel filtering, before any DB write): name > 255 chars → 400 { error: 'name exceeds 255 character limit' }; body_text for SMS > 1600 chars → 400 { error: 'body_text exceeds 1600 character limit for SMS templates' }; body_text for email > 10000 chars → 400 { error: 'body_text exceeds 10000 character limit for email templates' }; subject > 500 chars → 400 { error: 'subject exceeds 500 character limit' }; body_html > 500000 chars → 400 { error: 'body_html exceeds 500000 character limit' }",
+        "Three-branch versioning for content fields (body_text, subject, body_html, body_unlayer) — only fields present in the filtered request body are included: Branch 1: template.active_version === null → call repo.updateVersionInPlace(id, template.current_version, contentFields); Branch 2: template.current_version === template.active_version → wrap in transaction: call repo.insertNewVersion({ template_id: id, version: template.current_version + 1, ...contentFields, created_by }) then repo.updateTemplateGroup(id, { current_version: template.current_version + 1, ...(name !== undefined ? { name } : {}) }); Branch 3: template.current_version > template.active_version → call repo.updateVersionInPlace(id, template.current_version, contentFields)",
+        "For Branches 1 and 3: after the version update, call repo.updateTemplateGroup(id, { ...(name !== undefined ? { name } : {}) }) to refresh updated_at and optionally update the name (updateTemplateGroup always refreshes updated_at via db.fn.now())",
+        "Disabled templates: PATCH is allowed; do not auto re-enable; do not modify status field",
+        "On pg unique violation (error code '23505') from name update: return 409 { error: 'Template name already exists' }",
+        "Response 200: fetch the updated template group row (returned by updateTemplateGroup) and the current draft version via repo.findVersionContent(id, updatedTemplate.current_version); return { ...updatedTemplate, draft_content: { version, body_text, subject, body_html, body_unlayer } }",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "No business logic in repository — only DB access. All queries scoped to platform_templates schema. updated_at is always refreshed in updateTemplateGroup even if not passed by caller."
-    },
-    {
-      "id": "US-004",
-      "title": "Auth plugin — JWT verification and role guards",
-      "description": "As a developer, I need reusable auth utilities so all template routes can enforce JWT authentication and RBAC roles without duplicating verification logic.",
-      "acceptanceCriteria": [
-        "src/plugins/auth.ts: exports JwtClaims interface { sub: string, roles?: string[] }",
-        "exports verifyJwt(authHeader: string | undefined, secret: string): Promise<JwtClaims> — extracts Bearer token from Authorization header; calls jose jwtVerify with HS256; returns payload cast to JwtClaims; throws fastify.httpErrors.unauthorized('Unauthorized') if header missing; throws fastify.httpErrors.unauthorized('Invalid token') on jose verification failure",
-        "exports isServiceApiKey(authHeader: string | undefined): boolean — returns true if Authorization header is present and the token portion (after 'Bearer ') starts with 'ak_'",
-        "exports requireAuth(secret: string): FastifyRequestHandler — preHandler that accepts either a valid user JWT OR a service API key; calls isServiceApiKey first, if true returns (allowed); otherwise calls verifyJwt; throws 401 if neither passes",
-        "exports requireRole(role: string, secret: string): FastifyRequestHandler — preHandler that calls verifyJwt (never accepts API keys); checks roles array includes role; throws fastify.httpErrors.forbidden('Forbidden') if role not present; throws 401 if token invalid",
-        "src/app.ts updated: buildApp signature unchanged (jwtSecret already a param); after decorating app with jwtSecret, imports and registers auth helpers as app-level utilities so route handlers can call app.requireAuth() and app.requireRole(role) without passing the secret manually — either export factory functions bound to jwtSecret, or document usage pattern in code comment",
-        "test/unit/auth.test.ts: signs test JWTs using jose SignJWT with HS256; tests: (1) valid JWT with roles: ['marketing_staff'] passes requireRole('marketing_staff'); (2) valid JWT with roles: ['marketing_staff'] fails requireRole('marketing_manager') with 403; (3) missing Authorization header throws 401; (4) JWT with wrong signature throws 401; (5) service API key 'Bearer ak_test123' passes requireAuth; (6) random non-JWT non-ak_ bearer token fails requireAuth with 401",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 4,
-      "passes": true,
-      "notes": "@ortho/auth-middleware does not exist as a package — implement auth inline using jose. JWT claims include sub (user ID) and roles (string[]). Service API keys start with 'Bearer ak_'. Both requireAuth and requireRole throw using @fastify/sensible httpErrors for consistent error shapes."
+      "passes": false,
+      "notes": "Extract created_by for new version rows same pattern as POST: isServiceApiKey check → null; else verifyJwt → claims.sub. For Branch 2, the transaction ensures the new version row and current_version increment are atomic — use app.db.transaction(async (trx) => { await trx(...).insert(...); await trx(...).update(...) }) or pass db.transaction to the repo methods. Only include content fields in the version payload that are explicitly present in the request body (undefined means 'not provided' — use 'key in body' check, not just falsiness). Note: if ONLY name is patched with no content fields, still call updateTemplateGroup but skip the version operation."
     }
   ]
 }
