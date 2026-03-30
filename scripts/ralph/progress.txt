@@ -1,3 +1,16 @@
+## 2026-03-30 - US-005
+- What was implemented: Per-channel sliding-window rate limiter using Redis Lua script
+- Files changed:
+  - apps/platform/notification/src/services/rate-limiter.ts (new file)
+  - apps/platform/notification/test/unit/rate-limiter.test.ts (new file, 8 tests)
+- **Learnings for future iterations:**
+  - Lua script atomically INCRs key and sets EXPIRE only when count==1 (first call in window); subsequent calls skip EXPIRE to avoid resetting the window
+  - `redis.eval(LUA_SCRIPT, 1, key)` returns `[count, ttl]` as a tuple — cast to `[number, number]` in TypeScript
+  - The Lua script uses KEYS[1] (not a string literal) so Redis Cluster can route correctly
+  - Rate limit: 100 req / 60s window; key format: `ratelimit:channel:{channel}`
+  - Mocking ioredis in vitest: pass `{ eval: vi.fn() }` cast as `unknown as Redis`; mockResolvedValueOnce([count, ttl]) covers the full flow
+---
+
 ## 2026-03-30 - US-003
 - What was implemented: NotificationsRepo class with full DB access layer
 - Files changed:
