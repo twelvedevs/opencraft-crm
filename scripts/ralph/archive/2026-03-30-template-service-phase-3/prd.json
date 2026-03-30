@@ -1,0 +1,92 @@
+{
+  "project": "Ortho CRM — Template Service",
+  "branchName": "ralph/template-service-phase-4",
+  "description": "Template Service Phase 4 — Render Engine + Cache: pure merge-tag renderer service, lru-cache wrapper (30s TTL, eager eviction on activate/disable), POST /templates/render route (cache → DB → renderer → channel response), and unit tests for renderer and cache.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Template renderer service + unit tests",
+      "description": "As a developer, I want a pure merge-tag resolution function so that templates can be rendered from stored content and a caller-supplied context object without any I/O.",
+      "acceptanceCriteria": [
+        "Create `src/services/template-renderer.ts`",
+        "Export type: `export type RenderResult = { ok: true; value: string; warnings: string[] } | { ok: false; error: string }`",
+        "Export function: `export function renderString(template: string, context: Record<string, unknown>): RenderResult`",
+        "Malformed tag detection runs FIRST (before resolution): if the template contains an empty tag matching `/\\{\\{\\s*\\}\\}/` OR contains an unclosed `{{` that is not part of a valid `{{...}}` pair — return `{ ok: false, error: 'Malformed merge tag in template content' }`",
+        "Valid merge tag syntax: `{{key}}` where key matches `/[\\w.]+/` (word chars and dots, no spaces, non-empty); regex to find all valid tags: `/\\{\\{([\\w.]+)\\}\\}/g`",
+        "After replacing all valid tags, if the string still contains `{{` — return `{ ok: false, error: 'Malformed merge tag in template content' }` (catches unclosed tags that weren't matched as valid)",
+        "Tag key resolution: lowercase both the tag key and all context keys before matching (case-insensitive); dot-notation paths like `{{lead.first_name}}` are resolved by splitting on `.` and traversing the context object recursively",
+        "If a resolved intermediate value is not an object (for dot-notation) or the key is absent at any level — treat as unknown key: replace with empty string and add the original tag string (e.g. `'first_name'`) to the `warnings` array",
+        "Array index segments in dot-notation paths (e.g. `{{appointments.0.date}}`) are treated as unknown keys — replace with empty string + warning (no array traversal in v1)",
+        "Multiple occurrences of the same tag are all replaced",
+        "Template with no merge tags → returned unchanged with `{ ok: true, value: template, warnings: [] }`",
+        "Create `test/unit/template-renderer.test.ts` using Vitest covering: (1) happy path all tags resolved; (2) dot-notation path `{{lead.first_name}}`; (3) missing key → empty string, warning in result; (4) nested context object resolved correctly; (5) no merge tags → passthrough; (6) multiple occurrences of same tag all replaced; (7) case-insensitive: `{{First_Name}}` resolves `first_name`; (8) malformed unclosed `{{` → ok:false error result; (9) empty tag `{{ }}` → ok:false error result; (10) array index path treated as unknown key → empty string + warning",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Pure function — no imports from repositories, routes, or external packages beyond string manipulation. The `warnings` array in the ok:true result holds the original tag key strings (not the full `{{key}}` syntax) so callers can log them. The render route in US-003 will log these warnings via request.log.warn. Do NOT throw on missing keys or malformed tags — always return RenderResult. The malformed check before resolution is important: check for `{{ }}` (empty/whitespace-only tags) and after all valid `{{\\w.}}` tags are replaced, if `{{` still present in string, return error."
+    },
+    {
+      "id": "US-002",
+      "title": "Template cache service + unit tests",
+      "description": "As a developer, I want an in-process lru-cache wrapper so that active template version content can be cached for 30 seconds and eagerly evicted when a template is activated or disabled.",
+      "acceptanceCriteria": [
+        "Create `src/services/template-cache.ts`",
+        "Export interface: `export interface CachedTemplateContent { channel: 'sms' | 'email'; body_text: string | null; subject: string | null; body_html: string | null; }`",
+        "Import `LRUCache` from `lru-cache` (already in package.json dependencies as ^11.0.0)",
+        "Create a module-level singleton: `new LRUCache<string, CachedTemplateContent>({ max: 500, ttl: 30_000 })` — TTL is 30 seconds in milliseconds",
+        "Cache key helper (not exported): `function cacheKey(id: string): string { return \\`template:${id}:active\\`; }`",
+        "Export `templateCache` object with three methods: `get(id: string): CachedTemplateContent | undefined`, `set(id: string, content: CachedTemplateContent): void`, `evict(id: string): void` (calls `cache.delete(cacheKey(id))`)",
+        "Create `test/unit/template-cache.test.ts` using Vitest covering: (1) cache hit: set then get returns the stored content; (2) cache miss: get on unknown id returns undefined; (3) evict: set then evict then get returns undefined; (4) TTL expiry: set, advance fake time by 31 seconds using `vi.useFakeTimers()` + `vi.advanceTimersByTime(31_000)`, then get returns undefined",
+        "For TTL test: call `vi.useFakeTimers()` in beforeEach and `vi.useRealTimers()` in afterEach to avoid leaking fake timers into other tests",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Module-level singleton is the right pattern here — the cache is process-global, shared across all requests. The LRUCache TTL option uses milliseconds in lru-cache v10+. The `ttlAutopurge` option is not required — LRUCache evicts stale entries lazily on access, which is sufficient for this use case. For the TTL test: lru-cache v10+ uses Date.now() internally, and vi.useFakeTimers() replaces Date.now, so vi.advanceTimersByTime should cause the TTL check to see the entry as stale. If fake timers don't work with lru-cache's TTL, an alternative is to create a cache with `ttl: 100` (100ms) and use a real setTimeout in the test — but try fake timers first."
+    },
+    {
+      "id": "US-003",
+      "title": "repo.findActiveVersionContent + POST /templates/render route",
+      "description": "As a service consumer (Automation Engine, Nurturing Engine, Campaign Service), I want to POST a template_id and context object and receive the rendered template body so that I can pass pre-rendered content to the Messaging or Email Service.",
+      "acceptanceCriteria": [
+        "Add method `findActiveVersionContent(id: string): Promise<CachedTemplateContent | null>` to `TemplatesRepo` in `src/repositories/templates.ts`; import `CachedTemplateContent` from `../services/template-cache.js`",
+        "The method executes: `SELECT t.channel, tv.body_text, tv.subject, tv.body_html FROM platform_templates.templates t JOIN platform_templates.template_versions tv ON tv.template_id = t.id AND tv.version = t.active_version WHERE t.id = ? AND t.status != 'disabled' AND t.active_version IS NOT NULL` using Knex; return null if no row matched, otherwise return `{ channel, body_text, subject, body_html }`",
+        "Create `src/routes/render.ts` as a Fastify plugin (default export async function)",
+        "Inside the render plugin: call `app.addHook('preHandler', app.requireAuth())` — auth required, but NO `requireRole` guard (service-to-service callers use API keys; no marketing_staff check on render)",
+        "Register `POST /templates/render` with TypeBox body schema: `Type.Object({ template_id: Type.String({ format: 'uuid' }), context: Type.Record(Type.String(), Type.Unknown()) })` — missing or non-UUID template_id or missing context → 400",
+        "Handler: call `templateCache.get(template_id)`; if HIT use cached content; if MISS call `repo.findActiveVersionContent(template_id)`",
+        "If DB returns null (template not found, disabled, or no active_version) → return 404 `{ error: 'Template not found or not renderable' }`",
+        "On cache miss after successful DB fetch: call `templateCache.set(template_id, content)` before rendering",
+        "For SMS templates (`channel === 'sms'`): call `renderString(content.body_text ?? '', context as Record<string, unknown>)`; if result.ok is false → return 400 `{ error: result.error }`; log any warnings via `request.log.warn({ warnings: result.warnings, template_id }, 'merge tag resolution warnings')`; return 200 `{ channel: 'sms', body_text: result.value }`",
+        "For email templates (`channel === 'email'`): call renderString separately for subject, body_html, body_text; if ANY returns ok:false → return 400 `{ error: result.error }`; log all warnings combined; return 200 `{ channel: 'email', subject: renderedSubject, body_html: renderedHtml, body_text: renderedText }`",
+        "Import `renderString` from `../services/template-renderer.js` and `templateCache` from `../services/template-cache.js` in render.ts",
+        "Register the render plugin in `src/app.ts`: add `await app.register(import('./routes/render.js'))` AFTER the templates plugin registration",
+        "Unauthenticated request (no Authorization header, no API key) → 401",
+        "Request with valid service API key (`ak_...`) → proceeds (isServiceApiKey check in requireAuth handles this)",
+        "Request with valid JWT (any role) → proceeds",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The render plugin uses `app.requireAuth()` (not `app.requireRole`) as the preHandler — this is the same `requireAuth` function from `src/plugins/auth.ts` that allows both JWT tokens and service API keys (ak_ prefix). The templates plugin scope does NOT bleed into the render plugin because Fastify plugins are isolated by default. The `context` field in the request body is typed as `Record<string, unknown>` — pass it directly to `renderString`. For TypeBox, `Type.Record(Type.String(), Type.Unknown())` should accept any JSON object. Note: the `format: 'uuid'` constraint in TypeBox requires that Fastify has the ajv-formats plugin or equivalent — if UUID format validation fails typecheck or runtime, fall back to `Type.String()` and manually validate UUID format in the handler using a regex: `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i`."
+    },
+    {
+      "id": "US-004",
+      "title": "Wire cache eviction into activate and disable handlers",
+      "description": "As a developer, I want the cache to be eagerly evicted when a template is activated or disabled so that render calls reflect the new state immediately without waiting for TTL expiry.",
+      "acceptanceCriteria": [
+        "In `src/routes/templates.ts`: add `import { templateCache } from '../services/template-cache.js'` at the top of the file",
+        "In the `POST /templates/:id/activate` handler: after the successful `repo.activate(id)` call and before returning 200, add `templateCache.evict(params.id)`",
+        "In the `POST /templates/:id/disable` handler: after the successful `repo.disable(id)` call and before returning 200, add `templateCache.evict(params.id)`",
+        "The `POST /templates/:id/enable` handler: NO cache interaction — the spec explicitly states enable relies on TTL expiry; do not add evict or set calls",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "This story only touches `src/routes/templates.ts`. The evict call is placed AFTER the repo call succeeds and BEFORE the reply.send — so if the DB update fails (throws), the cache is not evicted (correct behavior). For activate: the cache entry for the OLD active_version content is evicted; the next render will fetch the new active_version from DB and populate a fresh cache entry. For disable: eviction causes the next render to go to DB, see status=disabled, return 404. The enable handler intentionally has no cache interaction per spec §5.2: 'Enable → neither evicts nor warms; relies on TTL expiry (delayed effect is not safety-critical for enable)'."
+    }
+  ]
+}

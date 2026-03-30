@@ -1,0 +1,52 @@
+# Ralph Progress Log
+Started: Mon Mar 30 2026
+---
+
+## 2026-03-30 - US-001
+- Added `activate(id)` repo method using `this.db.ref('current_version')` to set `active_version = current_version` in one UPDATE
+- Added POST /templates/:id/activate route with per-route `preHandler: app.requireRole('marketing_manager')`
+- Files changed: src/repositories/templates.ts, src/routes/templates.ts
+- **Learnings for future iterations:**
+  - `this.db.ref('column_name')` is the Knex way to reference another column in an UPDATE (avoids subquery)
+  - Per-route guard in Fastify: pass as route options `{ preHandler: app.requireRole('role') }` — not as a hook
+---
+
+## 2026-03-30 - US-002
+- Added `disable(id)` repo method: UPDATE status='disabled'
+- Added POST /templates/:id/disable route: 400 if already disabled, 200+warning if never activated (active_version null at findById time)
+- Files changed: src/repositories/templates.ts, src/routes/templates.ts
+- **Learnings:** Check the pre-disable row (from findById) for active_version; the disable UPDATE doesn't change active_version
+
+---
+
+## 2026-03-30 - US-003
+- Added `enable(id)` repo method: UPDATE status='active'
+- Added POST /templates/:id/enable route: 400 if no active_version, 400 if not disabled, else 200
+- Files changed: src/repositories/templates.ts, src/routes/templates.ts
+- **Learnings:** Guard order matters per PRD: active_version null first, then status !== disabled
+
+---
+
+## 2026-03-30 - US-004
+- Created test/unit/templates-lifecycle.test.ts: 12 HTTP-level tests using app.inject() via buildApp() with mocked TemplatesRepo
+- Mock approach: vi.mock with _mockRepo export for per-test spy configuration; beforeEach vi.clearAllMocks()
+- Files changed: test/unit/templates-lifecycle.test.ts (new)
+- **Learnings:**
+  - marketing_manager tokens must include BOTH ['marketing_staff', 'marketing_manager'] — plugin-level marketing_staff guard runs first
+  - vi.mock + exported _mockRepo pattern works well for constructor-injection repos
+
+---
+
+## Codebase Patterns
+- app.register(import('./routes/foo.js')) — dynamic import used to register Fastify route plugins (ESM, .js extension required)
+- Role guard at plugin level: app.addHook('preHandler', app.requireRole('role')) — all routes in the plugin inherit it
+- Per-route role guard: pass requireRole as preHandler in route options — app.post('/path', { preHandler: app.requireRole('marketing_manager') }, handler)
+- PG unique violation: catch (err as { code?: string }).code === '23505'
+- created_by pattern: isServiceApiKey(auth) → null; else verifyJwt(auth, app.jwtSecret) → claims.sub
+- Transaction with repo: pass `trx` (Knex.Transaction extends Knex) to `new TemplatesRepo(trx)` — repo methods work identically inside transactions
+- 'key in body' check vs undefined: use `'field' in body` for "was this field sent?" vs `body.field !== undefined` to handle explicit undefined safely
+- TypeBox body/query cast: `request.body as { ... }` — Fastify validates via AJV but generic type is still unknown
+- Project version content: destructure only { version, body_text, subject, body_html, body_unlayer } from version rows to strip db-internal fields
+- marketing_manager JWT tokens must include BOTH ['marketing_staff', 'marketing_manager'] — plugin-level marketing_staff guard runs first
+- `this.db.ref('column_name')` is the Knex way to reference another column in an UPDATE (avoids subquery)
+- Test app mock pattern: vi.mock + export _mockRepo from mock; beforeEach vi.clearAllMocks(); tokens need all required roles for all plugin-level guards
