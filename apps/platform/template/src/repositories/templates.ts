@@ -1,4 +1,5 @@
 import type { Knex } from 'knex';
+import type { CachedTemplateContent } from '../services/template-cache.js';
 
 const SCHEMA = 'platform_templates';
 const TEMPLATES = `${SCHEMA}.templates`;
@@ -163,6 +164,34 @@ export class TemplatesRepo {
       })
       .returning('*')) as TemplateRow[];
     return rows[0] ?? null;
+  }
+
+  async findActiveVersionContent(id: string): Promise<CachedTemplateContent | null> {
+    const row = (await this.db(TEMPLATES)
+      .join(
+        TEMPLATE_VERSIONS,
+        function () {
+          this.on(`${TEMPLATE_VERSIONS}.template_id`, '=', `${TEMPLATES}.id`).andOn(
+            `${TEMPLATE_VERSIONS}.version`,
+            '=',
+            `${TEMPLATES}.active_version`,
+          );
+        },
+      )
+      .where(`${TEMPLATES}.id`, id)
+      .whereNot(`${TEMPLATES}.status`, 'disabled')
+      .whereNotNull(`${TEMPLATES}.active_version`)
+      .select(
+        `${TEMPLATES}.channel`,
+        `${TEMPLATE_VERSIONS}.body_text`,
+        `${TEMPLATE_VERSIONS}.subject`,
+        `${TEMPLATE_VERSIONS}.body_html`,
+      )
+      .first()) as
+      | { channel: 'sms' | 'email'; body_text: string | null; subject: string | null; body_html: string | null }
+      | undefined;
+
+    return row ?? null;
   }
 
   async updateTemplateGroup(

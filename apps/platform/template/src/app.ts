@@ -21,6 +21,7 @@ export async function buildApp(db: Knex, jwtSecret: string): Promise<FastifyInst
   });
 
   await app.register(import('./routes/templates.js'));
+  await app.register(import('./routes/render.js'));
 
   return app;
 }
