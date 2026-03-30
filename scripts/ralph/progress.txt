@@ -1,3 +1,16 @@
+## 2026-03-30 - US-006
+- What was implemented: Publisher service that writes to DB and fans out to Redis pub/sub with BullMQ fallback
+- Files changed:
+  - apps/platform/notification/src/services/publisher.ts (new file)
+  - apps/platform/notification/test/unit/publisher.test.ts (new file, 7 tests)
+- **Learnings for future iterations:**
+  - Publisher constructs BullMQ Queue internally with `connection: redis` — the same ioredis instance is passed to BullMQ
+  - Redis publish key format: `notif:channel:{channel}`; BullMQ queue name: `publish-retry`
+  - DB insert uses `randomUUID()` from Node crypto for the notification ID; `expires_at = now() + 7 days`
+  - Redis failure is silently swallowed — enqueue BullMQ job and return `{ notification_id }` normally; DB insert is never rolled back
+  - Mocking BullMQ in vitest: `vi.mock('bullmq', ...)` with `Queue` as a constructor mock; grab `Queue.mock.results[n].value.add` to assert on job enqueuing
+---
+
 ## 2026-03-30 - US-005
 - What was implemented: Per-channel sliding-window rate limiter using Redis Lua script
 - Files changed:
