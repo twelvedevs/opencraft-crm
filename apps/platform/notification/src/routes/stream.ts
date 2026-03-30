@@ -76,6 +76,9 @@ export async function streamRoute(
       Connection: 'keep-alive',
       'X-Connection-ID': connectionId,
     });
+    // Flush headers immediately so the client receives them before any event data.
+    // Without this, Node.js HTTP buffers headers and only sends them on the first write().
+    reply.raw.flushHeaders();
 
     // Replay missed notifications if Last-Event-ID is present
     const lastEventId = request.headers['last-event-id'];
