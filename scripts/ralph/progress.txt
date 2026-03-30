@@ -1,3 +1,29 @@
+## 2026-03-30 - US-014
+- What was implemented: Full integration test suite (9 test files + helpers) covering publish→SSE fan-out, read-sync, read-all, history, replay, auth, rate-limit, redis-failure, and cleanup. Also added vitest.config.ts (singleFork sequential execution) and fixed stream.ts to call reply.raw.flushHeaders() after writeHead.
+- Files changed:
+  - apps/platform/notification/test/integration/helpers.ts (new — TestContext factory, SseCollector, JWT helpers, schema reset utilities)
+  - apps/platform/notification/test/integration/publish-stream.test.ts (new)
+  - apps/platform/notification/test/integration/read-sync.test.ts (new)
+  - apps/platform/notification/test/integration/read-all.test.ts (new)
+  - apps/platform/notification/test/integration/history.test.ts (new)
+  - apps/platform/notification/test/integration/replay.test.ts (new)
+  - apps/platform/notification/test/integration/auth.test.ts (new)
+  - apps/platform/notification/test/integration/rate-limit.test.ts (new)
+  - apps/platform/notification/test/integration/redis-failure.test.ts (new)
+  - apps/platform/notification/test/integration/cleanup.test.ts (new)
+  - apps/platform/notification/vitest.config.ts (new — singleFork: true for sequential test execution)
+  - apps/platform/notification/src/routes/stream.ts (added reply.raw.flushHeaders() after writeHead)
+- **Learnings for future iterations:**
+  - SSE route MUST call `reply.raw.flushHeaders()` after `reply.raw.writeHead()` — without it, Node.js HTTP buffers headers and never sends them until the first write(); SSE clients hang indefinitely waiting for headers, causing test timeouts
+  - `vitest.config.ts` with `pool: 'forks', poolOptions.forks.singleFork: true` is required for integration tests that share a Postgres schema — parallel execution causes races (one file drops the schema while another is using it)
+  - Replayed notifications (via findMissed/Last-Event-ID) use field `id` (raw NotificationRow), NOT `notification_id` (which is the Redis pub/sub payload field name); tests must distinguish these two formats
+  - `reply.raw.flushHeaders()` sends headers immediately without waiting for a write(); equivalent to `writeHead() + flush` in one step
+  - Use `resetSchema(db)` in beforeAll (drops + recreates) and `truncateTables(db)` in beforeEach — this gives each test file a clean slate without requiring per-file migration management
+  - Rate limiter tests: pre-seed the Redis counter with `redis.set(rateKey, '100', 'EX', 60)` to simulate a full window, then make the 101st request via inject — much faster than making 101 actual requests
+  - SseCollector must connect via REAL HTTP (not app.inject) since SSE uses reply.hijack() which writes to the raw TCP socket; inject uses a mock socket that doesn't support streaming
+  - For redis-failure tests, `vi.spyOn(redis, 'publish').mockRejectedValueOnce(err)` simulates Redis PUBLISH failure while still allowing BullMQ Queue operations (ZADD/XADD) to work on the same Redis connection
+---
+
 ## 2026-03-30 - US-013
 - What was implemented: BullMQ cleanup worker that runs daily at 2:00 AM UTC to delete expired notifications; wired into index.ts alongside the publish-retry worker
 - Files changed:
@@ -151,6 +177,10 @@
 - config.ts uses requireEnv() helper that throws on missing required vars; PORT has default 3006
 - BullMQ and ioredis are separate dependencies (ioredis used for pub/sub, BullMQ for job queues)
 - Services run on port 3006 (notification), matches existing port allocation pattern
+- SSE routes MUST call `reply.raw.flushHeaders()` after `reply.raw.writeHead()` to send headers before first write
+- Integration tests: use `vitest.config.ts` with `singleFork: true` when tests share a real Postgres schema
+- Integration test pattern: `resetSchema(db)` in beforeAll, `truncateTables(db)` in beforeEach
+- SseCollector connects via REAL HTTP (not app.inject); app.inject can still be used for all non-streaming requests
 
 ---
 

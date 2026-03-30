@@ -257,7 +257,7 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Use @ortho/testing helpers if available, otherwise local test fixtures. Each test file runs migrations before suite and truncates tables between tests."
     }
   ]
