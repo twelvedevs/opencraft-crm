@@ -140,6 +140,23 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
     },
   );
 
+  app.post(
+    '/templates/:id/activate',
+    { preHandler: app.requireRole('marketing_manager') },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const repo = new TemplatesRepo(app.db);
+
+      const template = await repo.findById(id);
+      if (!template) {
+        return reply.status(404).send({ error: 'Not found' });
+      }
+
+      const updated = await repo.activate(id);
+      return reply.status(200).send(updated);
+    },
+  );
+
   app.patch(
     '/templates/:id',
     {
