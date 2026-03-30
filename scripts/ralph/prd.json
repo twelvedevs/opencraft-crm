@@ -182,7 +182,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "User JWT validated for all /notifications routes. X-Total-Count: 0 when unread filter not applied."
     },
     {

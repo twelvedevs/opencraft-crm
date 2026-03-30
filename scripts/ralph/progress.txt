@@ -1,3 +1,17 @@
+## 2026-03-30 - US-010
+- What was implemented: GET /notifications history endpoint with user JWT auth, channel pattern/access validation, query param parsing, and NotificationsRepo.findHistory integration
+- Files changed:
+  - apps/platform/notification/src/routes/notifications.ts (new file)
+  - apps/platform/notification/src/index.ts (registered notificationsRoute)
+- **Learnings for future iterations:**
+  - `X-Total-Count` header set via `reply.header('X-Total-Count', String(totalUnread))` — comes from `findHistory.totalUnread` (always reflects full unread count regardless of pagination)
+  - Notification rows mapped from `id` → `notification_id` for the API response to match spec field names
+  - `unread` boolean query param: check `=== 'true' || === '1'` since query params are always strings
+  - `limit` query param: parseInt + clamp to MAX_LIMIT (100), default 50
+  - `parseUserJwt` helper returns a Promise or null (not async) — avoid double-awaiting; better to inline the jwtVerify call directly in the handler
+  - notificationsRoute registered in index.ts guarded by `if (repo)` — same pattern as streamRoute
+---
+
 ## 2026-03-30 - US-009
 - What was implemented: GET /notifications/stream SSE route with user JWT auth, channel validation, missed notification replay, SseManager registration, and 30s keepalive
 - Files changed:
