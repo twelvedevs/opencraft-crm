@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import { TemplatesRepo, type TemplateRow } from '../repositories/templates.js';
 import { isServiceApiKey, verifyJwt } from '../plugins/auth.js';
+import { templateCache } from '../services/template-cache.js';
 
 export default async function templateRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', app.requireRole('marketing_staff'));
@@ -183,6 +184,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
 
       const neverActivated = template.active_version === null;
       const updated = await repo.disable(id);
+      templateCache.evict(id);
 
       if (neverActivated) {
         return reply.status(200).send({ ...updated, warning: 'Template has no active version; it was never activated' });
@@ -204,6 +206,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
       }
 
       const updated = await repo.activate(id);
+      templateCache.evict(id);
       return reply.status(200).send(updated);
     },
   );
