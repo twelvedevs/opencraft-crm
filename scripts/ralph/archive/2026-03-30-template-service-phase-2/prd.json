@@ -1,0 +1,64 @@
+{
+  "project": "Ortho CRM — Template Service",
+  "branchName": "ralph/template-service-phase-2",
+  "description": "Template Service Phase 2 — Template CRUD routes: POST /templates, GET /templates (paginated list with filters), GET /templates/:id (with draft + active content), PATCH /templates/:id (three-branch draft versioning logic, content-length validation, channel field filtering). marketing_staff role guard applied at plugin level.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "CRUD routes plugin scaffold + POST /templates",
+      "description": "As a marketing staff member, I want to create a new template so that it can be used in messaging workflows.",
+      "acceptanceCriteria": [
+        "Create src/routes/templates.ts exporting async function templateRoutes(app: FastifyInstance): Promise<void> as default export — a Fastify plugin",
+        "At plugin level, register preHandler hook: app.addHook('preHandler', app.requireRole('marketing_staff')) — all routes in this file inherit this guard",
+        "POST /templates: TypeBox body schema with required fields: name (Type.String()) and channel (Type.Union([Type.Literal('sms'), Type.Literal('email')])); Fastify schema validation returns 400 on missing/invalid fields",
+        "POST /templates handler: determine created_by — if isServiceApiKey(request.headers.authorization) then created_by = null; else call verifyJwt(request.headers.authorization, app.jwtSecret) and use claims.sub",
+        "POST /templates handler: instantiate TemplatesRepo(app.db) and call repo.create({ name, channel, created_by })",
+        "On pg unique violation (error code '23505'): return reply.status(409).send({ error: 'Template name already exists' })",
+        "On success: return reply.status(201).send(templateRow)",
+        "Register templateRoutes plugin in app.ts via app.register(import('./routes/templates.js')) after the decorator setup",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "isServiceApiKey and verifyJwt are exported from src/plugins/auth.ts. app.db and app.jwtSecret are decorated on the FastifyInstance (see src/types.d.ts). app.requireRole is decorated and returns a preHandler function. Catch pg errors by checking (err as NodeJS.ErrnoException & { code?: string }).code === '23505' — or cast to any and check .code."
+    },
+    {
+      "id": "US-002",
+      "title": "GET /templates (paginated list) and GET /templates/:id",
+      "description": "As a marketing staff member, I want to list and retrieve templates so that I can view and manage them.",
+      "acceptanceCriteria": [
+        "GET /templates: TypeBox query schema (all fields optional): channel (Type.Optional(Type.Union([Type.Literal('sms'), Type.Literal('email')]))), status (Type.Optional(Type.Union([Type.Literal('draft'), Type.Literal('active'), Type.Literal('disabled')]))), sort (Type.Optional(Type.Union([Type.Literal('created_at'), Type.Literal('updated_at')])) — default 'updated_at'), order (Type.Optional(Type.Union([Type.Literal('asc'), Type.Literal('desc')])) — default 'desc'), limit (Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 }))), offset (Type.Optional(Type.Integer({ minimum: 0, default: 0 })))",
+        "GET /templates handler: call repo.list({ channel, status, sort: sort ?? 'updated_at', order: order ?? 'desc', limit: limit ?? 20, offset: offset ?? 0 })",
+        "GET /templates returns 200 { data: TemplateRow[], total: number, limit: number, offset: number } where limit and offset are the resolved values used in the query",
+        "GET /templates/:id: call repo.findById(id); return 404 { error: 'Not found' } if null",
+        "GET /templates/:id: fetch draft content via repo.findVersionContent(template.id, template.current_version)",
+        "GET /templates/:id: fetch active content via repo.findVersionContent(template.id, template.active_version!) only when template.active_version !== null; set active_content = null otherwise",
+        "GET /templates/:id returns 200 with all TemplateRow fields plus: draft_content: { version, body_text, subject, body_html, body_unlayer } and active_content: { version, body_text, subject, body_html, body_unlayer } | null — strip id, template_id, created_by, created_at from version rows",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "For GET /templates/:id response shape, project only the content fields from TemplateVersionRow (version, body_text, subject, body_html, body_unlayer). Fastify coerces query string integers automatically via AJV when Type.Integer() is used in the schema. When limit/offset defaults are set in the TypeBox schema with 'default' keyword, Fastify populates them — but also apply fallback ?? in the handler for safety."
+    },
+    {
+      "id": "US-003",
+      "title": "PATCH /templates/:id — draft versioning, content validation, channel filtering",
+      "description": "As a marketing staff member, I want to edit a template's draft content so that I can update messaging without disrupting active automations or in-flight sequences.",
+      "acceptanceCriteria": [
+        "PATCH /templates/:id: TypeBox body schema with all fields optional: name (Type.Optional(Type.String())), body_text (Type.Optional(Type.String())), subject (Type.Optional(Type.String())), body_html (Type.Optional(Type.String())), body_unlayer (Type.Optional(Type.Object({}, { additionalProperties: true })))",
+        "Fetch template by id via repo.findById(id); return 404 { error: 'Not found' } if null",
+        "Channel-immutable field filtering (applied before length validation): for SMS templates, drop subject, body_html, body_unlayer from the content payload silently — they are not stored and no error is returned; for email templates, accept all content fields",
+        "Content-length validation (applied after channel filtering, before any DB write): name > 255 chars → 400 { error: 'name exceeds 255 character limit' }; body_text for SMS > 1600 chars → 400 { error: 'body_text exceeds 1600 character limit for SMS templates' }; body_text for email > 10000 chars → 400 { error: 'body_text exceeds 10000 character limit for email templates' }; subject > 500 chars → 400 { error: 'subject exceeds 500 character limit' }; body_html > 500000 chars → 400 { error: 'body_html exceeds 500000 character limit' }",
+        "Three-branch versioning for content fields (body_text, subject, body_html, body_unlayer) — only fields present in the filtered request body are included: Branch 1: template.active_version === null → call repo.updateVersionInPlace(id, template.current_version, contentFields); Branch 2: template.current_version === template.active_version → wrap in transaction: call repo.insertNewVersion({ template_id: id, version: template.current_version + 1, ...contentFields, created_by }) then repo.updateTemplateGroup(id, { current_version: template.current_version + 1, ...(name !== undefined ? { name } : {}) }); Branch 3: template.current_version > template.active_version → call repo.updateVersionInPlace(id, template.current_version, contentFields)",
+        "For Branches 1 and 3: after the version update, call repo.updateTemplateGroup(id, { ...(name !== undefined ? { name } : {}) }) to refresh updated_at and optionally update the name (updateTemplateGroup always refreshes updated_at via db.fn.now())",
+        "Disabled templates: PATCH is allowed; do not auto re-enable; do not modify status field",
+        "On pg unique violation (error code '23505') from name update: return 409 { error: 'Template name already exists' }",
+        "Response 200: fetch the updated template group row (returned by updateTemplateGroup) and the current draft version via repo.findVersionContent(id, updatedTemplate.current_version); return { ...updatedTemplate, draft_content: { version, body_text, subject, body_html, body_unlayer } }",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Extract created_by for new version rows same pattern as POST: isServiceApiKey check → null; else verifyJwt → claims.sub. For Branch 2, the transaction ensures the new version row and current_version increment are atomic — use app.db.transaction(async (trx) => { await trx(...).insert(...); await trx(...).update(...) }) or pass db.transaction to the repo methods. Only include content fields in the version payload that are explicitly present in the request body (undefined means 'not provided' — use 'key in body' check, not just falsiness). Note: if ONLY name is patched with no content fields, still call updateTemplateGroup but skip the version operation."
+    }
+  ]
+}

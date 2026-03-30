@@ -1,50 +1,14 @@
 # Ralph Progress Log
-Started: Mon Mar 30 19:59:24 +03 2026
+Started: Mon Mar 30 2026
 ---
 
 ## Codebase Patterns
 - app.register(import('./routes/foo.js')) — dynamic import used to register Fastify route plugins (ESM, .js extension required)
 - Role guard at plugin level: app.addHook('preHandler', app.requireRole('role')) — all routes in the plugin inherit it
+- Per-route role guard: pass requireRole as preHandler in route options — app.post('/path', { preHandler: app.requireRole('marketing_manager') }, handler)
 - PG unique violation: catch (err as { code?: string }).code === '23505'
 - created_by pattern: isServiceApiKey(auth) → null; else verifyJwt(auth, app.jwtSecret) → claims.sub
 - Transaction with repo: pass `trx` (Knex.Transaction extends Knex) to `new TemplatesRepo(trx)` — repo methods work identically inside transactions
 - 'key in body' check vs undefined: use `'field' in body` for "was this field sent?" vs `body.field !== undefined` to handle explicit undefined safely
-
-## 2026-03-30 20:00 - US-001
-- Implemented templateRoutes Fastify plugin at src/routes/templates.ts
-- Added POST /templates with TypeBox schema, marketing_staff role guard, created_by logic, pg 23505 handling
-- Registered plugin in app.ts via app.register(import('./routes/templates.js'))
-- Files changed: src/routes/templates.ts (new), src/app.ts
-- **Learnings for future iterations:**
-  - Dynamic import for register: `app.register(import('./routes/templates.js'))` — Fastify 5 supports this directly
-  - TypeBox body cast: `request.body as { name: string; channel: 'sms' | 'email' }` needed since Fastify body is `unknown` by default
-  - Role guard preHandler placed at plugin top before route definitions; all routes inherit it automatically
----
-
-## 2026-03-30 20:03 - US-002
-- Added GET /templates (paginated list) and GET /templates/:id to src/routes/templates.ts
-- GET /templates: TypeBox querystring schema with optional channel/status/sort/order/limit/offset; calls repo.list(); returns { data, total, limit, offset }
-- GET /templates/:id: fetches template row + draft content (always) + active content (only if active_version !== null); projects only { version, body_text, subject, body_html, body_unlayer } from version rows
-- Also fixed prd.json: US-001 passes was incorrectly left false despite prior implementation; updated both US-001 and US-002 to passes: true
-- Files changed: src/routes/templates.ts, scripts/ralph/prd.json
-- **Learnings for future iterations:**
-  - query params cast: `request.query as { ... }` pattern, same as body cast — Fastify AJV validates/coerces but type is still unknown
-  - Project version content to strip db-internal fields (id, template_id, created_by, created_at) by destructuring only the needed fields
-  - Fastify GET route with no schema: pass `{}` as second arg — `app.get('/path', {}, handler)`
----
-
-## 2026-03-30 20:05 - US-003
-- Added PATCH /templates/:id to src/routes/templates.ts
-- Channel-immutable filtering: SMS silently drops subject/body_html/body_unlayer from content payload
-- Content-length validation: name ≤255, SMS body_text ≤1600, email body_text ≤10000, subject ≤500, body_html ≤500000
-- Three-branch versioning: Branch 1 (no active_version) → updateVersionInPlace; Branch 2 (draft==active) → transaction: insertNewVersion + updateTemplateGroup with new current_version; Branch 3 (draft>active) → updateVersionInPlace
-- Branches 1&3 call updateTemplateGroup after for updated_at + optional name; Branch 2 does both atomically in transaction, then re-fetches
-- 409 on pg unique violation ('23505') from name update
-- Response 200: updated template + draft_content projected fields
-- Added `TemplateRow` type import from repositories
-- Files changed: src/routes/templates.ts, scripts/ralph/prd.json, scripts/ralph/progress.txt
-- **Learnings for future iterations:**
-  - Pass `trx` directly to `new TemplatesRepo(trx)` for transactional repo operations — cleaner than raw table strings
-  - Use `'field' in body` not `body.field !== undefined` to detect whether a field was actually sent in the request
-  - Branch 2 re-fetches template after transaction since `updateTemplateGroup` runs inside trx scope; `repo.findById` after transaction gets the committed row
----
+- TypeBox body/query cast: `request.body as { ... }` — Fastify validates via AJV but generic type is still unknown
+- Project version content: destructure only { version, body_text, subject, body_html, body_unlayer } from version rows to strip db-internal fields
