@@ -1,3 +1,16 @@
+## 2026-03-30 - US-008
+- What was implemented: POST /notifications/publish route with HMAC JWT auth, TypeBox body validation, channel validation, rate limiting, and publisher wiring
+- Files changed:
+  - apps/platform/notification/src/routes/publish.ts (new file)
+  - apps/platform/notification/src/index.ts (updated to wire Publisher, RateLimiter, SseManager, register publishRoute)
+- **Learnings for future iterations:**
+  - `jose` import: `import { jwtVerify } from 'jose'`; secret key: `createSecretKey(Buffer.from(secret, 'utf-8'))` from Node crypto; `jwtVerify(token, secretKey, { algorithms: ['HS256'] })` for HMAC HS256
+  - `ioredis` must be imported as named export: `import { Redis } from 'ioredis'` — default import (`import Redis from 'ioredis'`) causes TS2351 "no construct signatures" error
+  - Route registration pattern: export `async function routeName(fastify: FastifyInstance, opts: RouteOptions)` and call `app.register(routeName, opts)` in index.ts
+  - TypeBox payload object with `additionalProperties: true`: `Type.Object({}, { additionalProperties: true })` — necessary for open-ended payload objects
+  - In index.ts, conditional route registration (when `NODE_ENV !== 'test'`) keeps unit tests simple since they import services directly, not index.ts
+---
+
 ## 2026-03-30 - US-007
 - What was implemented: SseManager class — in-memory connection maps with Redis PSUBSCRIBE fan-out, per-user connection eviction, read-sync routing, and keepalive support
 - Files changed:

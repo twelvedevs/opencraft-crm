@@ -145,7 +145,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Service-to-service JWT validated with jose (HMAC HS256). Not exposed publicly — internal VPC only."
     },
     {
