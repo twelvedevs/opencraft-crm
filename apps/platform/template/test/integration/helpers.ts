@@ -18,7 +18,8 @@ export async function makeStaffToken(sub = 'user-staff'): Promise<string> {
 
 export async function makeManagerToken(sub = 'user-manager'): Promise<string> {
   const key = new TextEncoder().encode(TEST_JWT_SECRET);
-  return new SignJWT({ sub, roles: ['marketing_manager'] })
+  // Includes marketing_staff so the global requireRole('marketing_staff') preHandler passes
+  return new SignJWT({ sub, roles: ['marketing_staff', 'marketing_manager'] })
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime('1h')
     .sign(key);
