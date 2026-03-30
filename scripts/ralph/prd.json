@@ -128,7 +128,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "In-memory maps only. Redis PSUBSCRIBE pattern: 'notif:*'. SSE events use \\n\\n line endings."
     },
     {

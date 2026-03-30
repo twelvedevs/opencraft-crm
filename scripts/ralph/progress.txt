@@ -1,3 +1,19 @@
+## 2026-03-30 - US-007
+- What was implemented: SseManager class — in-memory connection maps with Redis PSUBSCRIBE fan-out, per-user connection eviction, read-sync routing, and keepalive support
+- Files changed:
+  - apps/platform/notification/src/services/sse-manager.ts (new file)
+  - apps/platform/notification/test/unit/sse-manager.test.ts (new file, 15 tests)
+- **Learnings for future iterations:**
+  - `redis.psubscribe('notif:*', cb)` + `redis.on('pmessage', handler)` is the ioredis pattern for pattern subscriptions; handler receives `(pattern, channel, message)`
+  - Fan-out to `notif:channel:{channel}` uses `channelMap: Map<string, Set<SseConnection>>`; the channel name is `redisChannel.slice('notif:channel:'.length)` — preserves colons in the channel string (e.g. `location:loc1:sms`)
+  - Read-sync routing uses regex `/^notif:user:(.+):reads$/` to extract userId from Redis channel name
+  - `event: read-all` vs `event: read` distinguished by presence of `notification_ids` key in the parsed message
+  - Originating connection excluded by comparing `conn.connectionId === data.originating_connection_id`
+  - Per-user connection limit: userMap stores ordered array (insertion order = oldest first); on 11th registration, send `event: connection-limit` + `reply.raw.end()` + deregister oldest BEFORE registering new
+  - SSE write format: `event: {name}\ndata: {json}\n\n`; keepalive is `: keepalive\n\n` (comment line)
+  - Unit test pattern for PSUBSCRIBE: capture `pmessage` handler via `redis.on` mock; expose as `triggerRedis(pattern, channel, message)` helper
+---
+
 ## 2026-03-30 - US-006
 - What was implemented: Publisher service that writes to DB and fans out to Redis pub/sub with BullMQ fallback
 - Files changed:
