@@ -10,6 +10,18 @@
   - `onConflict(['user_id', 'notification_id']).ignore()` for idempotent upserts in notification_reads
 ---
 
+## 2026-03-30 - US-004
+- What was implemented: Channel validator service with pattern enforcement and JWT-based access control
+- Files changed:
+  - apps/platform/notification/src/services/channel-validator.ts (new file)
+  - apps/platform/notification/test/unit/channel-validator.test.ts (new file, 17 tests)
+- **Learnings for future iterations:**
+  - Accepted patterns: `location:{id}:{type}`, `user:{id}:{type}`, `global:system` — all others rejected
+  - Empty segment detection: split on `:` and check `parts.some(p => p === '')` catches trailing colons, double colons, etc.
+  - `global:system` is exact-match only — `global:other` and `global:system:extra` are both invalid
+  - `validateChannelAccess` checks `locations` array for `location:*`, `sub` equality for `user:*`, and always returns true for `global:*`
+---
+
 ## Codebase Patterns
 - Platform services use ESM (`"type": "module"`) with NodeNext module resolution — always use `.js` extensions in imports
 - tsconfig follows automation service pattern: target ES2022, NodeNext, strict, outDir dist/, rootDir src/
