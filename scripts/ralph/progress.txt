@@ -1,3 +1,16 @@
+## 2026-03-30 - US-004
+- Implemented auth plugin with JWT verification and RBAC role guards
+- Files changed: src/plugins/auth.ts (new), src/app.ts (added requireAuth/requireRole decorators), src/types.d.ts (added decorator types), test/unit/auth.test.ts (new, 14 tests)
+- **Learnings for future iterations:**
+  - `verifyJwt` and `requireRole`/`requireAuth` throw plain objects `{ statusCode, message }` (not httpErrors) — preHandlers catch and call `reply.status().send()` directly
+  - Service API keys check: `isServiceApiKey` returns true when token after `Bearer ` starts with `ak_`
+  - `requireRole` never accepts API keys — always calls `verifyJwt`
+  - `requireAuth` accepts either valid user JWT OR service API key
+  - `app.decorate('requireAuth', () => ...)` binds jwtSecret so routes call `app.requireAuth()` without passing secret
+  - Test pattern: use `SignJWT` from `jose` to sign tokens; mock request/reply with minimal objects; check `reply._status` to verify handler behavior
+  - vitest imports work with `.js` extension in ESM mode even for `.ts` source files
+---
+
 ## Codebase Patterns
 - Email service uses `src/env.ts`; template service uses `src/config.ts` per PRD spec
 - All services use TypeBox `Type.Object` + `Value.Check` for env validation; extract first error path for message

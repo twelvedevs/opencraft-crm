@@ -78,7 +78,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "@ortho/auth-middleware does not exist as a package — implement auth inline using jose. JWT claims include sub (user ID) and roles (string[]). Service API keys start with 'Bearer ak_'. Both requireAuth and requireRole throw using @fastify/sensible httpErrors for consistent error shapes."
     }
   ]
