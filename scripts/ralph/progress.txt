@@ -1,14 +1,3 @@
 # Ralph Progress Log
 Started: Mon Mar 30 2026
 ---
-
-## Codebase Patterns
-- app.register(import('./routes/foo.js')) — dynamic import used to register Fastify route plugins (ESM, .js extension required)
-- Role guard at plugin level: app.addHook('preHandler', app.requireRole('role')) — all routes in the plugin inherit it
-- Per-route role guard: pass requireRole as preHandler in route options — app.post('/path', { preHandler: app.requireRole('marketing_manager') }, handler)
-- PG unique violation: catch (err as { code?: string }).code === '23505'
-- created_by pattern: isServiceApiKey(auth) → null; else verifyJwt(auth, app.jwtSecret) → claims.sub
-- Transaction with repo: pass `trx` (Knex.Transaction extends Knex) to `new TemplatesRepo(trx)` — repo methods work identically inside transactions
-- 'key in body' check vs undefined: use `'field' in body` for "was this field sent?" vs `body.field !== undefined` to handle explicit undefined safely
-- TypeBox body/query cast: `request.body as { ... }` — Fastify validates via AJV but generic type is still unknown
-- Project version content: destructure only { version, body_text, subject, body_html, body_unlayer } from version rows to strip db-internal fields

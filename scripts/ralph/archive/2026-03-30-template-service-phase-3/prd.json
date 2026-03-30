@@ -1,0 +1,86 @@
+{
+  "project": "Ortho CRM — Template Service",
+  "branchName": "ralph/template-service-phase-3",
+  "description": "Template Service Phase 3 — Activation lifecycle routes: POST /templates/:id/activate (promote current_version → active_version), POST /templates/:id/disable (set status=disabled, warning on never-activated, 400 if already disabled), POST /templates/:id/enable (re-enable, 400 guards). marketing_manager role guard per route. Unit tests for all lifecycle state transitions.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "POST /templates/:id/activate — promote draft to active",
+      "description": "As a marketing manager, I want to activate the current draft version of a template so that it becomes the content rendered by the engine.",
+      "acceptanceCriteria": [
+        "Add repo method `activate(id: string): Promise<TemplateRow | null>` to TemplatesRepo: executes `UPDATE templates SET active_version = current_version, status = 'active', updated_at = now() WHERE id = ? RETURNING *`; returns the updated row or null if no row matched",
+        "Add POST /templates/:id/activate route to src/routes/templates.ts with per-route preHandler: app.requireRole('marketing_manager') — this is IN ADDITION to the plugin-level marketing_staff guard; the per-route guard is added in route options: `{ preHandler: app.requireRole('marketing_manager') }`",
+        "Handler: call repo.findById(params.id); if null → return 404 { error: 'Not found' }",
+        "Handler: call repo.activate(params.id); return 200 with the updated template row",
+        "Unauthenticated request to this route → 401 (inherited from plugin-level auth guard)",
+        "Request with marketing_staff role (not manager) → 403 { error: 'Forbidden' }",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "The per-route requireRole guard for marketing_manager is applied via route options `{ preHandler: app.requireRole('marketing_manager') }`. The plugin-level marketing_staff guard already runs for all routes in the plugin — the per-route guard runs additionally and will short-circuit with 403 if the role is insufficient. The activate repo method sets active_version = current_version (whatever current_version is at call time) and status = 'active'. No cache eviction yet — that is Phase 4."
+    },
+    {
+      "id": "US-002",
+      "title": "POST /templates/:id/disable — disable template with warning for never-activated",
+      "description": "As a marketing manager, I want to disable a template so that it stops rendering immediately and cannot be used by automations or sequences.",
+      "acceptanceCriteria": [
+        "Add repo method `disable(id: string): Promise<TemplateRow | null>` to TemplatesRepo: executes `UPDATE templates SET status = 'disabled', updated_at = now() WHERE id = ? RETURNING *`; returns the updated row or null if no row matched",
+        "Add POST /templates/:id/disable route to src/routes/templates.ts with per-route preHandler: app.requireRole('marketing_manager')",
+        "Handler: call repo.findById(params.id); if null → return 404 { error: 'Not found' }",
+        "Handler: if template.status === 'disabled' → return 400 { error: 'Template is already disabled' }",
+        "Handler: call repo.disable(params.id) to set status = 'disabled'",
+        "If template.active_version was null (template was never activated) → return 200 with updated row AND additional field: `warning: 'Template has no active version; it was never activated'`",
+        "If template.active_version was not null → return 200 with updated row only (no warning field)",
+        "Request with marketing_staff role (not manager) → 403 { error: 'Forbidden' }",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The warning field is only included in the response when active_version IS NULL at the time of the call — check the row fetched by findById (before the disable update) since active_version does not change during disable. Construct the response as: const row = await repo.disable(id); return active_version === null ? { ...row, warning: '...' } : row. No cache eviction yet — Phase 4."
+    },
+    {
+      "id": "US-003",
+      "title": "POST /templates/:id/enable — re-enable a disabled template",
+      "description": "As a marketing manager, I want to re-enable a disabled template so that it can be rendered again by automations and sequences.",
+      "acceptanceCriteria": [
+        "Add repo method `enable(id: string): Promise<TemplateRow | null>` to TemplatesRepo: executes `UPDATE templates SET status = 'active', updated_at = now() WHERE id = ? RETURNING *`; returns the updated row or null if no row matched",
+        "Add POST /templates/:id/enable route to src/routes/templates.ts with per-route preHandler: app.requireRole('marketing_manager')",
+        "Handler: call repo.findById(params.id); if null → return 404 { error: 'Not found' }",
+        "Handler: if template.active_version === null → return 400 { error: 'Template has no active version' }",
+        "Handler: if template.status !== 'disabled' → return 400 { error: 'Template is not disabled' }",
+        "Handler: call repo.enable(params.id); return 200 with the updated template row",
+        "Request with marketing_staff role (not manager) → 403 { error: 'Forbidden' }",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Guard order matters: check active_version === null first, then check status !== 'disabled'. Both checks use the template fetched by findById. The enable method sets status = 'active' — same as activate does but without changing active_version. No cache warming — Phase 4 spec says enable relies on TTL expiry, so no cache interaction needed here."
+    },
+    {
+      "id": "US-004",
+      "title": "Unit tests for activation lifecycle state transitions",
+      "description": "As a developer, I want unit tests covering all lifecycle state transition rules so that regressions in activate/disable/enable logic are caught immediately.",
+      "acceptanceCriteria": [
+        "Create test/unit/templates-lifecycle.test.ts using Vitest",
+        "Test: POST /templates/:id/activate on a draft template (active_version null) → response status 200, active_version equals current_version, status equals 'active'",
+        "Test: POST /templates/:id/activate on an already-active template with pending draft (current_version > active_version) → response status 200, active_version incremented to match current_version, status remains 'active'",
+        "Test: POST /templates/:id/disable on an active template → response status 200, status equals 'disabled', no warning field",
+        "Test: POST /templates/:id/disable on a draft template (active_version null) → response status 200, status equals 'disabled', warning field present with expected message",
+        "Test: POST /templates/:id/disable on already-disabled template → response status 400, error equals 'Template is already disabled'",
+        "Test: POST /templates/:id/enable on a disabled template with active_version set → response status 200, status equals 'active'",
+        "Test: POST /templates/:id/enable on a template with active_version null → response status 400, error equals 'Template has no active version'",
+        "Test: POST /templates/:id/enable on a non-disabled template (draft or active) → response status 400, error equals 'Template is not disabled'",
+        "Test: marketing_staff role calling activate → response status 403",
+        "Test: marketing_staff role calling disable → response status 403",
+        "Test: marketing_staff role calling enable → response status 403",
+        "Tests use Fastify inject() for HTTP-level testing; mock repo methods using vi.spyOn or constructor injection (whichever pattern the existing test suite uses)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Use the same test setup pattern as any existing unit tests in test/unit/ — check how auth is mocked (likely app.requireRole is mocked or the JWT is bypassed). If the existing tests use inject() with a test app that has a mock role decorator, follow that pattern. The tests are unit-level (mock the repo), not integration (no real DB needed for this story)."
+    }
+  ]
+}
