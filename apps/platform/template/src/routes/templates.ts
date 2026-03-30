@@ -141,6 +141,31 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
   );
 
   app.post(
+    '/templates/:id/enable',
+    { preHandler: app.requireRole('marketing_manager') },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const repo = new TemplatesRepo(app.db);
+
+      const template = await repo.findById(id);
+      if (!template) {
+        return reply.status(404).send({ error: 'Not found' });
+      }
+
+      if (template.active_version === null) {
+        return reply.status(400).send({ error: 'Template has no active version' });
+      }
+
+      if (template.status !== 'disabled') {
+        return reply.status(400).send({ error: 'Template is not disabled' });
+      }
+
+      const updated = await repo.enable(id);
+      return reply.status(200).send(updated);
+    },
+  );
+
+  app.post(
     '/templates/:id/disable',
     { preHandler: app.requireRole('marketing_manager') },
     async (request, reply) => {

@@ -131,6 +131,17 @@ export class TemplatesRepo {
     });
   }
 
+  async enable(id: string): Promise<TemplateRow | null> {
+    const rows = (await this.db(TEMPLATES)
+      .where({ id })
+      .update({
+        status: 'active',
+        updated_at: this.db.fn.now(),
+      })
+      .returning('*')) as TemplateRow[];
+    return rows[0] ?? null;
+  }
+
   async disable(id: string): Promise<TemplateRow | null> {
     const rows = (await this.db(TEMPLATES)
       .where({ id })
