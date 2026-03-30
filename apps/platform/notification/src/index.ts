@@ -9,6 +9,7 @@ import { SseManager } from './services/sse-manager.js';
 import { publishRoute } from './routes/publish.js';
 import { streamRoute } from './routes/stream.js';
 import { notificationsRoute } from './routes/notifications.js';
+import { createPublishRetryWorker } from './queue/publish-retry.worker.js';
 
 export const app = Fastify({ logger: true });
 
@@ -33,6 +34,9 @@ if (process.env['NODE_ENV'] !== 'test') {
   publisher = new Publisher(repo, redis);
   rateLimiter = new RateLimiter(redis);
   sseManager = new SseManager(subRedis);
+
+  // Start publish-retry BullMQ worker (uses its own Redis connections)
+  createPublishRetryWorker(config.REDIS_URL);
 }
 
 app.get('/health', async () => {
