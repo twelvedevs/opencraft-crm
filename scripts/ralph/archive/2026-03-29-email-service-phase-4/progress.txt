@@ -11,8 +11,10 @@
 - Register webhook routes at root (no prefix) in buildApp: `await app.register(webhookRoutes)` so path is `/webhooks/sendgrid` not `/emails/webhooks/sendgrid`
 
 # Ralph Progress Log
-Started: Sun Mar 29 23:26:10 +03 2026
+Started: Sun Mar 29 2026 — Phase 5 (Observability & Hardening)
 ---
+
+## Phase 4 progress archived to scripts/ralph/archive/2026-03-29-email-service-phase-4/
 
 ## 2026-03-29 - US-008
 - Added `findBySendgridMessageId`, `markDelivered`, `markOpenedFromWebhook`, `markClickedFromWebhook`, `markBouncedFromWebhook`, `markUnsubscribed`, `markSpamReported` to `EmailCampaignRecipientsRepository`
