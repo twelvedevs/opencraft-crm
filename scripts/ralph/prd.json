@@ -164,7 +164,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Use Fastify raw reply (reply.raw) to write SSE. fetch-event-source on client side sends Authorization header — server only does standard SSE."
     },
     {

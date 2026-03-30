@@ -1,3 +1,19 @@
+## 2026-03-30 - US-009
+- What was implemented: GET /notifications/stream SSE route with user JWT auth, channel validation, missed notification replay, SseManager registration, and 30s keepalive
+- Files changed:
+  - apps/platform/notification/src/routes/stream.ts (new file)
+  - apps/platform/notification/src/index.ts (added streamRoute registration, exposed repo variable)
+- **Learnings for future iterations:**
+  - Fastify SSE pattern: call `reply.hijack()` before writing headers, then `reply.raw.writeHead(200, {...})` for headers and `reply.raw.write(...)` for SSE events; await a Promise that resolves on `reply.raw.on('close', ...)` to keep connection open
+  - `reply.hijack()` tells Fastify not to manage the response — required for long-lived streaming connections
+  - Error responses (401/403/400) must be returned BEFORE calling `reply.hijack()` since hijack takes over the raw socket
+  - `last-event-id` header is used for missed notification replay — `findMissed({ channels, afterSeq: lastEventId, limit: 200 })`
+  - `replay-truncated` event format: `{ replayed: <count>, first_seq: <seq of first replayed row> }` — sent before the 200 replay events when truncated
+  - `request.headers['last-event-id']` (lowercase) — Node.js HTTP headers are always lowercase
+  - Connection ID assigned as randomUUID() before hijacking; sent as `X-Connection-ID` response header
+  - SseConnection `id` and `connectionId` fields are both the same connectionId UUID (from the SseConnection interface)
+---
+
 ## 2026-03-30 - US-008
 - What was implemented: POST /notifications/publish route with HMAC JWT auth, TypeBox body validation, channel validation, rate limiting, and publisher wiring
 - Files changed:
