@@ -1,3 +1,15 @@
+## 2026-03-30 - US-011
+- What was implemented: POST /notifications/:id/read and POST /notifications/read-all endpoints with user JWT auth, channel validation, markRead/markAllRead repo calls, Redis PUBLISH to notif:user:{userId}:reads for cross-tab read sync
+- Files changed:
+  - apps/platform/notification/src/routes/notifications.ts (added two POST routes)
+  - apps/platform/notification/src/index.ts (lifted redis to outer scope, passed redis to notificationsRoute)
+- **Learnings for future iterations:**
+  - `redis` was `const` inside the `if (NODE_ENV !== 'test')` block — had to lift it to outer `let redis: Redis | undefined` scope so it could be passed to route registrations outside the block
+  - `POST /notifications/read-all` must be registered BEFORE `POST /notifications/:id/read` — otherwise Fastify matches `/read-all` as id=`read-all` on the param route
+  - `originating_connection_id` comes from `X-Connection-ID` request header (optional); passed through in Redis PUBLISH payload for SseManager to exclude echo
+  - `markRead` returns boolean (false = not found/expired) → 404; `markAllRead` returns `{ ids, count }` → 200 `{ marked: count }`
+---
+
 ## 2026-03-30 - US-010
 - What was implemented: GET /notifications history endpoint with user JWT auth, channel pattern/access validation, query param parsing, and NotificationsRepo.findHistory integration
 - Files changed:
