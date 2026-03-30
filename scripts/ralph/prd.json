@@ -37,7 +37,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Use knex.raw() for CREATE SCHEMA and raw index DDL. Use knex.schema.withSchema('platform_templates') for createTable. Migrations must run in order: 001 before 002 due to FK reference."
     },
     {

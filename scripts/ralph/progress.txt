@@ -9,6 +9,17 @@
 
 ---
 
+## 2026-03-30 - US-002
+- Implemented database migrations for platform_templates schema
+- Files changed: migrations/knexfile.ts, migrations/001_create_templates.ts, migrations/002_create_template_versions.ts
+- **Learnings for future iterations:**
+  - CHECK constraints use `knex.raw('ALTER TABLE ... ADD CONSTRAINT ...')` after table creation (not inline builder methods)
+  - Named indexes use `knex.raw('CREATE INDEX ... ON ...')` for exact name control
+  - Cross-schema FK references in inTable use qualified name `'platform_templates.templates'`
+  - Migration files are NOT included in main tsconfig (rootDir is src/); migrations run via tsx at runtime, not compiled by tsc
+  - knexfile.ts exports `export default config` (not named export) matching notification service pattern
+---
+
 ## 2026-03-30 - US-001
 - Implemented template service project scaffold at apps/platform/template/
 - Files changed: package.json, tsconfig.json, Dockerfile, .env.example, src/config.ts, src/app.ts, src/index.ts, src/types.d.ts
