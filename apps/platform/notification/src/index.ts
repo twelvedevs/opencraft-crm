@@ -17,6 +17,7 @@ let publisher: Publisher | undefined;
 let rateLimiter: RateLimiter | undefined;
 let sseManager: SseManager | undefined;
 let repo: NotificationsRepo | undefined;
+let redis: Redis | undefined;
 
 if (process.env['NODE_ENV'] !== 'test') {
   const db = knex({
@@ -25,7 +26,7 @@ if (process.env['NODE_ENV'] !== 'test') {
     searchPath: ['platform_notifications'],
   });
 
-  const redis = new Redis(config.REDIS_URL);
+  redis = new Redis(config.REDIS_URL);
   const subRedis = new Redis(config.REDIS_URL);
 
   repo = new NotificationsRepo(db);
@@ -57,9 +58,10 @@ if (sseManager && repo) {
 }
 
 // Register notifications history + mark-read routes
-if (repo) {
+if (repo && redis) {
   await app.register(notificationsRoute, {
     repo,
+    redis,
     jwtSecret: config.JWT_HMAC_SECRET,
   });
 }

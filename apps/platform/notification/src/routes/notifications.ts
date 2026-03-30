@@ -1,6 +1,7 @@
 import { createSecretKey } from 'crypto';
 import { type FastifyInstance } from 'fastify';
 import { jwtVerify } from 'jose';
+import type { Redis } from 'ioredis';
 import { validateChannelPattern, validateChannelAccess } from '../services/channel-validator.js';
 import type { NotificationsRepo, NotificationRow } from '../repositories/notifications.repo.js';
 
@@ -9,6 +10,7 @@ const MAX_LIMIT = 100;
 
 export interface NotificationsRouteOptions {
   repo: NotificationsRepo;
+  redis: Redis;
   jwtSecret: string;
 }
 
@@ -45,6 +47,7 @@ export async function notificationsRoute(
   opts: NotificationsRouteOptions,
 ): Promise<void> {
   const secretKey = createSecretKey(Buffer.from(opts.jwtSecret, 'utf-8'));
+  const { repo, redis } = opts;
 
   // GET /notifications — paginated notification history
   fastify.get('/notifications', async (request, reply) => {
@@ -107,7 +110,7 @@ export async function notificationsRoute(
     const before = query['before'];
 
     // Fetch history
-    const { rows, nextCursor, totalUnread } = await opts.repo.findHistory({
+    const { rows, nextCursor, totalUnread } = await repo.findHistory({
       channels,
       userId: jwtClaims.sub,
       unread,
@@ -121,5 +124,80 @@ export async function notificationsRoute(
       notifications: rows.map(rowToResponse),
       next_cursor: nextCursor,
     });
+  });
+
+  // POST /notifications/read-all — mark all unread in channels as read
+  fastify.post('/notifications/read-all', async (request, reply) => {
+    const authHeader = request.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return reply.status(401).send({ error: 'missing_token' });
+    }
+
+    let jwtClaims: { sub: string; locations?: string[] };
+    try {
+      const result = parseUserJwt(authHeader, secretKey);
+      if (!result) return reply.status(401).send({ error: 'missing_token' });
+      jwtClaims = await result;
+    } catch {
+      return reply.status(403).send({ error: 'invalid_token' });
+    }
+
+    const body = request.body as { channels?: unknown };
+    if (!body || !Array.isArray(body.channels) || body.channels.length === 0) {
+      return reply.status(400).send({ error: 'channels_required' });
+    }
+
+    const channels = body.channels as string[];
+
+    for (const channel of channels) {
+      if (typeof channel !== 'string' || !validateChannelPattern(channel)) {
+        return reply.status(400).send({ error: 'invalid_channel_pattern', channel });
+      }
+      if (!validateChannelAccess(channel, jwtClaims)) {
+        return reply.status(403).send({ error: 'channel_access_denied', channel });
+      }
+    }
+
+    const originatingConnectionId = request.headers['x-connection-id'] as string | undefined;
+    const { ids, count } = await repo.markAllRead(jwtClaims.sub, channels);
+
+    await redis.publish(
+      `notif:user:${jwtClaims.sub}:reads`,
+      JSON.stringify({ notification_ids: ids, originating_connection_id: originatingConnectionId }),
+    );
+
+    return reply.status(200).send({ marked: count });
+  });
+
+  // POST /notifications/:id/read — mark a single notification as read
+  fastify.post('/notifications/:id/read', async (request, reply) => {
+    const authHeader = request.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return reply.status(401).send({ error: 'missing_token' });
+    }
+
+    let jwtClaims: { sub: string; locations?: string[] };
+    try {
+      const result = parseUserJwt(authHeader, secretKey);
+      if (!result) return reply.status(401).send({ error: 'missing_token' });
+      jwtClaims = await result;
+    } catch {
+      return reply.status(403).send({ error: 'invalid_token' });
+    }
+
+    const { id: notificationId } = request.params as { id: string };
+    const originatingConnectionId = request.headers['x-connection-id'] as string | undefined;
+
+    const found = await repo.markRead(jwtClaims.sub, notificationId);
+    if (!found) {
+      return reply.status(404).send({ error: 'notification_not_found' });
+    }
+
+    await redis.publish(
+      `notif:user:${jwtClaims.sub}:reads`,
+      JSON.stringify({ notification_id: notificationId, originating_connection_id: originatingConnectionId }),
+    );
+
+    return reply.status(200).send({});
   });
 }
