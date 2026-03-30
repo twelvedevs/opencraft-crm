@@ -1,0 +1,92 @@
+{
+  "project": "Ortho CRM — Nurturing Engine Phase 1",
+  "branchName": "ralph/nurturing-engine-phase-1",
+  "description": "Nurturing Engine Phase 1 — Shared package foundations: create @ortho/types package with lead.outbound_sent, lead.activity_logged event types and unenroll_sequence action type; create @ortho/interpolator package with interpolateFields (dot-notation + template string resolver) and computeNextActiveWindowMs (active-hours calculator, DST-safe) with full unit test coverage.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create @ortho/types package with Phase 1 type definitions",
+      "description": "As a platform developer, I need a shared @ortho/types package so that cross-service event contracts and action type unions have a single authoritative TypeScript definition.",
+      "acceptanceCriteria": [
+        "Create packages/@ortho/types/package.json: name '@ortho/types', version '0.1.0', type 'module', main 'dist/index.js', types 'dist/index.d.ts', scripts { build: 'tsc', typecheck: 'tsc --noEmit' }, devDependencies { typescript: '^5.0.0', '@types/node': '^22.0.0' }",
+        "Create packages/@ortho/types/tsconfig.json: compilerOptions { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, outDir: 'dist', rootDir: 'src', declaration: true, declarationMap: true, sourceMap: true, esModuleInterop: true, skipLibCheck: true }, include ['src/**/*'], exclude ['node_modules', 'dist']",
+        "Create packages/@ortho/types/src/events.ts exporting: LeadOutboundSentPayload interface with fields phone: string, email: string, stage: string, is_first_in_stage: boolean, stage_entered_at: string, location_timezone: string, location_number: string, location_id: string, sent_at: string",
+        "src/events.ts also exports: LeadOutboundSentEvent interface with event_type: 'lead.outbound_sent', entity_type: 'lead', entity_id: string, payload: LeadOutboundSentPayload",
+        "src/events.ts also exports: LeadActivityLoggedPayload interface with fields activity_type: string, stage: string, logged_by: string, logged_at: string",
+        "src/events.ts also exports: LeadActivityLoggedEvent interface with event_type: 'lead.activity_logged', entity_type: 'lead', entity_id: string, payload: LeadActivityLoggedPayload",
+        "Create packages/@ortho/types/src/actions.ts exporting: AutomationActionType as type union 'send_message' | 'send_email' | 'call_ai' | 'enroll_sequence' | 'emit_event' | 'call_webhook' | 'branch' | 'unenroll_sequence'",
+        "Create packages/@ortho/types/src/index.ts re-exporting all named exports from './events.js' and './actions.js'",
+        "Run npm install from packages/@ortho/types to generate package-lock.json",
+        "Typecheck passes (npm run typecheck from packages/@ortho/types)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "No existing @ortho/types package exists — create from scratch. This is a types-only package with no runtime dependencies. The AutomationActionType union in actions.ts adds unenroll_sequence to the existing Automation Engine action set (the implementation is deferred; this iteration only adds the type). Event interfaces are standalone (no base OrthoEvent inheritance needed for this package — keep it simple). Use .js extensions in import paths in src/index.ts for ESM compatibility."
+    },
+    {
+      "id": "US-002",
+      "title": "Create @ortho/interpolator package + interpolateFields implementation + unit tests",
+      "description": "As the Nurturing Engine step worker, I need an interpolateFields function so that step action params with dot-notation paths and {{template}} tokens are resolved against the enrollment context before dispatch.",
+      "acceptanceCriteria": [
+        "Create packages/@ortho/interpolator/package.json: name '@ortho/interpolator', version '0.1.0', type 'module', main 'dist/index.js', types 'dist/index.d.ts', scripts { build: 'tsc', typecheck: 'tsc --noEmit', test: 'vitest run', 'test:watch': 'vitest' }, devDependencies { typescript: '^5.0.0', '@types/node': '^22.0.0', vitest: '^2.0.0' }",
+        "Create packages/@ortho/interpolator/tsconfig.json: same compilerOptions as @ortho/event-bus (ES2022, NodeNext, strict, outDir dist, rootDir src, declaration true, declarationMap true, sourceMap true, esModuleInterop true, skipLibCheck true), include ['src/**/*'], exclude ['node_modules', 'dist']",
+        "Create packages/@ortho/interpolator/vitest.config.ts: import { defineConfig } from 'vitest/config'; export default defineConfig({ test: { include: ['test/**/*.test.ts'] } })",
+        "Create packages/@ortho/interpolator/src/interpolate.ts with: const DOT_PATH_RE = /^[a-zA-Z_][\\w.]*$/ and const TEMPLATE_TOKEN_RE = /\\{\\{(\\w+)\\}\\}/g",
+        "src/interpolate.ts exports function getByPath(obj: Record<string, unknown>, path: string): unknown — splits path on '.', reduces to nested value; returns undefined for missing keys or non-object intermediaries",
+        "src/interpolate.ts exports function interpolateValue(value: unknown, context: Record<string, unknown>): unknown — if value is a string matching DOT_PATH_RE: return getByPath(context, value); if value is a string containing at least one {{token}}: replace each {{key}} with String(context[key]) if key present, or keep '{{key}}' literal if missing; if value is a non-string or matches neither pattern: return value unchanged",
+        "src/interpolate.ts exports function interpolateFields(params: Record<string, unknown>, context: Record<string, unknown>): Record<string, unknown> — recursively resolves all values: strings via interpolateValue; arrays via map; nested objects via recursive call; non-strings/non-objects returned as-is",
+        "Create packages/@ortho/interpolator/src/index.ts re-exporting interpolateValue and interpolateFields from './interpolate.js'",
+        "Create packages/@ortho/interpolator/test/interpolate.test.ts with the following test cases:",
+        "interpolateValue: dot-notation 'context.phone' against { context: { phone: '+1555' } } → '+1555'",
+        "interpolateValue: nested dot-notation 'a.b.c' against { a: { b: { c: 42 } } } → 42",
+        "interpolateValue: deeply nested missing path 'a.b.x' against { a: { b: { c: 1 } } } → undefined",
+        "interpolateValue: template string '{{enrollment_id}}-step-1' against { enrollment_id: 'abc123' } → 'abc123-step-1'",
+        "interpolateValue: template string with multiple tokens '{{entity_type}}/{{entity_id}}' against { entity_type: 'lead', entity_id: '456' } → 'lead/456'",
+        "interpolateValue: template string with missing key '{{missing}}-suffix' → '{{missing}}-suffix' (literal preserved)",
+        "interpolateValue: plain string 'literal_value' (no dot-notation, no template tokens) → 'literal_value' unchanged",
+        "interpolateValue: non-string number 99 → 99 unchanged",
+        "interpolateValue: non-string boolean false → false unchanged",
+        "interpolateValue: non-string null → null unchanged",
+        "interpolateFields: flat object { to: 'context.phone', dedup_key: '{{enrollment_id}}-step-1' } against { context: { phone: '+1999' }, enrollment_id: 'e1' } → { to: '+1999', dedup_key: 'e1-step-1' }",
+        "interpolateFields: nested object with array — { payload: { ids: ['context.id', 'literal'] } } against { context: { id: 'x1' } } → { payload: { ids: ['x1', 'literal'] } }",
+        "interpolateFields: non-string values in object are passed through unchanged",
+        "Run npm install from packages/@ortho/interpolator",
+        "Typecheck passes; Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The context object passed to interpolateFields is a merged root: { context: <enrollmentContext>, enrollment_id, step_id, entity_type, entity_id }. Dot-notation 'context.phone' resolves the 'context' key first, then 'phone' within it — this is why the enrollment context is stored under a 'context' key in the root. Template tokens like '{{enrollment_id}}' resolve top-level keys in the same root. This design means a single flat context object handles both resolution modes. TEMPLATE_TOKEN_RE is a global regex — reset lastIndex before each use or use a fresh regex per call to avoid stale lastIndex bugs. A string can contain both a template token AND look like a dot-notation path only if it has braces — DOT_PATH_RE will not match strings containing '{' or '}', so the two modes are mutually exclusive for any given value."
+    },
+    {
+      "id": "US-003",
+      "title": "Add computeNextActiveWindowMs to @ortho/interpolator + unit tests",
+      "description": "As the Nurturing Engine step worker, I need a computeNextActiveWindowMs function so that send_message and send_email steps can be deferred until the next active-hours window, with correct DST handling.",
+      "acceptanceCriteria": [
+        "Create packages/@ortho/interpolator/src/active-hours.ts exporting: interface ActiveHoursConfig { start: string; end: string; } where both fields are HH:MM 24-hour strings",
+        "src/active-hours.ts exports: function computeNextActiveWindowMs(config: ActiveHoursConfig, timezone: string, now?: Date): number — now defaults to new Date()",
+        "Implementation: parse start/end to milliseconds-since-midnight via parseHHMM(time: string): number = (h*3600 + m*60) * 1000",
+        "Implementation: compute current time-of-day ms in target timezone using Intl.DateTimeFormat with timeZone option, hour/minute/second parts, hourCycle 'h23'; add date.getMilliseconds()",
+        "Implementation: validate timezone — try Intl.DateTimeFormat(undefined, { timeZone: tz }), catch → console.warn and fall back to 'UTC'",
+        "Implementation: if start === end → return 0 (always-open window)",
+        "Implementation: non-midnight-crossing window (startMs <= endMs): if currentMs >= startMs && currentMs < endMs → 0; if currentMs < startMs → startMs - currentMs; if currentMs >= endMs → DAY_MS - currentMs + startMs",
+        "Implementation: midnight-crossing window (startMs > endMs): if currentMs >= startMs || currentMs < endMs → 0; else → startMs - currentMs",
+        "Implementation: result is always in range [0, DAY_MS) — DAY_MS = 86_400_000",
+        "Export ActiveHoursConfig and computeNextActiveWindowMs from packages/@ortho/interpolator/src/index.ts (add to existing re-exports)",
+        "Create packages/@ortho/interpolator/test/active-hours.test.ts with the following test cases:",
+        "time currently inside window (08:00–20:00, now=10:00 in America/Chicago) → 0",
+        "time before window start (08:00–20:00, now=07:00 in America/Chicago) → exactly 3600000 ms (1 hour)",
+        "time after window end (08:00–20:00, now=21:00 in America/Chicago) → ms until 08:00 next day (11 hours = 39600000)",
+        "start === end → always returns 0 regardless of current time",
+        "invalid timezone string → does not throw, falls back to UTC, returns a non-negative number",
+        "midnight-crossing window (22:00–06:00): time=23:00 in UTC → 0 (inside window)",
+        "midnight-crossing window (22:00–06:00): time=10:00 in UTC → ms until 22:00 (12 hours = 43200000)",
+        "DST edge: America/New_York, window 08:00–20:00, now set to a UTC timestamp corresponding to 07:30 EST (before spring-forward on 2026-03-08) → result > 0 and result <= DAY_MS",
+        "result is never negative and never exceeds DAY_MS (86400000) — assert for multiple time positions",
+        "Typecheck passes; Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The active-hours calculator in the Automation Engine (apps/platform/automation/src/services/active-hours.ts) uses an identical algorithm — reference it for the implementation pattern. Key difference: computeNextActiveWindowMs takes a pre-resolved timezone string directly (the Nurturing Engine resolves timezone_field from context before calling this function), while the Automation Engine's computeDelay resolves the timezone internally. For DST tests, use fixed UTC timestamps that correspond to known local times: 2026-03-08T12:30:00Z = 07:30 EST before spring-forward. Use vitest fake timers (vi.setSystemTime) to control 'now' in tests that need specific times. The test for 'time after window end at 21:00' should use a specific UTC timestamp that maps to 21:00 in America/Chicago to be deterministic — compute it as e.g. new Date('2026-01-15T03:00:00Z') which is 21:00 CST (UTC-6 in January)."
+    }
+  ]
+}
