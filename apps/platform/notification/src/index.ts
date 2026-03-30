@@ -7,6 +7,7 @@ import { Publisher } from './services/publisher.js';
 import { RateLimiter } from './services/rate-limiter.js';
 import { SseManager } from './services/sse-manager.js';
 import { publishRoute } from './routes/publish.js';
+import { streamRoute } from './routes/stream.js';
 
 export const app = Fastify({ logger: true });
 
@@ -14,6 +15,7 @@ export const app = Fastify({ logger: true });
 let publisher: Publisher | undefined;
 let rateLimiter: RateLimiter | undefined;
 let sseManager: SseManager | undefined;
+let repo: NotificationsRepo | undefined;
 
 if (process.env['NODE_ENV'] !== 'test') {
   const db = knex({
@@ -25,7 +27,7 @@ if (process.env['NODE_ENV'] !== 'test') {
   const redis = new Redis(config.REDIS_URL);
   const subRedis = new Redis(config.REDIS_URL);
 
-  const repo = new NotificationsRepo(db);
+  repo = new NotificationsRepo(db);
   publisher = new Publisher(repo, redis);
   rateLimiter = new RateLimiter(redis);
   sseManager = new SseManager(subRedis);
@@ -40,6 +42,15 @@ if (publisher && rateLimiter) {
   await app.register(publishRoute, {
     publisher,
     rateLimiter,
+    jwtSecret: config.JWT_HMAC_SECRET,
+  });
+}
+
+// Register SSE stream route (only when dependencies are available)
+if (sseManager && repo) {
+  await app.register(streamRoute, {
+    sseManager,
+    repo,
     jwtSecret: config.JWT_HMAC_SECRET,
   });
 }
