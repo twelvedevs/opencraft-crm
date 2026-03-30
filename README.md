@@ -213,3 +213,43 @@ Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/ty
 Write implementation plan, store to prd.json
 ```
 
+
+#### Template Service
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-template-service-design.md
+```
+- `claude -p 'Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-template-service-design.md' --dangerously-skip-permissions`
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-template-service-design.md
+- clarifying questions and answers @tasks/prd-questions-template-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-template-service-design.md with clarifications you got from  @tasks/prd-questions-template-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-03-30-template-service-updated-design.md
+```
+
+```
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-30-template-service-updated-design.md
+We need to plan implementation of this component in phases. Just suggest me list of phases with deliverables. No need to write detailed implementation plan yet.
+Keep UI / React component aside, work only on backend.
+Write resultting list of phases into docs/superpowers/specs/2026-03-30-template-service-phases.md
+```
+
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-30-template-service-updated-design.md
+- implementation phases @docs/superpowers/specs/2026-03-30-template-service-phases.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest.
+Write implementation plan for Phase 1, store to prd.json 
+```
+- `claude -p 'Load the ralph skill. Read docs: - overall platform & product architecture at @docs/01-platform-arch-design.md ; - component architecture design @docs/superpowers/specs/2026-03-30-template-service-updated-design.md ; - implementation phases @docs/superpowers/specs/2026-03-30-template-service-phases.md . Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest. Write implementation plan for Phase 1, store to prd.json ' --dangerously-skip-permissions`
+
