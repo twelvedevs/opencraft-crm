@@ -3,6 +3,10 @@
 - Auth plugin: `isServiceApiKey` checks `token.startsWith('ak_')` — any `ak_*` string works as service API key.
 - JWT signing uses `new TextEncoder().encode(secret)` as key (not `createSecretKey`) — must match in tests.
 - Integration test helpers: use `port: 0` to get OS-assigned port, derive `serverUrl` from `app.server.address()`.
+- Manager tokens need BOTH roles: `['marketing_staff', 'marketing_manager']` — the global `requireRole('marketing_staff')` preHandler in templateRoutes blocks manager-only tokens.
+- `created_by` column is UUID type — JWT `sub` must be a valid UUID (e.g. `'00000000-0000-0000-0000-000000000001'`). Service API keys bypass auth but are blocked by `requireRole`.
+- Render route uses `requireAuth` (not `requireRole`) — service API keys work there; all CRUD routes use `requireRole('marketing_staff')`.
+- Multiple integration test files sharing a DB require `fileParallelism: false` in vitest.config.ts to avoid schema reset race conditions.
 
 # Ralph Progress Log
 Started: Mon Mar 30 20:32:47 +03 2026
@@ -17,4 +21,33 @@ Started: Mon Mar 30 20:32:47 +03 2026
   - `resetSchema` uses `DROP SCHEMA IF EXISTS platform_templates CASCADE` then re-runs both migration `up()` functions
   - `createTestContext` starts Fastify on port 0, gets actual port from `app.server.address() as { port: number }`
   - All 40 existing unit tests still pass after adding helpers
+---
+
+## 2026-03-30 - US-002
+- Implemented CRUD + lifecycle integration tests in `test/integration/templates-crud.test.ts`
+- Files changed: `test/integration/templates-crud.test.ts` (new), `test/integration/helpers.ts` (updated makeManagerToken to include both roles)
+- **Learnings for future iterations:**
+  - `requireRole` does NOT bypass service API keys — use JWT tokens for routes with `requireRole` preHandler
+  - Manager token needs `['marketing_staff', 'marketing_manager']` to pass global + route-level preHandlers
+  - `created_by` is UUID column — JWT sub must be valid UUID (use '00000000-0000-0000-0000-000000000001')
+  - Content-Type: application/json with empty body causes 400 in Fastify — omit it for bodyless POST requests
+---
+
+## 2026-03-30 - US-003
+- Implemented render integration tests in `test/integration/render.test.ts`
+- Added `vitest.config.ts` with `fileParallelism: false` to prevent DB race conditions
+- Files changed: `test/integration/render.test.ts` (new), `vitest.config.ts` (new)
+- **Learnings for future iterations:**
+  - Render route uses `requireAuth` — service API keys AND JWT tokens both work
+  - Cache is module-level singleton; `templateCache.evict(id)` can be called directly in tests
+  - Multiple integration test files with `resetSchema` must run sequentially (fileParallelism: false)
+---
+
+## 2026-03-30 - US-004
+- Implemented TypeBox contract tests in `test/contract/render-contract.test.ts`
+- Files changed: `test/contract/render-contract.test.ts` (new)
+- **Learnings for future iterations:**
+  - `Value.Check(schema, input)` from `@sinclair/typebox/value` does runtime validation
+  - TypeBox default is open schemas — extra fields pass validation
+  - No server or DB needed for contract tests — pure in-memory schema checks
 ---

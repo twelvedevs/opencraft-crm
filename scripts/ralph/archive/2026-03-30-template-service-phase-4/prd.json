@@ -64,7 +64,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Use the global `fetch` (Node.js 24 has it built-in — no node-fetch needed). Each test in `templates-crud.test.ts` should be a top-level `it(...)` or grouped in `describe` blocks by operation. Keep tests independent — each beforeEach truncates tables so order doesn't matter. For the PATCH email-only-fields-on-SMS test: after patching an SMS template with subject/body_html, do a GET and check `draft_content` — the fields should be null/absent since the route silently ignores cross-channel fields. For the `body_text` limit test: generate a 1601-char string with `'a'.repeat(1601)`. The `makeManagerToken` and `makeStaffToken` helpers are async — await them in beforeAll or per-test as needed. For 'enable on non-disabled' test: the template should be in 'active' status (just activated, not disabled) — call enable on it and expect 400."
     },
     {
@@ -95,7 +95,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Cache isolation between tests: since the template cache is a module-level singleton shared across the app instance, rendering a template in one test populates the cache. The cleanest approach is to import `templateCache` from `../../src/services/template-cache.js` in the test file and call `templateCache.evict(templateId)` in afterEach or at the start of each test that uses a known template ID. Alternatively, since each beforeEach truncates tables and each test creates new templates with `gen_random_uuid()` IDs, cache entries from deleted templates are harmless (the stale cache entry would just cause a DB lookup returning null on the next get, which is a cache miss that returns null — safe). For the 'malformed merge tag' test: the PATCH endpoint stores whatever body_text is given (it does not validate merge tag syntax at write time per the spec); only the render endpoint validates. The `{{ }}` empty tag (with spaces) should pass the PATCH but fail at render time. Note: the spec says PATCH should catch malformed tags at save time only as a note, but the design spec section 5.1 says malformed tags cause 400 at render time; the PATCH handler in phases 1-3 does NOT validate merge tag syntax."
     },
     {
@@ -116,7 +116,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "These are pure in-memory schema validation tests — no database, no HTTP server needed. Import `Value` from `@sinclair/typebox/value` for runtime type checking (this is a sub-path export of the @sinclair/typebox package already in dependencies). The `Value.Check(schema, input)` function returns boolean — it validates the input against the TypeBox schema at runtime. No Pact or external contract framework — plain Vitest assertions. TypeBox schemas are the ground truth for what consumers (Automation Engine, Nurturing Engine, Campaign Service) can expect in render responses. If `@sinclair/typebox/value` import path does not resolve, try `import { Value } from '@sinclair/typebox/value'` — this is the standard sub-path export in typebox 0.34+."
     }
   ]
