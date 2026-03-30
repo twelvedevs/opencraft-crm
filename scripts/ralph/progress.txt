@@ -12,6 +12,18 @@
 Started: Mon Mar 30 13:08:41 +03 2026
 ---
 
+## 2026-03-30 - US-002
+- What was implemented: Database migrations for platform_notifications schema
+- Files changed:
+  - apps/platform/notification/migrations/001_create_notifications.ts (notifications + notification_reads tables with all required indexes)
+  - apps/platform/notification/migrations/knexfile.ts (pg client, platform_notifications searchPath)
+- **Learnings for future iterations:**
+  - Use `table.specificType('seq', 'bigserial').notNullable()` for bigserial non-PK column in Knex
+  - Descending and partial indexes must be created with `knex.raw()` — Knex doesn't support them natively
+  - FK reference for cross-table in same schema: use `.references('id').inTable('platform_notifications.notifications')` (full schema-qualified)
+  - knexfile.ts mirrors automation service pattern: searchPath includes schema + public
+---
+
 ## 2026-03-30 - US-001
 - What was implemented: Full project scaffold for @platform/notification service
 - Files changed:
