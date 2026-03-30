@@ -19,7 +19,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "isServiceApiKey and verifyJwt are exported from src/plugins/auth.ts. app.db and app.jwtSecret are decorated on the FastifyInstance (see src/types.d.ts). app.requireRole is decorated and returns a preHandler function. Catch pg errors by checking (err as NodeJS.ErrnoException & { code?: string }).code === '23505' — or cast to any and check .code."
     },
     {
@@ -37,7 +37,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "For GET /templates/:id response shape, project only the content fields from TemplateVersionRow (version, body_text, subject, body_html, body_unlayer). Fastify coerces query string integers automatically via AJV when Type.Integer() is used in the schema. When limit/offset defaults are set in the TypeBox schema with 'default' keyword, Fastify populates them — but also apply fallback ?? in the handler for safety."
     },
     {

@@ -18,3 +18,15 @@ Started: Mon Mar 30 19:59:24 +03 2026
   - TypeBox body cast: `request.body as { name: string; channel: 'sms' | 'email' }` needed since Fastify body is `unknown` by default
   - Role guard preHandler placed at plugin top before route definitions; all routes inherit it automatically
 ---
+
+## 2026-03-30 20:03 - US-002
+- Added GET /templates (paginated list) and GET /templates/:id to src/routes/templates.ts
+- GET /templates: TypeBox querystring schema with optional channel/status/sort/order/limit/offset; calls repo.list(); returns { data, total, limit, offset }
+- GET /templates/:id: fetches template row + draft content (always) + active content (only if active_version !== null); projects only { version, body_text, subject, body_html, body_unlayer } from version rows
+- Also fixed prd.json: US-001 passes was incorrectly left false despite prior implementation; updated both US-001 and US-002 to passes: true
+- Files changed: src/routes/templates.ts, scripts/ralph/prd.json
+- **Learnings for future iterations:**
+  - query params cast: `request.query as { ... }` pattern, same as body cast — Fastify AJV validates/coerces but type is still unknown
+  - Project version content to strip db-internal fields (id, template_id, created_by, created_at) by destructuring only the needed fields
+  - Fastify GET route with no schema: pass `{}` as second arg — `app.get('/path', {}, handler)`
+---
