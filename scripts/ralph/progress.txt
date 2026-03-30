@@ -1,0 +1,21 @@
+## Codebase Patterns
+- Email service uses `src/env.ts`; template service uses `src/config.ts` per PRD spec
+- All services use TypeBox `Type.Object` + `Value.Check` for env validation; extract first error path for message
+- `buildApp(db, ...)` factory pattern — app does NOT call listen; `index.ts` owns the listen call
+- Guard `app.listen()` with `NODE_ENV !== 'test'` to allow test imports without binding a port
+- `src/types.d.ts` augments `declare module 'fastify'` for typed decorators
+- tsconfig: `target ESNext`, `module NodeNext`, `moduleResolution NodeNext`, `strict true`
+- `lru-cache` and `jose` are in dependencies (not devDependencies) — they're runtime deps
+
+---
+
+## 2026-03-30 - US-001
+- Implemented template service project scaffold at apps/platform/template/
+- Files changed: package.json, tsconfig.json, Dockerfile, .env.example, src/config.ts, src/app.ts, src/index.ts, src/types.d.ts
+- **Learnings for future iterations:**
+  - Email service uses `env.ts` export name; template PRD requires `config.ts` with named export `config`
+  - PRD spec: `buildApp(db: Knex, jwtSecret: string)` — only two params, no Redis/BullMQ/EventBridge
+  - PORT defaults to 3005 (not 3000 like email service)
+  - tsconfig uses `target: ESNext` (email uses ES2022) — follow PRD spec exactly
+  - `node_modules` should NOT be committed — use `.gitignore` if needed
+---

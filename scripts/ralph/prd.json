@@ -20,7 +20,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "No Redis, no BullMQ, no EventBridge. Follow email service patterns: buildApp factory, TypeBox env validation, @fastify/sensible v6. PORT default 3005."
     },
     {
