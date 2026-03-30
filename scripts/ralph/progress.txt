@@ -1,3 +1,16 @@
+## 2026-03-30 - US-012
+- What was implemented: BullMQ publish-retry worker that retries Redis PUBLISH after failure; wired into index.ts to start alongside the Fastify server
+- Files changed:
+  - apps/platform/notification/src/queue/publish-retry.worker.ts (new file)
+  - apps/platform/notification/src/index.ts (import + start worker in non-test block)
+- **Learnings for future iterations:**
+  - BullMQ Worker connections require `maxRetriesPerRequest: null` on the ioredis client — without it, BullMQ throws an error about the connection not being in blocking mode
+  - Use TWO separate ioredis connections inside the worker: one passed to `Worker({ connection: workerRedis })` for BullMQ's blocking operations, and a second `publishRedis` for the actual Redis PUBLISH command
+  - The `PublishRetryJobData` type is already exported from `publisher.ts` — import it as a type to avoid creating duplicates
+  - Worker retry config (attempts, backoff) is set on the job at enqueue time in `publisher.ts` — the Worker itself just processes and throws on failure; BullMQ handles the retry scheduling automatically
+  - Worker `failed` event handler receives `(job | undefined, err)` — guard against `job` being undefined
+---
+
 ## 2026-03-30 - US-011
 - What was implemented: POST /notifications/:id/read and POST /notifications/read-all endpoints with user JWT auth, channel validation, markRead/markAllRead repo calls, Redis PUBLISH to notif:user:{userId}:reads for cross-tab read sync
 - Files changed:
