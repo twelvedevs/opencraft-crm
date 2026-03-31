@@ -1003,7 +1003,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)"
       ],
       "priority": 45,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 7, originally US-005] The 'server accepts traffic before scan completes' test is the most architecturally important one — it verifies the non-blocking design. The simplest way to implement it: create a slow mock scanner (returns a Promise that resolves after a timeout), start the server with that mock, make an HTTP request to /health (or the sequences list endpoint) immediately, assert the response arrives before the scanner resolves. Use a short artificial delay (e.g. 200ms) in the mock so the test completes quickly. The DB test for re-enqueueing uses runStartupScan directly (not through the HTTP server) — faster and avoids needing a full Fastify instance. The mockStepQueue.add mock returns { id: 'mock-job-id' } — match the BullMQ Job type's id property (it is a string). Check Phase 4 integration tests for the DB setup pattern (how enrollments and step_executions are inserted directly)."
     },
     {

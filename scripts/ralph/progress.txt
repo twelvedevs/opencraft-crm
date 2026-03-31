@@ -556,3 +556,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - safetyNetPollerPlugin is registered before fastify.listen (inside createApp), but only when both redis and queue are non-null
   - runStartupScan is called after fastify.listen resolves (in main()), non-blocking via void + .catch — guarded by queue non-null check
 ---
+
+## 2026-03-31 - US-045
+- Created integration test suite for startup scanner (4 tests, all skip gracefully without DB)
+- Files changed:
+  - apps/platform/nurturing/test/integration/startup-scanner.test.ts (new — 4 tests)
+- **Learnings for future iterations:**
+  - Direct DB inserts for step_executions bypass the enrollment API — insert enrollment row first, then step_execution row referencing it
+  - Each test in this file creates its own sequence via HTTP API to avoid cross-test interference
+  - The "server accepts traffic before scan completes" test uses a hung mock scanner (never-resolving Promise) fired non-awaited; app.inject() immediately responds because the server is already ready
+  - Filter mock.calls by enrollment_id to isolate assertions in multi-enrollment tests
+---
