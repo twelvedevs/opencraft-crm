@@ -294,3 +294,15 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - loadServiceUrls() pattern: collect missing env vars into array, throw with joined list — same approach as other config loaders
   - createPublisher() reads EVENTBRIDGE_BUS_NAME; all 3 publish methods use identical PutEventsCommand shape with Source='platform.nurturing'
 ---
+
+## 2026-03-31 - US-023
+- Created send-message action handler as a pure function (no class)
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/send-message.ts (new — ResolvedSendMessageParams interface + executeSendMessage function)
+- **Learnings for future iterations:**
+  - Pure function pattern (no class) for action handlers — the step worker calls them directly
+  - Two-step flow: render template first (POST /templates/render), then send message (POST /messages/send)
+  - Native fetch (Node 24 built-in) — no axios/node-fetch import needed
+  - No auth headers on service-to-service calls — internal VPC routing handles it
+  - All params are pre-resolved by the step worker before calling the handler
+---

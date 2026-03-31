@@ -566,7 +566,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 23,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-003] All params received here are ALREADY resolved — the step worker resolves dot-notation paths and template strings before calling the handler, so 'to', 'from', and 'dedup_key' are plain string values. The 'context' field is the raw enrollment.context object passed directly to the Template Service for merge-tag resolution. Use native fetch (Node 24 built-in). No auth header needed on service-to-service calls in this iteration — internal VPC routing. The handler is a pure function (no class); the action executor calls it directly."
     },
     {
