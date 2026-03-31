@@ -163,6 +163,47 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
       }
     },
   );
+  fastify.post(
+    '/sequences/:id/activate',
+    {
+      preHandler: [fastify.authenticate, fastify.requireRole(['marketing_manager'])],
+      schema: {
+        params: ParamsSchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const def = await definitionsRepo.findById(id);
+      if (!def) {
+        return reply.code(404).send({ error: 'sequence_not_found' });
+      }
+
+      const updated = await definitionsRepo.setActiveVersion(id, def.current_version);
+      return reply.send(updated);
+    },
+  );
+
+  fastify.post(
+    '/sequences/:id/disable',
+    {
+      preHandler: [fastify.authenticate, fastify.requireRole(['marketing_manager'])],
+      schema: {
+        params: ParamsSchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const def = await definitionsRepo.findById(id);
+      if (!def) {
+        return reply.code(404).send({ error: 'sequence_not_found' });
+      }
+
+      const updated = await definitionsRepo.updateStatus(id, 'disabled');
+      return reply.send(updated);
+    },
+  );
 };
 
 export default sequencesRoutes;
