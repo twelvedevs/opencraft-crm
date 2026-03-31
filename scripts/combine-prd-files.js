@@ -23,10 +23,6 @@ if (phaseFiles.length === 0) {
   process.exit(1);
 }
 
-// console.log(phaseFiles);
-// process.exit();
-
-
 console.log(`Found ${phaseFiles.length} phase files:`, phaseFiles);
 
 // Use metadata from the first phase file
@@ -40,6 +36,7 @@ const combined = {
 };
 
 let globalCounter = 1;
+let priority = 0;
 
 for (const file of phaseFiles) {
   const phase = JSON.parse(readFileSync(join(ralphDir, file), 'utf8'));
@@ -53,9 +50,13 @@ for (const file of phaseFiles) {
       notes: story.notes
         ? `[Phase ${phaseNum}, originally ${story.id}] ${story.notes}`
         : `[Phase ${phaseNum}, originally ${story.id}]`,
+      priority: priority + story.priority,
     });
     globalCounter++;
   }
+
+  const priorities = phase.userStories.map(s => s.priority);
+  priority += Math.max(...priorities);
 }
 
 const outputPath = join(ralphDir, 'prd-combined.json');
