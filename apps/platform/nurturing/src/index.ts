@@ -16,6 +16,7 @@ import { runStartupScan } from './services/startup-scanner.js';
 import safetyNetPollerPlugin from './services/safety-net-poller.js';
 import sequencesRoutes from './routes/sequences.js';
 import enrollmentsRoutes from './routes/enrollments.js';
+import statsRoutes from './routes/stats.js';
 import { createStepQueue, type StepJobData } from './queue/step-queue.js';
 import type { Logger } from 'pino';
 import { createPublisher, type NurturingPublisher } from './events/publisher.js';
@@ -73,6 +74,7 @@ export async function createApp(opts?: {
   await fastify.register(authPlugin);
   await fastify.register(sequencesRoutes, { definitionsRepo, versionsRepo, versioningService });
   await fastify.register(enrollmentsRoutes, { enrollmentManager, enrollmentsRepo, stepExecutionsRepo, db, stepQueue: queue, publisher });
+  await fastify.register(statsRoutes, { definitionsRepo, versionsRepo, enrollmentsRepo });
 
   if (redis && queue) {
     await fastify.register(safetyNetPollerPlugin, { stepExecutionsRepo, stepQueue: queue, redis, logger: fastify.log as Logger });
