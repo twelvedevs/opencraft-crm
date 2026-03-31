@@ -1186,7 +1186,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 54,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 8, originally US-008] These are inbound contract tests — they verify that the consumer is robust against malformed SQS messages. SQS standard queues guarantee at-least-once delivery and can deliver duplicate or corrupted messages; a throwing consumer will cause the message to remain in the queue and be redelivered endlessly. The 'handles completely invalid JSON structure — does not throw' test passes null because AWS Lambda SQS event parsing can produce null body in edge cases. Check processOptOutMessage's actual function signature from Phase 6 — the deps parameter shape may differ slightly from the mock above; adjust the mock to match the real interface. The 'continues processing others' test verifies per-enrollment try/catch which was a spec requirement in Phase 6 — this contract test is verifying that requirement is actually met."
     }
   ]

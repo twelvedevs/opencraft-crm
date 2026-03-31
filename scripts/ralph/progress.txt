@@ -663,3 +663,18 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - For EventBridge event tests: mock `ebClient.send` via `vi.fn().mockResolvedValue({})`, pass mock client to `new NurturingPublisher(ebClient, busName)`, then inspect the `PutEventsCommand` args from `sendMock.mock.calls[0][0]`
   - `executeAction` returns `chainSendMessage` (not a fetch call) for call_ai with auto_send:true; step-worker performs the actual POST /messages/send
 ---
+
+## 2026-03-31 - US-054
+- Created contract tests for inbound opt_out.received malformed event handling
+- Also added per-enrollment try/catch to processOptOutMessage (spec requirement that was missing from implementation)
+- Files changed:
+  - apps/platform/nurturing/test/contract/inbound-opt-out.contract.test.ts (new — 6 tests, all passing)
+  - apps/platform/nurturing/src/consumers/opt-out.consumer.ts (added per-enrollment try/catch in for loop)
+- **Learnings for future iterations:**
+  - processOptOutMessage takes `messageBody: string` (JSON string), not an object — tests must pass JSON.stringify(...)
+  - Event structure is `{ detail: { entity_id: string } }` (not `{ payload: { entity_id } }`) — test must match
+  - The `unenroll` field in OptOutConsumerDeps is a direct function, not `unenrollmentService.unenroll`
+  - `publisher` mock needs `publishAllSequencesCancelled` (not generic `publish`) to match NurturingPublisher interface
+  - Passing `null as unknown as string` to test runtime resilience against null SQS body is valid pattern
+  - Per-enrollment try/catch was a spec requirement — the contract test revealed it was missing and the fix was applied inline
+---
