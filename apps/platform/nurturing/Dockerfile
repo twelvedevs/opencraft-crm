@@ -7,4 +7,4 @@ RUN npm ci --omit=dev
 
 COPY dist/ ./dist/
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/src/index.js"]
