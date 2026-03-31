@@ -149,4 +149,61 @@ export class EnrollmentsRepository {
       .select('se.*', 'sv.ab_test as ab_test');
     return rows as Array<SequenceEnrollment & { ab_test: unknown }>;
   }
+
+  async getEnrollmentCounts(sequenceId: string): Promise<{
+    total: number;
+    completed: number;
+    unenrolled: number;
+    failed: number;
+    active: number;
+  }> {
+    const [row] = await this.db.raw<{ rows: Array<Record<string, string>> }>(
+      `SELECT
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+        COUNT(*) FILTER (WHERE status = 'unenrolled') AS unenrolled,
+        COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+        COUNT(*) FILTER (WHERE status = 'active') AS active
+      FROM ${ENROLLMENTS_TABLE}
+      WHERE sequence_id = ?`,
+      [sequenceId],
+    ).then((r) => r.rows);
+    return {
+      total: parseInt(row['total'], 10),
+      completed: parseInt(row['completed'], 10),
+      unenrolled: parseInt(row['unenrolled'], 10),
+      failed: parseInt(row['failed'], 10),
+      active: parseInt(row['active'], 10),
+    };
+  }
+
+  async getAbBreakdown(sequenceId: string): Promise<
+    Array<{
+      ab_variant: string;
+      enrollments: number;
+      completions: number;
+      conversions: number;
+    }>
+  > {
+    const CONVERSIONS_TABLE = `${SCHEMA}.sequence_conversions`;
+    const rows = await this.db.raw<{ rows: Array<Record<string, string>> }>(
+      `SELECT
+        se.ab_variant,
+        COUNT(*) AS enrollments,
+        COUNT(*) FILTER (WHERE se.status = 'completed') AS completions,
+        COUNT(sc.id) AS conversions
+      FROM ${ENROLLMENTS_TABLE} se
+      LEFT JOIN ${CONVERSIONS_TABLE} sc ON sc.enrollment_id = se.id
+      WHERE se.sequence_id = ?
+        AND se.ab_variant IS NOT NULL
+      GROUP BY se.ab_variant`,
+      [sequenceId],
+    ).then((r) => r.rows);
+    return rows.map((row) => ({
+      ab_variant: row['ab_variant'],
+      enrollments: parseInt(row['enrollments'], 10),
+      completions: parseInt(row['completions'], 10),
+      conversions: parseInt(row['conversions'], 10),
+    }));
+  }
 }
