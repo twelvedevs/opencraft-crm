@@ -475,3 +475,13 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - pino logger instantiated directly in worker.ts with `pino({ name: 'nurturing-worker' })` — no shared logger factory used
   - unenrollDeps is assembled inline in worker.ts from already-available db/repos/queue/publisher; no new instances needed
 ---
+
+## 2026-03-31 - US-038
+- Created unit tests for unenrollment service (4 tests, all passing)
+- Files changed:
+  - apps/platform/nurturing/test/unit/unenrollment.test.ts
+- **Learnings for future iterations:**
+  - db.transaction mock: `vi.fn().mockImplementation(async (fn) => fn(mockTrx))` where mockTrx is a plain object — enables the callback to execute and populate jobIds correctly
+  - BullMQ removal failure test: mock `stepQueue.getJob` to reject; assert the promise resolves (catch block in unenrollment.ts swallows errors)
+  - "leaves non-pending steps untouched" test is structural: verify no stepExecutionsRepo methods beyond cancelPendingByEnrollment are called — SQL WHERE clause is the actual guard, unit test confirms the service itself doesn't call other mutation methods
+---

@@ -880,7 +880,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)"
       ],
       "priority": 38,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-006] The db.transaction mock is the trickiest part. In Knex, db.transaction(async (trx) => { ... }) executes the callback with a transaction object. The mock must call the callback fn(trx) and return the result, so the service's jobIds variable is populated correctly. Use vi.fn().mockImplementation((fn) => fn(mockTrx)) where mockTrx can be a plain object passed as the trx arg to repo methods. The test for 'leaves non-pending steps untouched' is structural — it confirms the service does not call any other step-execution mutation methods beyond cancelPendingByEnrollment. This guarantees non-pending steps are untouched by the service itself (the SQL WHERE clause is the actual guard, which is tested in integration). The BullMQ removal failure test ensures the catch block swallows errors, not re-throws — important because Redis may be unavailable without stopping the unenrollment."
     },
     {
