@@ -269,3 +269,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - afterAll cleanup order: sequence_step_executions first (FK to enrollments), then sequence_enrollments, then sequence_versions (FK to definitions), then sequence_definitions
   - Scheduling tolerance check: `Math.abs(new Date(row.scheduled_at).getTime() - expected) < 5000`; cast rows from knex as `string` since pg returns timestamptz columns as strings
 ---
+
+## 2026-03-31 - US-021
+- Updated EnrollmentsRepository.updateStatus signature to narrower type (opts object pattern); added 7 new methods to StepExecutionsRepository for step worker lifecycle management
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (updated updateStatus signature: status 'completed'|'failed', opts?.completedAt)
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (added findById, claimForExecution, markCompleted, markFailed, markCancelled, updateDeferral, incrementAttempt)
+- **Learnings for future iterations:**
+  - claimForExecution uses `.where('status', 'pending')` not `.where({ status: 'pending' })` — both work but chained form is explicit; returns `rows.length > 0` as boolean
+  - markCompleted uses `JSON.stringify(output)` for non-null output (jsonb); pass null directly for null
+  - updateDeferral sets job_id to null — this is intentional; the step worker writes the new job_id back after re-enqueueing via updateJobId
+  - incrementAttempt uses `this.db.raw('attempt + 1')` — Knex cannot express increment without raw; this is idiomatic pattern
+  - enrollments.repo updateStatus had no callers (only definitionsRepo.updateStatus was called) — safe rename from bare `completedAt?: Date` to `opts?: { completedAt?: Date }`
+---

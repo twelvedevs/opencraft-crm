@@ -525,7 +525,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 21,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-001] The updateStatus method on enrollments.repo is needed by the step worker to mark enrollment as 'completed' (when the last step finishes) or 'failed' (when max retries exhausted). The claimForExecution method is the optimistic lock — it atomically transitions the step from 'pending' to 'running' and returns false if another worker already claimed it, preventing duplicate execution. updateDeferral sets job_id = NULL so that, after the step worker writes the new job_id back, the safety-net poller can accurately track the step. The existing updateJobId(id, jobId) method from Phase 4 is used for writing the new job_id after re-enqueueing. Import 'import type { Knex } from \"knex\"' if needed for transaction parameter. In Knex 3 the raw UPDATE...RETURNING * pattern: await this.db('sequence_step_executions').where({ id }).where('status', 'pending').update({ status: 'running', started_at: new Date() }).returning('id') returns an array — length > 0 means the row was claimed."
     },
     {
