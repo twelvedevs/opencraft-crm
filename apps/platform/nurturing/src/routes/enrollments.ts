@@ -1,14 +1,28 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyPluginAsync } from 'fastify';
+import type { Queue } from 'bullmq';
+import type { Knex } from 'knex';
 import type { EnrollmentManager } from '../services/enrollment-manager.js';
 import type { EnrollmentsRepository } from '../repositories/enrollments.repo.js';
 import type { StepExecutionsRepository } from '../repositories/step-executions.repo.js';
+import type { NurturingPublisher } from '../events/publisher.js';
+import type { StepJobData } from '../queue/step-queue.js';
+import { unenroll } from '../services/unenrollment.js';
 
 export interface EnrollmentsRouteOptions {
   enrollmentManager: EnrollmentManager;
   enrollmentsRepo: EnrollmentsRepository;
   stepExecutionsRepo: StepExecutionsRepository;
+  db: Knex;
+  stepQueue: Queue<StepJobData> | null;
+  publisher: NurturingPublisher | null;
 }
+
+const UnenrollBodySchema = Type.Object({
+  sequence_id: Type.String({ format: 'uuid' }),
+  entity_type: Type.String({ minLength: 1 }),
+  entity_id: Type.String({ minLength: 1 }),
+});
 
 const EnrollBodySchema = Type.Object({
   sequence_id: Type.String({ format: 'uuid' }),
@@ -180,6 +194,35 @@ const enrollmentsRoutes: FastifyPluginAsync<EnrollmentsRouteOptions> = async (fa
         }
         throw err;
       }
+    },
+  );
+  fastify.post(
+    '/sequences/unenroll',
+    {
+      preHandler: [fastify.authenticate],
+      schema: {
+        body: UnenrollBodySchema,
+      },
+    },
+    async (request, reply) => {
+      const body = request.body as {
+        sequence_id: string;
+        entity_type: string;
+        entity_id: string;
+      };
+
+      await unenroll(
+        { sequence_id: body.sequence_id, entity_type: body.entity_type, entity_id: body.entity_id },
+        {
+          db: opts.db,
+          enrollmentsRepo: opts.enrollmentsRepo,
+          stepExecutionsRepo: opts.stepExecutionsRepo,
+          stepQueue: opts.stepQueue as Queue<StepJobData>,
+          publisher: opts.publisher as NurturingPublisher,
+        },
+      );
+
+      return reply.code(200).send({ ok: true });
     },
   );
 };

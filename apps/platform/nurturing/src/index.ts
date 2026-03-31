@@ -14,8 +14,9 @@ import { EnrollmentManager } from './services/enrollment-manager.js';
 import sequencesRoutes from './routes/sequences.js';
 import enrollmentsRoutes from './routes/enrollments.js';
 import { createStepQueue, type StepJobData } from './queue/step-queue.js';
+import { createPublisher, type NurturingPublisher } from './events/publisher.js';
 
-export async function createApp(opts?: { queue?: Queue<StepJobData> | null }): Promise<FastifyInstance> {
+export async function createApp(opts?: { queue?: Queue<StepJobData> | null; publisher?: NurturingPublisher | null }): Promise<FastifyInstance> {
   const fastify = Fastify({ logger: true });
   const db = createDb();
   const definitionsRepo = new SequenceDefinitionsRepository(db);
@@ -32,6 +33,17 @@ export async function createApp(opts?: { queue?: Queue<StepJobData> | null }): P
     queue = redisUrl ? createStepQueue(redisUrl) : null;
   }
 
+  let publisher: NurturingPublisher | null;
+  if (opts !== undefined && 'publisher' in opts) {
+    publisher = opts.publisher ?? null;
+  } else {
+    try {
+      publisher = createPublisher();
+    } catch (_err) {
+      publisher = null;
+    }
+  }
+
   const enrollmentManager = new EnrollmentManager(
     db,
     definitionsRepo,
@@ -44,7 +56,7 @@ export async function createApp(opts?: { queue?: Queue<StepJobData> | null }): P
   await fastify.register(sensible);
   await fastify.register(authPlugin);
   await fastify.register(sequencesRoutes, { definitionsRepo, versionsRepo, versioningService });
-  await fastify.register(enrollmentsRoutes, { enrollmentManager, enrollmentsRepo, stepExecutionsRepo });
+  await fastify.register(enrollmentsRoutes, { enrollmentManager, enrollmentsRepo, stepExecutionsRepo, db, stepQueue: queue, publisher });
 
   fastify.get('/healthz', async () => {
     return { ok: true };
