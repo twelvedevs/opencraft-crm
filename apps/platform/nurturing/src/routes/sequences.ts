@@ -8,6 +8,10 @@ export interface SequencesRouteOptions {
   versionsRepo: SequenceVersionsRepository;
 }
 
+const CreateBodySchema = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 255 }),
+});
+
 const ListQuerySchema = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 })),
   cursor: Type.Optional(Type.String()),
@@ -19,6 +23,38 @@ const ParamsSchema = Type.Object({
 
 const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastify, opts) => {
   const { definitionsRepo, versionsRepo } = opts;
+
+  fastify.post(
+    '/sequences',
+    {
+      preHandler: [fastify.authenticate],
+      schema: {
+        body: CreateBodySchema,
+      },
+    },
+    async (request, reply) => {
+      const { name } = request.body as { name: string };
+      const created_by = (request.user as { sub: string; role: string }).sub;
+
+      const def = await definitionsRepo.create({ name, created_by });
+      await versionsRepo.insert({
+        sequence_id: def.id,
+        version: 1,
+        steps: [],
+        cancel_on_opt_out: true,
+        created_by,
+      });
+
+      return reply.code(201).send({
+        id: def.id,
+        name: def.name,
+        status: def.status,
+        current_version: def.current_version,
+        active_version: def.active_version,
+        created_at: def.created_at,
+      });
+    },
+  );
 
   fastify.get(
     '/sequences',
