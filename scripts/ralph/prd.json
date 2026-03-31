@@ -768,7 +768,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 32,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-012] To simulate multiple retry attempts, create mock Job objects: const makeJob = (attemptsMade: number) => ({ data: jobData, attemptsMade, id: 'job-1' } as unknown as Job<StepJobData>). Call processor(makeJob(0)) through processor(makeJob(4)) sequentially. The incrementAttempt call happens on each failure, so after 5 calls the DB attempt column should be 5. For the emit_event test with EventBridge: spy on the ebClient.send method passed into ActionExecutorDeps — the step worker's ebClient is injected, so you can pass a mock. Alternative: spy on fetch if emit-event uses fetch (it does not — it uses @aws-sdk/client-eventbridge SDK calls). For A/B: the sequence definition must have ab_test configured so the enrollment manager assigns variant B (100% B split). Check enrollment row ab_variant = 'B' before running the worker test to confirm variant assignment."
     },
     {

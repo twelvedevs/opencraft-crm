@@ -408,3 +408,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Two separate deps instances (deps1, deps2) for the optimistic lock test ensure independent DB connections for concurrent calls
   - vi.spyOn(globalThis, 'fetch') — not global.fetch or window.fetch — to intercept Node 24 native fetch in integration tests
 ---
+
+## 2026-03-31 - US-032
+- Added step-worker-advanced.test.ts with 5 integration tests covering advanced step-worker paths
+- Files changed:
+  - apps/platform/nurturing/test/integration/step-worker-advanced.test.ts (new, 5 tests, all skipped without DB)
+- **Learnings for future iterations:**
+  - For retry simulation: after each failed attempt, step status stays 'running'; must manually reset to 'pending' between calls so claimForExecution succeeds on each retry
+  - emit_event tests: pass a { send: vi.fn() } mock as ebClient via buildWorkerDeps overrides; access Detail via `mock.calls[0][0].input.Entries[0].Detail`
+  - A/B test: pass `ab_test: { enabled: true, split: { A: 0, B: 100 } }` in the PUT /sequences/:id body; verify enrollment.ab_variant='B' before running worker
+  - createActiveSequence helper needs to forward `ab_test` in the PUT payload for A/B tests (use options object pattern)
+---
