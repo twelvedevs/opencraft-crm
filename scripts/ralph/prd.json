@@ -476,7 +476,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 4, originally US-006] The sid param is a user-defined step ID string (e.g. 'step-1') — NOT a UUID — so use Type.String() without format:'uuid'. The route path is /sequences/:id/enrollments/:eid/steps/:sid (not /output suffix) because the output is included in the step response body. This matches the spec Section 6 route: 'GET /sequences/:id/enrollments/:eid/steps/:sid/output' — use '/output' suffix if specified in spec; check spec Section 6 and match exactly. The GET /sequences/:id/enrollments/:eid route does not validate that the enrollment belongs to the sequence in the URL params — for simplicity, findById(eid) is sufficient."
     },
     {

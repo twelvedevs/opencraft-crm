@@ -245,3 +245,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - The `queue` variable is computed before enrollmentManager creation — pass it directly rather than re-evaluating opts?.queue
   - enrollmentsRoutes uses preHandler: [fastify.authenticate] only (no role check) — service-to-service callers use standard JWT
 ---
+
+## 2026-03-31 - US-019
+- Added GET /sequences/:id/enrollments, GET /sequences/:id/enrollments/:eid, and GET /sequences/:id/enrollments/:eid/steps/:sid routes to apps/platform/nurturing/src/routes/enrollments.ts
+- Files changed:
+  - apps/platform/nurturing/src/routes/enrollments.ts (3 new GET routes prepended before existing POST /sequences/enroll)
+- **Learnings for future iterations:**
+  - All required repo methods (findBySequenceId, findById, findByEnrollmentId, findByEnrollmentAndStepId) already existed from prior stories — no repo changes needed
+  - TypeBox schemas defined as module-level consts before plugin function — same pattern as sequences.ts
+  - sid param for step lookup uses Type.String() without format:'uuid' — it's a user-defined step ID string (e.g. 'step-1'), not a UUID
+  - GET /sequences/:id/enrollments/:eid uses findById(eid) only — no validation that enrollment belongs to the sequence in the URL
+---
