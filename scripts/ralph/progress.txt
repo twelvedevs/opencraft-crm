@@ -118,3 +118,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - `fastify.httpErrors.forbidden()` works because `@fastify/sensible` is registered first in index.ts
   - `request.user` from @fastify/jwt is typed as `unknown` by default — cast to `{ sub: string; role: string }` at call site
 ---
+
+## 2026-03-31 - US-009
+- Created GET /sequences list and GET /sequences/:id detail routes
+- Files changed:
+  - apps/platform/nurturing/src/routes/sequences.ts (new — SequencesRouteOptions interface, GET /sequences, GET /sequences/:id)
+  - apps/platform/nurturing/src/index.ts (createDb, SequenceDefinitionsRepository, SequenceVersionsRepository instantiation, register sequencesRoutes)
+- **Learnings for future iterations:**
+  - Route plugin opts typed via FastifyPluginAsync<OptionsInterface> — same pattern as automation rulesRoutes
+  - step_count computed via Array.isArray(version.steps) ? (version.steps as unknown[]).length : 0; version typed as unknown in repo so cast needed
+  - db is created once in index.ts and passed to repo constructors before route registration
+  - preHandler array uses [fastify.authenticate] — fastify.authenticate is decorated by authPlugin (US-008)
+  - `reply.code(404).send(...)` for 404 (use .code(), not .status(), for Fastify 5 compatibility)
+---

@@ -231,7 +231,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 3, originally US-002] The routes file takes repos as plugin opts — this is the same dependency-injection pattern used in the automation engine routes. The db instance is created once in src/index.ts and passed to all repos and route plugins. Import SequenceDefinitionsRepository and SequenceVersionsRepository from their repo files. Use @sinclair/typebox Type helpers for schema validation — import { Type, Static } from '@sinclair/typebox'. For the route schema, set schema: { querystring: QuerySchema } etc. The step_count is derived by parsing the 'steps' jsonb field — the repo returns it as unknown so cast via (version.steps as unknown[]) after checking Array.isArray. Fastify 5 uses the 'preHandler' key (camelCase) in route options."
     },
     {
