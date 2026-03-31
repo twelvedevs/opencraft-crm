@@ -750,7 +750,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 31,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-011] The processor function is tested by importing createStepWorker and extracting the processor, or by calling the step worker's internal processor directly. The cleanest approach: export the processor logic as a separate function testable without a live BullMQ connection, or test via createStepWorker with a mock Redis URL (the processor is just a function). For the deferred step test: after invoking processor(), updateDeferral sets status back to 'pending' and clears job_id, then the new BullMQ job is enqueued (mockQueue.add), then updateJobId writes the new job_id. The DB step should end with status='pending' and a new non-null job_id. To mock fetch: vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, opts) => { const urlStr = String(url); if (urlStr.includes('/templates/render')) return new Response(JSON.stringify({ body: 'Hello test' }), { status: 200 }); ... }). Remember to call vi.restoreAllMocks() in afterEach."
     },
     {
