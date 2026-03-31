@@ -121,6 +121,19 @@ export class StepExecutionsRepository {
       .where('scheduled_at', '<', this.db.raw("now() - interval '1 minute'")) as Promise<SequenceStepExecution[]>;
   }
 
+  async findNullJobIdPending(): Promise<SequenceStepExecution[]> {
+    return this.db(STEPS_TABLE)
+      .whereNull('job_id')
+      .where({ status: 'pending' }) as Promise<SequenceStepExecution[]>;
+  }
+
+  async findOrphanedPending(): Promise<SequenceStepExecution[]> {
+    return this.db(STEPS_TABLE)
+      .where({ status: 'pending' })
+      .whereNotNull('job_id')
+      .where('scheduled_at', '<', this.db.raw("now() - interval '1 minute'")) as Promise<SequenceStepExecution[]>;
+  }
+
   async findById(id: string): Promise<SequenceStepExecution | null> {
     const row = await this.db(STEPS_TABLE).where({ id }).first();
     return (row as SequenceStepExecution) ?? null;
