@@ -5,6 +5,7 @@ export default defineConfig({
     environment: 'node',
     include: ['test/**/*.test.ts'],
     passWithNoTests: true,
+    fileParallelism: false,
     env: {
       DATABASE_URL: 'postgres://test:test@localhost:5432/test',
       REDIS_URL: 'redis://localhost:6379',
