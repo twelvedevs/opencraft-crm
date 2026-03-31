@@ -604,3 +604,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - ab_test JSONB column may come back as string or object depending on Knex/pg parsing — handled both cases with typeof check + JSON.parse
   - The consumer wraps entire body in try/catch for crash safety, plus validates event shape before processing
 ---
+
+## 2026-03-31 - US-049
+- Added getEnrollmentCounts and getAbBreakdown methods to EnrollmentsRepository
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (2 new methods appended)
+- **Learnings for future iterations:**
+  - db.raw<{ rows: Array<Record<string, string>> }>(...).then(r => r.rows) is the pattern for raw SQL returning typed rows in Knex 3
+  - FILTER (WHERE ...) clause syntax works in PostgreSQL for conditional aggregation — cleaner than CASE WHEN
+  - getAbBreakdown uses CONVERSIONS_TABLE constant defined inside the method (not module-level) since it's only used there
+  - COUNT(sc.id) (not COUNT(*)) for LEFT JOIN conversions — ensures nulls from missing rows don't inflate count
+---
