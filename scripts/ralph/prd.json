@@ -369,7 +369,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 4, originally US-002] Import 'import type { Knex } from \"knex\"' for the trx parameter type. The pattern (trx ?? this.db) means all methods work both inside and outside a Knex transaction. For insertMany, Knex 3 batch insert: db('table').insert(arrayOfRows).returning('*') returns the inserted rows typed as any[] — cast to SequenceStepExecution[]. The context field is JSONB in Postgres; Knex returns it already parsed as an object, so no JSON.parse needed. The existing repo classes from Phase 2 likely already have a constructor taking a Knex instance (this.db) — add these methods to those existing classes without restructuring."
     },
     {

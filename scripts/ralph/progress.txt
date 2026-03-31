@@ -196,3 +196,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - createApp opts pattern: `if (opts !== undefined && 'queue' in opts)` distinguishes "explicitly passed null" from "no opts at all" (fallback to REDIS_URL)
   - test/helpers/build-app.ts can now just delegate to createApp({ queue: null }) — no need to duplicate plugin/route registration
 ---
+
+## 2026-03-31 - US-015
+- Extended enrollments repo: renamed InsertEnrollmentInput → InsertEnrollmentData (added status + enrolled_at fields, updated context to Record<string, unknown>); renamed findBySequence → findBySequenceId; insert now uses data.status and data.enrolled_at instead of hardcoded values
+- Extended step-executions repo: renamed InsertStepInput → InsertStepExecutionData (with explicit job_id: null, status: 'pending', attempt: 0 literal types); renamed findByEnrollment → findByEnrollmentId; renamed findByEnrollmentAndStep → findByEnrollmentAndStepId
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts
+- **Learnings for future iterations:**
+  - Neither repo was imported anywhere else yet — safe to rename types and methods without cascading changes
+  - InsertEnrollmentData now accepts caller-provided status and enrolled_at (enrollment manager controls these values, not the repo)
+  - InsertStepExecutionData uses literal types (job_id: null, status: 'pending', attempt: 0) so callers get compile-time enforcement
+  - findBySequenceId cursor decoded as new Date(cursor) per acceptance criteria (not passed as raw string)
+---
