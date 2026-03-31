@@ -317,3 +317,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Email Service endpoint is POST /emails/send (vs /messages/send for SMS)
   - subject? is optional in params but the rendered template always provides it
 ---
+
+## 2026-03-31 - US-025
+- Created call-ai action handler as a pure function
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/call-ai.ts (new — ResolvedCallAiParams, CallAiResult interfaces + executeCallAi function)
+- **Learnings for future iterations:**
+  - Simplest of the three action handlers: single fetch to AI Service, no template rendering step
+  - Returns CallAiResult { output, auto_send } — step worker uses auto_send to decide whether to chain a send_message call
+  - Only system_prompt, user_prompt, model are sent to AI Service (no extra fields per arch spec)
+  - auto_send defaults to false via `params.auto_send ?? false`
+---

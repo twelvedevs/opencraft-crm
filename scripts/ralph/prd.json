@@ -600,7 +600,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 25,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-005] The call-ai handler returns auto_send so the step worker can decide whether to chain a send_message call. Both system_prompt and user_prompt are template strings already resolved by the step worker before calling this handler. Only these three fields are sent to the AI Service: { system_prompt, user_prompt, model } — no extra fields per the arch spec (Section 3.2 sync calls table). The AI Service response shape { text: string } is assumed based on the @ortho/ai-service design."
     },
     {
