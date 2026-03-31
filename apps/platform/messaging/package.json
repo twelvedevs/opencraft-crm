@@ -16,6 +16,7 @@
     "seed": "knex seed:run --knexfile knexfile.ts"
   },
   "dependencies": {
+    "@fastify/formbody": "^8.0.2",
     "@fastify/sensible": "^6.0.0",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
     "@ortho/logger": "file:../../../packages/@ortho/logger",

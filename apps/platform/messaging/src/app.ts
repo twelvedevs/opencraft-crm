@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
+import formbody from '@fastify/formbody';
 import type { Redis } from 'ioredis';
 import type { Knex } from './db.js';
 import type { EventBus } from '@ortho/event-bus';
@@ -9,6 +10,7 @@ import { healthRoutes } from './routes/health.js';
 import { numberRoutes } from './routes/numbers.js';
 import { messageRoutes } from './routes/messages.js';
 import { optOutRoutes } from './routes/opt-outs.js';
+import { webhookRoutes } from './routes/webhooks.js';
 
 export async function buildApp(
   db: Knex,
@@ -20,6 +22,7 @@ export async function buildApp(
   const app = Fastify({ logger: true });
 
   await app.register(sensible);
+  await app.register(formbody);
 
   app.decorate('db', db);
   app.decorate('eventBus', eventBus);
@@ -43,6 +46,7 @@ export async function buildApp(
   await app.register(numberRoutes);
   await app.register(messageRoutes);
   await app.register(optOutRoutes);
+  await app.register(webhookRoutes);
 
   return app;
 }
