@@ -13,6 +13,7 @@
 |----------|-------------|
 | [arch/adr-event-bus.md](arch/adr-event-bus.md) | ADR: Event bus selection and design |
 | [arch/adr-logger.md](arch/adr-logger.md) | ADR: Logger selection and configuration |
+| [arch/adr-interpolator.md](arch/adr-interpolator.md) | ADR: `@ortho/interpolator` — field interpolation & active hours |
 
 ## Component Design Specs (`docs/superpowers/specs/`)
 

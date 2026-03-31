@@ -24,7 +24,8 @@
       "Bash(npm run:*)",
       "Bash(npm test:*)",
       "Bash(rm -rf node_modules package-lock.json)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(ls /workspace/docs/NAVIGATOR*)"
     ]
   }
 }
