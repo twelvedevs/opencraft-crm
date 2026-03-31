@@ -2,10 +2,12 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyPluginAsync } from 'fastify';
 import type { SequenceDefinitionsRepository } from '../repositories/sequence-definitions.repo.js';
 import type { SequenceVersionsRepository } from '../repositories/sequence-versions.repo.js';
+import type { VersioningService } from '../services/versioning.service.js';
 
 export interface SequencesRouteOptions {
   definitionsRepo: SequenceDefinitionsRepository;
   versionsRepo: SequenceVersionsRepository;
+  versioningService: VersioningService;
 }
 
 const CreateBodySchema = Type.Object({
@@ -21,8 +23,15 @@ const ParamsSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
 });
 
+const SaveDraftBodySchema = Type.Object({
+  active_hours: Type.Optional(Type.Unknown()),
+  cancel_on_opt_out: Type.Optional(Type.Boolean()),
+  steps: Type.Array(Type.Unknown()),
+  ab_test: Type.Optional(Type.Unknown()),
+});
+
 const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastify, opts) => {
-  const { definitionsRepo, versionsRepo } = opts;
+  const { definitionsRepo, versionsRepo, versioningService } = opts;
 
   fastify.post(
     '/sequences',
@@ -122,6 +131,36 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
         active_version_data: activeVersion,
         current_version_data: currentVersion,
       });
+    },
+  );
+  fastify.put(
+    '/sequences/:id',
+    {
+      preHandler: [fastify.authenticate],
+      schema: {
+        params: ParamsSchema,
+        body: SaveDraftBodySchema,
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        active_hours?: unknown;
+        cancel_on_opt_out?: boolean;
+        steps: unknown[];
+        ab_test?: unknown;
+      };
+      const createdBy = (request.user as { sub: string; role: string }).sub;
+
+      try {
+        const result = await versioningService.saveDraft(id, body, createdBy);
+        return reply.send(result);
+      } catch (err) {
+        if (err instanceof Error && err.message === 'sequence_not_found') {
+          return reply.code(404).send({ error: 'sequence_not_found' });
+        }
+        throw err;
+      }
     },
   );
 };
