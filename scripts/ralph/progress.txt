@@ -615,3 +615,15 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - getAbBreakdown uses CONVERSIONS_TABLE constant defined inside the method (not module-level) since it's only used there
   - COUNT(sc.id) (not COUNT(*)) for LEFT JOIN conversions — ensures nulls from missing rows don't inflate count
 ---
+
+## 2026-03-31 - US-050
+- Added computeAbSignificance (two-proportion z-test) to apps/platform/nurturing/src/services/ab-significance.ts
+- Files changed:
+  - apps/platform/nurturing/src/services/ab-significance.ts (AbVariantStats, AbSignificanceResult interfaces, computeAbSignificance)
+  - apps/platform/nurturing/test/unit/ab-significance.test.ts (6 tests, all passing)
+- **Learnings for future iterations:**
+  - PRD notes claim 42/175 vs 31/175 gives p≈0.031 — this is WRONG. Actual math gives p≈0.148. The correct numbers for p≈0.031 are 43/175 vs 27/175 (same pattern as US-003 PRD timestamp error).
+  - The A&S 7.1.26 erf approximation (5-term polynomial) is accurate to ±1.5e-7 — sufficient for p=0.05 threshold.
+  - Guard clause: if se === 0 (zero conversions in both variants), the function returns { significant: false, winner: null, p_value: 1 } without division by zero.
+  - Minimum 100 enrollments per variant is a hard threshold — checked before any z-test computation.
+---
