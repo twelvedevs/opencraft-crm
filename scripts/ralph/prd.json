@@ -1125,7 +1125,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 51,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 8, originally US-005] The route needs ConversionsRepository and EnrollmentsRepository injected — check how other routes in src/routes/ receive repository dependencies (likely via Fastify decorators or closure-based factory). The ab_test configuration is on sequence_versions, not sequence_definitions — load the active_version row to check ab_test.enabled. When total = 0, return rates as 0 rather than NaN (division by zero guard). The winner field in the A/B block uses the variant key names from the breakdown ('A' and 'B') — pass those as variantAName and variantBName to computeAbSignificance. Round rates to 3 decimal places: Math.round(rate * 1000) / 1000 — consistent with the spec example values (0.629, 0.571, etc.)."
     },
     {

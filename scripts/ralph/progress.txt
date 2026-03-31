@@ -627,3 +627,17 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Guard clause: if se === 0 (zero conversions in both variants), the function returns { significant: false, winner: null, p_value: 1 } without division by zero.
   - Minimum 100 enrollments per variant is a hard threshold — checked before any z-test computation.
 ---
+
+## 2026-03-31 - US-051
+- Implemented GET /sequences/:id/stats endpoint
+- Files changed:
+  - apps/platform/nurturing/src/routes/stats.ts (new stats route plugin)
+  - apps/platform/nurturing/src/index.ts (register statsRoutes)
+- **Learnings for future iterations:**
+  - Route options pattern: StatsRouteOptions interface with definitionsRepo, versionsRepo, enrollmentsRepo injected via FastifyPluginAsync closure
+  - A/B test config is on sequence_versions.ab_test (not sequence_definitions) — always load the active_version row to check ab_test.enabled
+  - When total = 0, guard rates as 0 to avoid NaN from division by zero
+  - Rates rounded to 3 decimal places: Math.round(rate * 1000) / 1000
+  - getAbBreakdown returns rows only for variants with enrollments; use find('A')/'B' with ?? 0 fallbacks
+  - computeAbSignificance takes variant name strings 'A' and 'B' for winner field labeling
+---
