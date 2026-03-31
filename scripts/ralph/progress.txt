@@ -1,0 +1,34 @@
+# Ralph Progress Log
+Started: Tue Mar 31 19:22:35 UTC 2026
+
+## Codebase Patterns
+- Use `{ Redis } from 'ioredis'` (named import, NOT default import) — default import fails typecheck
+- Follow email service (`apps/platform/email/`) patterns for env.ts, db.ts, app.ts, index.ts, types.d.ts, health.ts
+- TypeBox schemas use `Type.Union([Type.String(), Type.Null()])` for nullable columns
+- Repositories follow class pattern with Knex constructor injection, `returning('*')` on inserts
+- Migrations use `.ts` extension with `export async function up/down(knex: Knex)` pattern
+- Use `knex.raw('gen_random_uuid()')` for UUID PKs, `knex.fn.now()` for timestamps
+- Cursor-based pagination: base64-encode `{ created_at, id }` JSON for keyset pagination
+- Route plugins: register WITHOUT prefix in app.ts, use full paths (e.g. `/numbers`) inside the plugin — email service `domainRoutes` uses this pattern
+- Unique constraint violations: catch with Knex error code `23505` via `isUniqueViolation()` helper
+- Knexfile: use `export default { ... }` for ESM compatibility
+
+---
+
+## 2026-03-31 - US-001
+- What was implemented: Full project scaffold for messaging service — package.json, tsconfig, env parsing, db module, Knex migration (messaging_numbers, messaging_messages, messaging_opt_outs), three repositories (NumbersRepository, MessagesRepository, OptOutsRepository), Fastify app bootstrap with health check, index.ts entry point
+- Files changed: 13 files in apps/platform/messaging/ (package.json, tsconfig.json, src/env.ts, src/db.ts, src/app.ts, src/index.ts, src/types.d.ts, src/routes/health.ts, src/repositories/numbers.repo.ts, src/repositories/messages.repo.ts, src/repositories/opt-outs.repo.ts, migrations/001_initial_schema.ts, package-lock.json)
+- **Learnings for future iterations:**
+  - ioredis uses named import `{ Redis }`, not default — default causes TS2351
+  - The messaging service has NO BullMQ queues — Redis is only for rate limiting
+  - Email service is the closest pattern reference for this service
+---
+
+## 2026-03-31 - US-002
+- What was implemented: Phone number pool CRUD routes (POST/GET/DELETE /numbers, GET /numbers/resolve), dev seed script with 4 test numbers, knexfile.ts for Knex CLI
+- Files changed: apps/platform/messaging/src/routes/numbers.ts (new), apps/platform/messaging/src/app.ts (register numberRoutes), apps/platform/messaging/seeds/dev-numbers.ts (new), apps/platform/messaging/knexfile.ts (new), apps/platform/messaging/package.json (seed script)
+- **Learnings for future iterations:**
+  - Don't use prefix option when registering route plugins — put full paths in the plugin itself (email service pattern)
+  - Seed scripts use `onConflict().ignore()` for idempotent re-runs
+  - Query param booleans come as strings — parse with `=== 'true'`
+---

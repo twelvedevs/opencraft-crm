@@ -12,7 +12,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed": "knex seed:run --knexfile knexfile.ts"
   },
   "dependencies": {
     "@fastify/sensible": "^6.0.0",

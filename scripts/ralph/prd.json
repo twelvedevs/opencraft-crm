@@ -24,7 +24,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Follow email service patterns exactly for app.ts, index.ts, db.ts, env.ts, types.d.ts, health.ts. Use Redis import from 'ioredis'. The messaging service does NOT use BullMQ — no queues. Redis is only for rate limiting (added in US-003). createEventBus from @ortho/event-bus. Migrations use .ts extension and the standard Knex up/down pattern."
     },
     {
@@ -43,7 +43,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "No auth middleware on these routes for now — spec says auth is via @ortho/auth-middleware but that package integration is deferred. The /numbers/resolve endpoint is the internal resolution path used by the send flow in US-003. The knexfile.ts needs to handle ESM — use `export default { ... }` with type: 'module'."
     },
     {
