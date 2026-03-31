@@ -429,6 +429,17 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - No unit tests needed for publisher methods — pure delegation to EventBridgeClient
 ---
 
+## 2026-03-31 - US-035
+- Created unenrollment service (src/services/unenrollment.ts)
+- Files changed:
+  - apps/platform/nurturing/src/services/unenrollment.ts (new — UnenrollParams, UnenrollmentDeps, UnenrollResult interfaces + unenroll() function)
+- **Learnings for future iterations:**
+  - Repo classes use named exports (not default exports) — `import type { EnrollmentsRepository }` not `import type EnrollmentsRepository`
+  - unenroll follows 5-step pattern: guard (findActiveByEntity) → atomic transaction (markUnenrolled + cancelPendingByEnrollment) → best-effort BullMQ removal → publish event → return result
+  - Publisher call is AFTER the transaction commits to avoid holding DB connection open during external calls
+  - Queue<StepJobData> type is used; import StepJobData from '../queue/step-queue.js' for the type parameter
+---
+
 ## 2026-03-31 - US-034
 - Extended EnrollmentsRepository and StepExecutionsRepository with unenrollment-specific query and mutation methods
 - Files changed:

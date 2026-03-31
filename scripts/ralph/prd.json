@@ -822,7 +822,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 35,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-003] The transaction atomically sets enrollment status = 'unenrolled' AND cancels all pending steps. Any step already in 'running' status is untouched (cancelPendingByEnrollment only touches status = 'pending'). If a running step worker later calls enrollmentsRepo.findById and sees status = 'unenrolled', it was already past the Step 1 guard check in the step worker (which checks before the optimistic lock) — this is fine; the step completes normally. The best-effort BullMQ removal is wrapped in individual try/catch per job_id to ensure a failed removal does not abort the rest. If a removed job is somehow still fired later, the step worker guard (Step 1: enrollment.status !== 'active') will cancel it cleanly. The stepQueue type is Queue<StepJobData> imported from '../queue/step-queue.js' — use the same type as in Phase 5's enrollment manager. The publisher.publishEnrollmentUnenrolled is called AFTER the transaction commits, not inside it, to avoid holding the DB transaction open during an external HTTP call."
     },
     {
