@@ -800,7 +800,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 34,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-002] The trx parameter on findActiveByEntity, markUnenrolled, and cancelPendingByEnrollment enables the unenrollment service to run all three within a single Knex transaction using deps.db.transaction(async (trx) => { ... }). findAllActiveByEntityId has no trx parameter because the opt-out consumer calls it outside any transaction — it iterates the results and calls unenroll() per enrollment, each with its own transaction. The cancelPendingByEnrollment RETURNING clause returns an array of row objects in Knex 3 (not raw scalars), so map with r.job_id. The filter to non-null job_ids is important: steps with job_id = NULL were never enqueued (crash recovery path), so there is nothing to remove from BullMQ for them. Entity type is included in findActiveByEntity to prevent collision between different entity types that share the same entity_id string (spec Section 5.3 note)."
     },
     {

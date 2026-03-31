@@ -428,3 +428,15 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Pattern is identical to existing methods: PutEventsCommand with Source 'platform.nurturing', DetailType as event name, Detail: JSON.stringify(data)
   - No unit tests needed for publisher methods — pure delegation to EventBridgeClient
 ---
+
+## 2026-03-31 - US-034
+- Extended EnrollmentsRepository and StepExecutionsRepository with unenrollment-specific query and mutation methods
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (modified findActiveByEntity to return `SequenceEnrollment | null` with LIMIT 1 and trx param; added findAllActiveByEntityId; added markUnenrolled)
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (added cancelPendingByEnrollment returning string[])
+- **Learnings for future iterations:**
+  - findActiveByEntity previously returned SequenceEnrollment[] — changed to SequenceEnrollment | null with .limit(1).first() per spec; only mock callers in tests needed updating (no production callers yet)
+  - cancelPendingByEnrollment RETURNING clause: Knex 3 returns array of row objects `{ job_id: string | null }`, not scalars — map with `r.job_id` then filter nulls
+  - findAllActiveByEntityId takes only entityId (no entityType) — distinct from findActiveByEntityAcrossAllSequences which takes both
+  - markUnenrolled uses `qb.fn.now()` for updated_at — same pattern as other update methods in the service
+---
