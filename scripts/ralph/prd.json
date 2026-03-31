@@ -328,7 +328,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 3, originally US-006] To avoid having to refactor src/index.ts, create apps/platform/nurturing/test/helpers/build-app.ts that imports and calls the same Fastify setup (register plugins + routes) returning the fastify instance without calling fastify.listen() — tests inject directly via fastify.inject(). To mint JWTs in tests without running a server first, use the 'jsonwebtoken' package (add as devDependency if not present) with the same JWT_SECRET value. The test.skipIf pattern in Vitest: import { it, describe, beforeAll } from 'vitest'; use describe.skipIf(!process.env['DATABASE_URL'])('sequences API integration', () => { ... }). Use a beforeAll to run migrations before the test suite if DATABASE_URL is set — run knex.migrate.latest() using the knexfile config. Each test should clean up its own created sequence using a direct DB call in afterEach or afterAll to keep the DB tidy between runs."
     },
     {

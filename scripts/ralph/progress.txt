@@ -165,3 +165,18 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - setActiveVersion and updateStatus methods already exist in SequenceDefinitionsRepository from US-010/US-011
   - ParamsSchema (TypeBox uuid) was already defined at top of file — reuse for both routes
 ---
+
+## 2026-03-31 - US-013
+- Created integration test suite for sequences API
+- Files changed:
+  - apps/platform/nurturing/package.json (added jsonwebtoken + @types/jsonwebtoken as devDependencies)
+  - apps/platform/nurturing/package-lock.json (updated)
+  - apps/platform/nurturing/test/helpers/build-app.ts (new — Fastify app factory without listen())
+  - apps/platform/nurturing/test/integration/sequences-api.test.ts (new — 12 integration tests)
+- **Learnings for future iterations:**
+  - describe.skipIf(!process.env['DATABASE_URL']) is the correct Vitest pattern for DB-gated tests — 12 tests skip gracefully when no DB is set
+  - build-app.ts mirrors src/index.ts but calls fastify.ready() instead of fastify.listen() — inject-based tests work without a bound port
+  - jsonwebtoken.sign({ sub, role }, JWT_SECRET) mints test JWTs before app creation; set process.env['JWT_SECRET'] in beforeAll before buildApp()
+  - Knex migration runner needs absolute migrations directory path in programmatic use — use join(dirname(fileURLToPath(import.meta.url)), '../../migrations')
+  - createdIds array + afterAll cleanup: track created IDs, delete sequence_versions first (FK), then sequence_definitions
+---
