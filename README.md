@@ -184,6 +184,35 @@ Store documents in
 - docs/arch/adr-event-bus.md
 ```
 
+Code review:
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- @docs/superpowers/specs/2026-03-30-nurturing-engine-updated-design.md
+- @docs/superpowers/specs/2026-03-24-automation-engine-design.md
+
+Do code-review of the package "interpolator" ( packages/@ortho/interpolator ) either it completely satisfies requirements of the Automation Engine and Nurturing Engine.
+```
+
+Docs:
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- @docs/superpowers/specs/2026-03-30-nurturing-engine-updated-design.md
+- @docs/superpowers/specs/2026-03-24-automation-engine-design.md
+
+Scan packages implementation in:
+- packages/@ortho/interpolator
+
+Write package API description so that other consumers of these packages know how to use it. Provide several examples. Format should be similar to ADR.
+Store document in
+- docs/arch/adr-interpolator.md
+
+Update docs NAVIGATOR
+```
+
 
 
 #### Notification Service
@@ -299,4 +328,28 @@ Write implementation plan for Phase 1, store to prd.json
 ```
 - For loop:
 - `claude -p 'Load the ralph skill. Read docs: - overall platform & product architecture at @docs/01-platform-arch-design.md ; - component architecture design @docs/superpowers/specs/2026-03-30-nurturing-engine-updated-design.md ; - implementation phases @docs/superpowers/specs/2026-03-30-nurturing-engine-phases.md . Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest. Write implementation plan for Phase 1, store to ./scripts/ralph/prd.json ' --dangerously-skip-permissions`
+
+
+Alternative:
+```bash
+time claude -p 'Load the ralph skill. \
+Read docs: \
+- overall platform & product architecture at @docs/01-platform-arch-design.md ; \
+- component architecture design @docs/superpowers/specs/2026-03-30-nurturing-engine-updated-design.md ; \
+- implementation phases @docs/superpowers/specs/2026-03-30-nurturing-engine-phases.md . \
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest. \
+Write implementation plan for Phase 2, store to ./scripts/ralph/prd-phase-2.json \
+' --dangerously-skip-permissions
+```
+
+
+Script for PRD combining:
+```
+Load the ralph skill. We have number of PRD files scripts/ralph/prd-phase-*.json for the same specification. Implement me javascript code that:
+- combines all stories from all PRD files into single combined json file
+- keeps sequential number of stories across all PRD files so that all tasks will be executed in correct order
+- produces combined PRD file and stores it in scripts/ralph/prd-combined.json
+- store resulting javascript file in scripts/combine-prd-files.js
+```
+
 
