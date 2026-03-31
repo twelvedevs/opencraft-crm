@@ -24,6 +24,19 @@ export interface StepFailedPayload {
   attempt: number;
 }
 
+export interface EnrollmentUnenrolledPayload {
+  enrollment_id: string;
+  sequence_id: string;
+  entity_type: string;
+  entity_id: string;
+}
+
+export interface AllSequencesCancelledPayload {
+  entity_type: string;
+  entity_id: string;
+  cancelled_count: number;
+}
+
 export class NurturingPublisher {
   constructor(
     private ebClient: EventBridgeClient,
@@ -53,6 +66,36 @@ export class NurturingPublisher {
             EventBusName: this.busName,
             Source: 'platform.nurturing',
             DetailType: 'nurturing.enrollment_completed',
+            Detail: JSON.stringify(data),
+          },
+        ],
+      }),
+    );
+  }
+
+  async publishEnrollmentUnenrolled(data: EnrollmentUnenrolledPayload): Promise<void> {
+    await this.ebClient.send(
+      new PutEventsCommand({
+        Entries: [
+          {
+            EventBusName: this.busName,
+            Source: 'platform.nurturing',
+            DetailType: 'nurturing.enrollment_unenrolled',
+            Detail: JSON.stringify(data),
+          },
+        ],
+      }),
+    );
+  }
+
+  async publishAllSequencesCancelled(data: AllSequencesCancelledPayload): Promise<void> {
+    await this.ebClient.send(
+      new PutEventsCommand({
+        Entries: [
+          {
+            EventBusName: this.busName,
+            Source: 'platform.nurturing',
+            DetailType: 'nurturing.all_sequences_cancelled',
             Detail: JSON.stringify(data),
           },
         ],
