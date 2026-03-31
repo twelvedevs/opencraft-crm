@@ -16,6 +16,7 @@
   "dependencies": {
     "@aws-sdk/client-eventbridge": "^3.0.0",
     "@aws-sdk/client-sqs": "^3.0.0",
+    "@fastify/jwt": "^9.0.0",
     "@fastify/sensible": "^5.0.0",
     "@sinclair/typebox": "^0.34.0",
     "bullmq": "^5.0.0",

@@ -1,9 +1,11 @@
 import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
+import authPlugin from './plugins/auth.js';
 
 const fastify = Fastify({ logger: true });
 
 await fastify.register(sensible);
+await fastify.register(authPlugin);
 
 fastify.get('/healthz', async () => {
   return { ok: true };
