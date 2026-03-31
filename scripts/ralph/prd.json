@@ -155,7 +155,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 2, originally US-003] Pattern mirrors apps/platform/automation/src/repositories/rules.repository.ts exactly — same SCHEMA constant prefix, same .returning('*') pattern, same Knex type annotations. Both repository files should be in src/repositories/ directory. SCHEMA constant should be defined once per file (not shared between files yet — sharing is premature). Use (row as SequenceDefinition) ?? null cast pattern from automation repo. For findAll keyset cursor, created_at is a Date in the TS interface but the cursor param from HTTP will be a string ISO timestamp — the WHERE clause comparing timestamptz column against a string literal works in Postgres."
     },
     {

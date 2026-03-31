@@ -79,3 +79,15 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Migration seed SQL goes in a TypeScript block comment (/* ... */) above the return — NOT executed
   - knexfile.ts uses process.env.DATABASE_URL (not process.env['DATABASE_URL']) — consistent with automation pattern
 ---
+
+## 2026-03-31 - US-006
+- Created sequence definitions and versions repositories
+- Files changed:
+  - apps/platform/nurturing/src/repositories/sequence-definitions.repo.ts (SequenceDefinition interface + SequenceDefinitionsRepository class)
+  - apps/platform/nurturing/src/repositories/sequence-versions.repo.ts (SequenceVersion interface + CreateVersionInput + SequenceVersionsRepository class)
+- **Learnings for future iterations:**
+  - Pattern follows automation/src/repositories/rules.repository.ts exactly: SCHEMA constant per file, `.returning('*')`, `(row as T) ?? null`
+  - findAll keyset cursor compares timestamptz column against string ISO — works in Postgres without explicit cast
+  - JSON.stringify applied to steps, ab_test, active_hours in SequenceVersionsRepository.insert (jsonb columns)
+  - No shared SCHEMA constant between repo files — each file defines its own (premature abstraction avoided)
+---
