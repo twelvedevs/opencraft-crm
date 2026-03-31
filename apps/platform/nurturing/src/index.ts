@@ -1,11 +1,19 @@
 import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
 import authPlugin from './plugins/auth.js';
+import { createDb } from './db.js';
+import { SequenceDefinitionsRepository } from './repositories/sequence-definitions.repo.js';
+import { SequenceVersionsRepository } from './repositories/sequence-versions.repo.js';
+import sequencesRoutes from './routes/sequences.js';
 
 const fastify = Fastify({ logger: true });
+const db = createDb();
+const definitionsRepo = new SequenceDefinitionsRepository(db);
+const versionsRepo = new SequenceVersionsRepository(db);
 
 await fastify.register(sensible);
 await fastify.register(authPlugin);
+await fastify.register(sequencesRoutes, { definitionsRepo, versionsRepo });
 
 fastify.get('/healthz', async () => {
   return { ok: true };
