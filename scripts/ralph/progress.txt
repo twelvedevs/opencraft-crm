@@ -1,0 +1,25 @@
+# Ralph Progress Log
+Started: Tue Mar 31 16:10:59 +03 2026
+---
+
+## Codebase Patterns
+- @ortho/* packages use ESM (`"type": "module"`), NodeNext module resolution, ES2022 target
+- Import paths in src/ use `.js` extensions for ESM compatibility
+- Migration files follow `NNN_<description>.ts` naming, export `up(knex)` and `down(knex)`
+- PostgreSQL COUNT(*) returns bigint as string in node-postgres — use parseInt() or CAST AS int
+- Typecheck is run per-service: `npm run typecheck` from the service directory
+
+## 2026-03-31 - US-001
+- Created @ortho/types package with Phase 1 type definitions
+- Files changed:
+  - packages/@ortho/types/package.json
+  - packages/@ortho/types/tsconfig.json
+  - packages/@ortho/types/src/events.ts (LeadOutboundSentPayload/Event, LeadActivityLoggedPayload/Event)
+  - packages/@ortho/types/src/actions.ts (AutomationActionType union)
+  - packages/@ortho/types/src/index.ts
+  - packages/@ortho/types/package-lock.json
+- **Learnings for future iterations:**
+  - Phase branches (ralph/nurturing-engine-phase-1 through phase-8) already have complete implementations — use as reference with `git show <branch>:<path>`
+  - The combined prd.json is the authoritative task list; individual phase PRDs are archived references
+  - The ralph/nurturing-engine branch was created fresh from feature/nurturing-engine (no prior code)
+---

@@ -20,7 +20,7 @@
         "Typecheck passes (npm run typecheck from packages/@ortho/types)"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 1, originally US-001] No existing @ortho/types package exists — create from scratch. This is a types-only package with no runtime dependencies. The AutomationActionType union in actions.ts adds unenroll_sequence to the existing Automation Engine action set (the implementation is deferred; this iteration only adds the type). Event interfaces are standalone (no base OrthoEvent inheritance needed for this package — keep it simple). Use .js extensions in import paths in src/index.ts for ESM compatibility."
     },
     {
