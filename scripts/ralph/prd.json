@@ -506,7 +506,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 4, originally US-007] For the scheduled_at tolerance check: const expected24h = Date.now() + 24 * 3600 * 1000; expect(Math.abs(step0.scheduled_at.getTime() - expected24h)).toBeLessThan(5000). The mock queue's add() returns { id: randomUUID() } synchronously wrapped in Promise.resolve() — since EnrollmentManager awaits queue.add() and then awaits updateJobId(), by the time the HTTP 201 response is sent, all job_id values are already written to the DB. The createAndActivateSequence helper must use the POST /sequences and POST /sequences/:id/activate routes (not direct DB calls) to exercise the full API path. Import createApp from '../../src/index.js'. Import createDb from '../../src/db.js'. Ensure jsonwebtoken is installed as a devDependency if not already present for minting JWTs in tests."
     },
     {

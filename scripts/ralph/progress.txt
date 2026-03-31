@@ -256,3 +256,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - sid param for step lookup uses Type.String() without format:'uuid' — it's a user-defined step ID string (e.g. 'step-1'), not a UUID
   - GET /sequences/:id/enrollments/:eid uses findById(eid) only — no validation that enrollment belongs to the sequence in the URL
 ---
+
+## 2026-03-31 - US-020
+- Created mock-queue helper and enrollment integration test suite (10 tests, all skip gracefully without DATABASE_URL)
+- Files changed:
+  - apps/platform/nurturing/test/helpers/mock-queue.ts (new — createMockQueue factory returning Queue<StepJobData>-compatible mock with getMockJobs())
+  - apps/platform/nurturing/test/integration/enrollment.test.ts (new — 10 integration tests covering full enrollment lifecycle)
+- **Learnings for future iterations:**
+  - Mock queue shape: `{ add(name, data, opts?): Promise<{ id: string }>, getMockJobs() }` cast as `unknown as Queue<StepJobData>` — EnrollmentManager only calls `.add()`, so the mock doesn't need full BullMQ Queue interface
+  - createAndActivateSequence helper uses POST /sequences → PUT /sequences/:id (with steps) → POST /sequences/:id/activate; POST creates v1 with empty steps, PUT creates v2 with actual steps
+  - createApp creates its own db via createDb() internally — test db is a separate knex instance for direct assertions; both connect to same DATABASE_URL
+  - afterAll cleanup order: sequence_step_executions first (FK to enrollments), then sequence_enrollments, then sequence_versions (FK to definitions), then sequence_definitions
+  - Scheduling tolerance check: `Math.abs(new Date(row.scheduled_at).getTime() - expected) < 5000`; cast rows from knex as `string` since pg returns timestamptz columns as strings
+---
