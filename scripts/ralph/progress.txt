@@ -591,3 +591,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Migration numbering gap (001 to 005) is intentional — migrations 002-004 will cover other schema changes added in phases 2-7
   - UNIQUE constraint via table.unique(['enrollment_id']) Knex builder produces the same SQL as knex.raw UNIQUE INDEX
 ---
+
+## 2026-03-31 - US-048
+- Created ConversionsRepository and conversion event consumer for A/B conversion tracking
+- Files changed:
+  - apps/platform/nurturing/src/repositories/conversions.repo.ts (ConversionsRepository with findByEnrollmentId + insert with ON CONFLICT DO NOTHING)
+  - apps/platform/nurturing/src/consumers/conversion.consumer.ts (processConversionEvent)
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (added findActiveWithAbTestEnabledByEntityId JOIN method)
+- **Learnings for future iterations:**
+  - The conversion consumer deps only include enrollmentsRepo — the JOIN query (enrollments + sequence_versions) was added as a new method on EnrollmentsRepository rather than passing db directly
+  - filter-engine package directory exists but has no src/ files — implemented inline condition evaluator for eq/neq/gt/lt/contains operators
+  - ab_test JSONB column may come back as string or object depending on Knex/pg parsing — handled both cases with typeof check + JSON.parse
+  - The consumer wraps entire body in try/catch for crash safety, plus validates event shape before processing
+---
