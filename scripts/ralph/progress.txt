@@ -578,3 +578,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Concurrent cycle test uses Promise.all([runPollCycle(deps), runPollCycle(deps)]) with shared mockRedis — both calls attempt redis.set; only the first gets 'OK'
   - dedup_key structural test: assert jobId === step.id (UUID) — BullMQ prevents double-execution if original job reappears
 ---
+
+## 2026-03-31 - US-047
+- Created apps/platform/nurturing/migrations/005_sequence_conversions.ts
+- Table: sequence_conversions with id, enrollment_id (FK to sequence_enrollments), sequence_id, ab_variant, entity_type, entity_id, event_type, converted_at
+- UNIQUE on enrollment_id (first conversion wins per enrollment)
+- Indexes: (sequence_id, ab_variant) and (entity_id, event_type)
+- Files changed:
+  - apps/platform/nurturing/migrations/005_sequence_conversions.ts
+- **Learnings for future iterations:**
+  - Phase-8 reference branch used a different approach (added converted_at to sequence_enrollments) — the PRD spec chose a separate table instead for flexibility
+  - Migration numbering gap (001 to 005) is intentional — migrations 002-004 will cover other schema changes added in phases 2-7
+  - UNIQUE constraint via table.unique(['enrollment_id']) Knex builder produces the same SQL as knex.raw UNIQUE INDEX
+---
