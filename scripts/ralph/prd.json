@@ -54,7 +54,7 @@
         "Typecheck passes; Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 1, originally US-002] The context object passed to interpolateFields is a merged root: { context: <enrollmentContext>, enrollment_id, step_id, entity_type, entity_id }. Dot-notation 'context.phone' resolves the 'context' key first, then 'phone' within it — this is why the enrollment context is stored under a 'context' key in the root. Template tokens like '{{enrollment_id}}' resolve top-level keys in the same root. This design means a single flat context object handles both resolution modes. TEMPLATE_TOKEN_RE is a global regex — reset lastIndex before each use or use a fresh regex per call to avoid stale lastIndex bugs. A string can contain both a template token AND look like a dot-notation path only if it has braces — DOT_PATH_RE will not match strings containing '{' or '}', so the two modes are mutually exclusive for any given value."
     },
     {
@@ -85,7 +85,7 @@
         "Typecheck passes; Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 1, originally US-003] The active-hours calculator in the Automation Engine (apps/platform/automation/src/services/active-hours.ts) uses an identical algorithm — reference it for the implementation pattern. Key difference: computeNextActiveWindowMs takes a pre-resolved timezone string directly (the Nurturing Engine resolves timezone_field from context before calling this function), while the Automation Engine's computeDelay resolves the timezone internally. For DST tests, use fixed UTC timestamps that correspond to known local times: 2026-03-08T12:30:00Z = 07:30 EST before spring-forward. Use vitest fake timers (vi.setSystemTime) to control 'now' in tests that need specific times. The test for 'time after window end at 21:00' should use a specific UTC timestamp that maps to 21:00 in America/Chicago to be deterministic — compute it as e.g. new Date('2026-01-15T03:00:00Z') which is 21:00 CST (UTC-6 in January)."
     },
     {

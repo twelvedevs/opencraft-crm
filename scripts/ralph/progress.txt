@@ -23,3 +23,30 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - The combined prd.json is the authoritative task list; individual phase PRDs are archived references
   - The ralph/nurturing-engine branch was created fresh from feature/nurturing-engine (no prior code)
 ---
+
+## 2026-03-31 - US-002
+- Created @ortho/interpolator package with interpolateFields implementation and unit tests
+- Files changed:
+  - packages/@ortho/interpolator/package.json
+  - packages/@ortho/interpolator/tsconfig.json
+  - packages/@ortho/interpolator/vitest.config.ts
+  - packages/@ortho/interpolator/src/interpolate.ts (getByPath, interpolateValue, interpolateFields)
+  - packages/@ortho/interpolator/src/index.ts
+  - packages/@ortho/interpolator/test/interpolate.test.ts (13 tests, all passing)
+  - packages/@ortho/interpolator/package-lock.json
+- **Learnings for future iterations:**
+  - DOT_PATH_RE requires at least one dot (`[\w]*\.[\w.]*`) — single-segment paths like 'phone' are not dot-notation
+  - TEMPLATE_TOKEN_RE is global — always use a fresh `new RegExp(...)` per call to avoid stale lastIndex
+  - src/index.ts for US-002 only exports interpolate.ts; active-hours.js exports are added in US-003
+---
+
+## 2026-03-31 - US-003
+- Added computeNextActiveWindowMs to @ortho/interpolator with 9 unit tests (all passing)
+- Files changed:
+  - packages/@ortho/interpolator/src/active-hours.ts (ActiveHoursConfig interface, computeNextActiveWindowMs)
+  - packages/@ortho/interpolator/src/index.ts (re-export active-hours)
+  - packages/@ortho/interpolator/test/active-hours.test.ts (9 tests)
+- **Learnings for future iterations:**
+  - PRD notes claim 2026-03-08T12:30:00Z = 07:30 EST before spring-forward — this is WRONG. Spring-forward on March 8 happens at 7am UTC; 12:30 UTC is already 8:30 EDT (inside window). Correct timestamp for 07:30 before the 08:00 window on that day: 2026-03-08T11:30:00Z = 07:30 EDT.
+  - The active-hours algorithm is identical to apps/platform/automation/src/services/active-hours.ts — key difference is this version takes a pre-resolved timezone string (no ExecutionContext dependency), making it a pure utility function.
+---
