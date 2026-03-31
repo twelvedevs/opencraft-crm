@@ -41,14 +41,18 @@ export async function processOptOutMessage(messageBody: string, deps: OptOutCons
   const enrollments = await deps.enrollmentsRepo.findAllActiveByEntityId(entityId);
 
   for (const enrollment of enrollments) {
-    await deps.unenroll(
-      {
-        sequence_id: enrollment.sequence_id,
-        entity_type: enrollment.entity_type,
-        entity_id: enrollment.entity_id,
-      },
-      deps.unenrollDeps,
-    );
+    try {
+      await deps.unenroll(
+        {
+          sequence_id: enrollment.sequence_id,
+          entity_type: enrollment.entity_type,
+          entity_id: enrollment.entity_id,
+        },
+        deps.unenrollDeps,
+      );
+    } catch (err) {
+      deps.logger.error(err, `opt_out.received: unenroll failed for enrollment ${enrollment.sequence_id}, continuing`);
+    }
   }
 
   await deps.publisher.publishAllSequencesCancelled({
