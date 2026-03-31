@@ -367,3 +367,19 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Step 6a chains send_message after call_ai by posting directly to Messaging Service (body already resolved, no template rendering needed)
   - retry config (attempts: 5, backoff: exponential 5000ms) is set in enrollment-manager.ts when enqueuing, not in the worker config
 ---
+
+## 2026-03-31 - US-029
+- Created apps/platform/nurturing/worker.ts (standalone BullMQ step worker entry point)
+- Updated tsconfig.json: changed rootDir from "src" to "." and added "worker.ts" to include array
+- Updated Dockerfile: CMD changed from "dist/index.js" to "dist/src/index.js" (path shift due to rootDir change)
+- Files changed:
+  - apps/platform/nurturing/worker.ts (new — bootstraps step worker with DB, queue, repos, publisher, actionExecutorDeps)
+  - apps/platform/nurturing/tsconfig.json (rootDir: "." to allow worker.ts at root; include: ["src/**/*", "worker.ts"])
+  - apps/platform/nurturing/Dockerfile (CMD updated to dist/src/index.js)
+- **Learnings for future iterations:**
+  - When worker.ts lives at service root (outside src/), tsconfig rootDir must be "." not "src" — otherwise tsc errors with "file is not under rootDir"
+  - Changing rootDir from "src" to "." shifts all src/ output from dist/*.js to dist/src/*.js — update Dockerfile CMD accordingly
+  - worker.ts does NOT instantiate SequenceDefinitionsRepository — StepWorkerDeps doesn't require it; only versionsRepo, enrollmentsRepo, stepExecutionsRepo are needed
+  - createPublisher() internally creates EventBridgeClient — no need to pass one from worker.ts
+  - loadServiceUrls() is in src/config/service-urls.ts, not in src/events/publisher.ts
+---

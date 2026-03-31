@@ -703,7 +703,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 29,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-009] The worker.ts is a separate process entry point — in production it runs as a separate ECS task definition using the same Docker image as the API, launched with 'node dist/worker.js' instead of 'node dist/src/index.js'. The step worker only needs db, stepExecutionsRepo, enrollmentsRepo, versionsRepo, and queue — it does NOT need definitionsRepo (it loads versions directly via versionsRepo.findBySequenceAndVersion). The StepWorkerDeps type should be updated if definitionsRepo is not needed, or accept it as optional. Check the existing src/index.ts for the createDb() import pattern. Verify tsconfig.json's 'include' field already covers worker.ts or update it accordingly."
     },
     {
