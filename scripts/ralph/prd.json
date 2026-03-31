@@ -1023,7 +1023,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)"
       ],
       "priority": 46,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 7, originally US-006] runPollCycle is tested directly (not through the Fastify plugin wrapper) for the same reason processOptOutMessage was tested directly in Phase 6 — it avoids needing a live setInterval and makes test execution fast and deterministic. The dedup_key no-duplicate-send test is a structural assertion about jobId usage rather than a full end-to-end test: the spec says 'no duplicate send (Messaging Service dedup_key guard)' — in practice this means both the step worker's dedup_key field AND BullMQ's job deduplication on jobId = step.id prevent double execution. The test verifies the latter (correct jobId) because the former (dedup_key passed to Messaging Service) is already covered by Phase 5 step-worker integration tests. The 'Redis lock prevents concurrent cycle' test uses Promise.all([runPollCycle(deps), runPollCycle(deps)]) with mock.set returning 'OK' then null in sequence — verify with mockRedis.set.mock.calls.length === 2 and stepQueue.add.mock.calls.length === 1."
     },
     {

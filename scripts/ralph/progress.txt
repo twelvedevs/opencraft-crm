@@ -567,3 +567,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - The "server accepts traffic before scan completes" test uses a hung mock scanner (never-resolving Promise) fired non-awaited; app.inject() immediately responds because the server is already ready
   - Filter mock.calls by enrollment_id to isolate assertions in multi-enrollment tests
 ---
+
+## 2026-03-31 - US-046
+- Created integration test suite for safety-net poller (5 tests, all skip gracefully without DB)
+- Files changed:
+  - apps/platform/nurturing/test/integration/safety-net-poller.test.ts (new — 5 tests)
+- **Learnings for future iterations:**
+  - makeMockRedis helper accepts a sequence of return values (['OK', null]) — shift() per call simulates lock acquisition then contention
+  - runPollCycle only picks up steps where job_id IS NOT NULL AND scheduled_at < now() - 1 minute; null-job-id steps are ignored (startup scanner territory)
+  - Concurrent cycle test uses Promise.all([runPollCycle(deps), runPollCycle(deps)]) with shared mockRedis — both calls attempt redis.set; only the first gets 'OK'
+  - dedup_key structural test: assert jobId === step.id (UUID) — BullMQ prevents double-execution if original job reappears
+---
