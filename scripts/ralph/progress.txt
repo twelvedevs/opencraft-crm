@@ -383,3 +383,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - createPublisher() internally creates EventBridgeClient — no need to pass one from worker.ts
   - loadServiceUrls() is in src/config/service-urls.ts, not in src/events/publisher.ts
 ---
+
+## 2026-03-31 - US-030
+- Created unit tests for active hours deferral decision logic in the step worker
+- Files changed:
+  - apps/platform/nurturing/test/unit/step-worker-deferral.test.ts (6 tests, all passing)
+- **Learnings for future iterations:**
+  - Tests import computeNextActiveWindowMs from '@ortho/interpolator' and call the function directly with `new Date()` (no arg) after vi.setSystemTime — the function defaults `now = new Date()` which picks up the fake timer
+  - 2026-03-31: NY is in EDT (UTC-4). 10:00 EDT = 14:00 UTC; 22:00 EDT = 02:00 UTC+1day; 07:59 EDT = 11:59 UTC; 08:00 EDT = 12:00 UTC; 20:00 EDT = 00:00 UTC next day
+  - For the LA standard time test, use a January date (e.g. 2026-01-15) so PST (UTC-8) is in effect; 09:00 UTC = 01:00 PST
+  - vi.useFakeTimers() must be called before vi.setSystemTime(); vi.useRealTimers() in afterEach restores real timers
+---

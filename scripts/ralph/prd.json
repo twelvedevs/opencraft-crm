@@ -726,7 +726,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 30,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-010] These tests directly exercise the @ortho/interpolator computeNextActiveWindowMs function using Vitest's fake timer support. The function was implemented in Phase 1. The key invariant from the spec is 'always ≤ 24h' — if we're inside the window the return value must be 0; if outside it must be positive and at most 86400000ms. Use vi.setSystemTime(new Date('2026-03-31T15:00:00.000Z')) — UTC time — and remember that 15:00 UTC = 11:00 EDT (UTC-4 in DST) so within the 08:00–20:00 NY window. Adjust test times carefully for DST: New York is UTC-5 in standard time (Nov–Mar) and UTC-4 in DST (Mar–Nov). As of 2026-03-31, NY is in EDT (UTC-4)."
     },
     {
