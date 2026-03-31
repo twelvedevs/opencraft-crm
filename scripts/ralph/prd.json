@@ -450,7 +450,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 4, originally US-005] The service-to-service auth uses a standard JWT (same Identity Service JWT) — no special role is required. fastify.authenticate already validates the JWT; no role check is added on this route. Import EnrollmentManager from '../services/enrollment-manager.js'; import EnrollmentsRepository from '../repositories/enrollments.repo.js'; import StepExecutionsRepository from '../repositories/step-executions.repo.js'. For the error discrimination: TypeScript requires casting the caught value since catch(err) is unknown. The else branch re-throws unexpected errors so Fastify's default error handler returns 500."
     },
     {

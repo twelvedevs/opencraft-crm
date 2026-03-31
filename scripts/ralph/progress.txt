@@ -234,3 +234,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Queue.add returns `{ id: string }` — use `job.id!` (non-null assertion) when calling updateJobId since the mock always provides it
   - Sort stepRows by step_index before enqueueing to guarantee ordered BullMQ scheduling
 ---
+
+## 2026-03-31 - US-018
+- Created POST /sequences/enroll route and wired EnrollmentManager into createApp()
+- Files changed:
+  - apps/platform/nurturing/src/routes/enrollments.ts (new — EnrollmentsRouteOptions interface + POST /sequences/enroll handler)
+  - apps/platform/nurturing/src/index.ts (added EnrollmentsRepository, StepExecutionsRepository, EnrollmentManager instantiation + enrollmentsRoutes registration)
+- **Learnings for future iterations:**
+  - Error discrimination in catch blocks: cast `err as { code?: string }` since TypeScript types catch as unknown
+  - The `queue` variable is computed before enrollmentManager creation — pass it directly rather than re-evaluating opts?.queue
+  - enrollmentsRoutes uses preHandler: [fastify.authenticate] only (no role check) — service-to-service callers use standard JWT
+---
