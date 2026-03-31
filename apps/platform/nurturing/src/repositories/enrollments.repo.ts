@@ -6,7 +6,7 @@ export interface SequenceEnrollment {
   sequence_version: number;
   entity_type: string;
   entity_id: string;
-  context: unknown;
+  context: Record<string, unknown>;
   ab_variant: string | null;
   status: string;
   enrolled_at: Date;
@@ -14,13 +14,15 @@ export interface SequenceEnrollment {
   dedup_key: string;
 }
 
-export interface InsertEnrollmentInput {
+export interface InsertEnrollmentData {
   sequence_id: string;
   sequence_version: number;
   entity_type: string;
   entity_id: string;
-  context: unknown;
+  context: Record<string, unknown>;
   ab_variant: string | null;
+  status: string;
+  enrolled_at: Date;
   dedup_key: string;
 }
 
@@ -35,7 +37,7 @@ export class EnrollmentsRepository {
     return (row as SequenceEnrollment) ?? null;
   }
 
-  async insert(data: InsertEnrollmentInput, trx?: Knex.Transaction): Promise<SequenceEnrollment> {
+  async insert(data: InsertEnrollmentData, trx?: Knex.Transaction): Promise<SequenceEnrollment> {
     const qb = trx ?? this.db;
     const [row] = await qb(ENROLLMENTS_TABLE)
       .insert({
@@ -45,7 +47,8 @@ export class EnrollmentsRepository {
         entity_id: data.entity_id,
         context: JSON.stringify(data.context),
         ab_variant: data.ab_variant,
-        status: 'active',
+        status: data.status,
+        enrolled_at: data.enrolled_at,
         dedup_key: data.dedup_key,
       })
       .returning('*');
@@ -57,7 +60,7 @@ export class EnrollmentsRepository {
     return (row as SequenceEnrollment) ?? null;
   }
 
-  async findBySequence(
+  async findBySequenceId(
     sequenceId: string,
     opts: { limit: number; cursor?: string },
   ): Promise<SequenceEnrollment[]> {
@@ -66,7 +69,7 @@ export class EnrollmentsRepository {
       .orderBy('enrolled_at', 'desc')
       .limit(opts.limit);
     if (opts.cursor) {
-      query.where('enrolled_at', '<', opts.cursor);
+      query.where('enrolled_at', '<', new Date(opts.cursor));
     }
     return query as Promise<SequenceEnrollment[]>;
   }

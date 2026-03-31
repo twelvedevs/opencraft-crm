@@ -15,11 +15,14 @@ export interface SequenceStepExecution {
   completed_at: Date | null;
 }
 
-export interface InsertStepInput {
+export interface InsertStepExecutionData {
   enrollment_id: string;
   step_id: string;
   step_index: number;
   scheduled_at: Date;
+  job_id: null;
+  status: 'pending';
+  attempt: 0;
 }
 
 const SCHEMA = 'platform_nurturing';
@@ -28,7 +31,7 @@ const STEPS_TABLE = `${SCHEMA}.sequence_step_executions`;
 export class StepExecutionsRepository {
   constructor(private readonly db: Knex) {}
 
-  async insertMany(rows: InsertStepInput[], trx?: Knex.Transaction): Promise<SequenceStepExecution[]> {
+  async insertMany(rows: InsertStepExecutionData[], trx?: Knex.Transaction): Promise<SequenceStepExecution[]> {
     if (rows.length === 0) return [];
     const qb = trx ?? this.db;
     const inserts = rows.map((r) => ({
@@ -36,20 +39,24 @@ export class StepExecutionsRepository {
       step_id: r.step_id,
       step_index: r.step_index,
       scheduled_at: r.scheduled_at,
-      status: 'pending',
-      job_id: null,
-      attempt: 0,
+      job_id: r.job_id,
+      status: r.status,
+      attempt: r.attempt,
     }));
     return qb(STEPS_TABLE).insert(inserts).returning('*') as Promise<SequenceStepExecution[]>;
   }
 
-  async findByEnrollment(enrollmentId: string): Promise<SequenceStepExecution[]> {
+  async updateJobId(id: string, jobId: string): Promise<void> {
+    await this.db(STEPS_TABLE).where({ id }).update({ job_id: jobId });
+  }
+
+  async findByEnrollmentId(enrollmentId: string): Promise<SequenceStepExecution[]> {
     return this.db(STEPS_TABLE)
       .where({ enrollment_id: enrollmentId })
       .orderBy('step_index', 'asc') as Promise<SequenceStepExecution[]>;
   }
 
-  async findByEnrollmentAndStep(
+  async findByEnrollmentAndStepId(
     enrollmentId: string,
     stepId: string,
   ): Promise<SequenceStepExecution | null> {
@@ -57,10 +64,6 @@ export class StepExecutionsRepository {
       .where({ enrollment_id: enrollmentId, step_id: stepId })
       .first();
     return (row as SequenceStepExecution) ?? null;
-  }
-
-  async updateJobId(id: string, jobId: string): Promise<void> {
-    await this.db(STEPS_TABLE).where({ id }).update({ job_id: jobId });
   }
 
   async claimPending(id: string): Promise<string | null> {
