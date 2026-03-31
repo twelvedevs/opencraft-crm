@@ -451,3 +451,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - findAllActiveByEntityId takes only entityId (no entityType) — distinct from findActiveByEntityAcrossAllSequences which takes both
   - markUnenrolled uses `qb.fn.now()` for updated_at — same pattern as other update methods in the service
 ---
+
+## 2026-03-31 - US-036
+- Added POST /sequences/unenroll route to enrollments.ts; extended EnrollmentsRouteOptions with db, stepQueue, and publisher deps; updated createApp() to create publisher (with graceful null fallback when EVENTBRIDGE_BUS_NAME is missing)
+- Files changed:
+  - apps/platform/nurturing/src/routes/enrollments.ts (added UnenrollBodySchema + POST /sequences/unenroll handler)
+  - apps/platform/nurturing/src/index.ts (createPublisher import, publisher creation with try/catch, pass to enrollmentsRoutes)
+- **Learnings for future iterations:**
+  - Route always returns 200 { ok: true } regardless of whether enrollment existed (idempotent per spec Section 5.3)
+  - Publisher creation wrapped in try/catch in createApp() so tests/dev without EVENTBRIDGE_BUS_NAME don't break; null publisher is cast at call-site inside the route
+  - Extend EnrollmentsRouteOptions (not a new plugin) — unenroll deps are passed alongside existing deps
+---

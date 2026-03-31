@@ -840,7 +840,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 36,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-004] The route is added to the existing enrollments.ts routes file which already has GET /sequences/:id/enrollments and GET /sequences/:id/enrollments/:eid from Phase 4. Check how deps (db, repos, publisher, queue) are threaded through to the enrollment route handlers and replicate that pattern for unenroll. The body schema uses format: 'uuid' on sequence_id — if other route bodies don't use format validators, drop it to keep consistency. The 200-always behavior is intentional per spec: callers should not branch on whether an enrollment existed."
     },
     {
