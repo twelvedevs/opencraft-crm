@@ -131,3 +131,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - preHandler array uses [fastify.authenticate] — fastify.authenticate is decorated by authPlugin (US-008)
   - `reply.code(404).send(...)` for 404 (use .code(), not .status(), for Fastify 5 compatibility)
 ---
+
+## 2026-03-31 - US-010
+- Added POST /sequences route to apps/platform/nurturing/src/routes/sequences.ts
+- Files changed:
+  - apps/platform/nurturing/src/routes/sequences.ts (added CreateBodySchema + POST /sequences handler)
+- **Learnings for future iterations:**
+  - POST /sequences creates the definition row first, then version row — no transaction needed (orphaned draft is harmless)
+  - request.user cast to `{ sub: string; role: string }` inline to extract created_by
+  - versionsRepo.insert handles JSON.stringify for steps internally — pass `steps: []` directly
+  - reply.code(201).send(...) is the correct pattern for 201 responses in Fastify 5
+---

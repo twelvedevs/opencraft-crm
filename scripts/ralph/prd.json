@@ -249,7 +249,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 3, originally US-003] No transaction needed here — if version insert fails after definition insert, the orphaned definition row is harmless (will appear as a draft with no version). The versionsRepo.insert already handles JSON.stringify for steps. The created_by comes from the JWT sub claim — request.user is typed as { sub: string; role: string } per the module augmentation from US-001."
     },
     {
