@@ -142,3 +142,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - versionsRepo.insert handles JSON.stringify for steps internally — pass `steps: []` directly
   - reply.code(201).send(...) is the correct pattern for 201 responses in Fastify 5
 ---
+
+## 2026-03-31 - US-011
+- Created VersioningService class (src/services/versioning.service.ts) and added PUT /sequences/:id route
+- Files changed:
+  - apps/platform/nurturing/src/services/versioning.service.ts (new — SaveDraftInput interface + VersioningService class)
+  - apps/platform/nurturing/src/routes/sequences.ts (added SaveDraftBodySchema + PUT /sequences/:id handler; updated SequencesRouteOptions with versioningService)
+  - apps/platform/nurturing/src/index.ts (import VersioningService, instantiate, pass to sequencesRoutes)
+- **Learnings for future iterations:**
+  - VersioningService is a plain class with no Fastify coupling — good separation of concerns
+  - `error.message === 'sequence_not_found'` pattern for typed 404 errors in route handlers
+  - `updatedDefinition!` non-null assertion is safe here — we just confirmed the row exists via findById
+  - vitest exits with code 1 when no test files found — this is expected until US-013 adds integration tests
+---

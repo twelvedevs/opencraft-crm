@@ -276,7 +276,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 3, originally US-004] active_version is NOT changed by saveDraft — it stays at whatever it was set to previously (null or a prior version number). Only POST /sequences/:id/activate changes active_version. The VersioningService is a plain class — no Fastify coupling. Import SequenceDefinition and SequenceVersion types from their respective repo files. For the 'sequence_not_found' error pattern, the handler catches the thrown error and checks error.message === 'sequence_not_found' to reply 404. Type.Unknown() in TypeBox accepts any JSON value — appropriate for DSL fields (active_hours, ab_test) that are validated at runtime by the step worker, not at the API layer."
     },
     {
