@@ -897,7 +897,7 @@
         "Typecheck passes; Tests pass"
       ],
       "priority": 39,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-007] The integration test directly inserts rows into sequence_step_executions with status='running' to simulate an in-flight step worker. This is the easiest way to verify that cancelPendingByEnrollment's WHERE status='pending' clause correctly leaves running steps alone. There is no need to run an actual step worker for this test. The test for 'already completed' enrollment verifies the idempotent path: findActiveByEntity returns null (since status='completed', not 'active'), so the service returns { found: false } and the route returns 200. Follow the integration test setup pattern from Phase 3 and Phase 4 tests — use the test DB client and seed factories from @ortho/testing if available, or direct Knex inserts. Mock or stub the BullMQ Queue.getJob call (integration test does not need a live Redis for unenrollment)."
     },
     {
