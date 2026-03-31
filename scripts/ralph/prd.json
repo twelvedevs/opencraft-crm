@@ -346,7 +346,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 4, originally US-001] BullMQ v5 requires IORedis with { maxRetriesPerRequest: null } — omitting this causes worker connection errors. The createApp factory is the same pattern used in the automation engine: tests call createApp({ queue: mockQueue }) and inject requests via fastify.inject() without starting the HTTP server. Import Queue from 'bullmq'; import IORedis from 'ioredis'. The queue instance will be threaded into the EnrollmentManager in US-005 when routes are registered."
     },
     {

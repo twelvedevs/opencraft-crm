@@ -8,6 +8,8 @@ Started: Tue Mar 31 16:10:59 +03 2026
 - Migration files follow `NNN_<description>.ts` naming, export `up(knex)` and `down(knex)`
 - PostgreSQL COUNT(*) returns bigint as string in node-postgres — use parseInt() or CAST AS int
 - Typecheck is run per-service: `npm run typecheck` from the service directory
+- Use `import { Redis } from 'ioredis'` (named export) — default import has no construct signatures with NodeNext
+- Guard `main()` with `process.argv[1] === fileURLToPath(import.meta.url)` to prevent auto-execution when vitest imports src/index.ts
 
 ## 2026-03-31 - US-001
 - Created @ortho/types package with Phase 1 type definitions
@@ -179,4 +181,18 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - jsonwebtoken.sign({ sub, role }, JWT_SECRET) mints test JWTs before app creation; set process.env['JWT_SECRET'] in beforeAll before buildApp()
   - Knex migration runner needs absolute migrations directory path in programmatic use — use join(dirname(fileURLToPath(import.meta.url)), '../../migrations')
   - createdIds array + afterAll cleanup: track created IDs, delete sequence_versions first (FK), then sequence_definitions
+---
+
+## 2026-03-31 - US-014
+- Added ioredis to package.json; created src/queue/step-queue.ts with StepJobData type and createStepQueue(); refactored src/index.ts to export createApp() factory; updated test/helpers/build-app.ts to use createApp
+- Files changed:
+  - apps/platform/nurturing/package.json (added ioredis ^5.0.0)
+  - apps/platform/nurturing/src/queue/step-queue.ts (new — StepJobData, createStepQueue)
+  - apps/platform/nurturing/src/index.ts (createApp factory + main() with ESM entry guard)
+  - apps/platform/nurturing/test/helpers/build-app.ts (simplified — delegates to createApp({ queue: null }))
+- **Learnings for future iterations:**
+  - Use `import { Redis } from 'ioredis'` (named export) not `import IORedis from 'ioredis'` — default import has no construct signatures with NodeNext module resolution
+  - Guard `main()` with `process.argv[1] === fileURLToPath(import.meta.url)` to prevent execution when vitest imports src/index.ts
+  - createApp opts pattern: `if (opts !== undefined && 'queue' in opts)` distinguishes "explicitly passed null" from "no opts at all" (fallback to REDIS_URL)
+  - test/helpers/build-app.ts can now just delegate to createApp({ queue: null }) — no need to duplicate plugin/route registration
 ---
