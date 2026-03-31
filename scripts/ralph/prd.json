@@ -193,7 +193,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 2, originally US-004] insertMany with an empty array must not crash — add a guard: if rows.length === 0 return []. claimPending uses the optimistic lock pattern: the UPDATE touches a row only if status is still 'pending'; returns null when another worker already claimed it (no row returned). Methods that accept a trx parameter should use (trx ?? this.db) as the query builder so they work both inside and outside transactions. updateScheduledAt sets status back to 'pending' as well as clearing/updating job_id — this is intentional: when a step is deferred mid-execution the worker resets it to pending with new schedule. JSON.stringify is NOT needed for output in updateStatus — Knex/pg handles jsonb serialization for plain objects."
     },
     {

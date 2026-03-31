@@ -91,3 +91,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - JSON.stringify applied to steps, ab_test, active_hours in SequenceVersionsRepository.insert (jsonb columns)
   - No shared SCHEMA constant between repo files — each file defines its own (premature abstraction avoided)
 ---
+
+## 2026-03-31 - US-007
+- Created enrollments and step executions repositories
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (SequenceEnrollment interface + InsertEnrollmentInput + EnrollmentsRepository class with 7 methods)
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (SequenceStepExecution interface + InsertStepInput + StepExecutionsRepository class with 10 methods)
+- **Learnings for future iterations:**
+  - Methods accepting optional trx use `(trx ?? this.db)` pattern — consistent with notes
+  - claimPending returns null when no row updated (optimistic lock pattern) — cast rows[0] as `{ id: string }` to extract id
+  - insertMany guards against empty array with early return `if (rows.length === 0) return []`
+  - findOrphanedOverdueSteps uses `this.db.raw("now() - interval '1 minute'")` for the timestamp comparison
+  - JSON.stringify NOT needed for output in updateStatus — Knex/pg handles jsonb for plain objects
+---
