@@ -462,3 +462,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Publisher creation wrapped in try/catch in createApp() so tests/dev without EVENTBRIDGE_BUS_NAME don't break; null publisher is cast at call-site inside the route
   - Extend EnrollmentsRouteOptions (not a new plugin) — unenroll deps are passed alongside existing deps
 ---
+
+## 2026-03-31 - US-037
+- Created apps/platform/nurturing/src/consumers/opt-out.consumer.ts with processOptOutMessage and startOptOutConsumer
+- Updated apps/platform/nurturing/worker.ts to instantiate and start the opt-out SQS consumer after the BullMQ step worker
+- Files changed:
+  - apps/platform/nurturing/src/consumers/opt-out.consumer.ts (new — OptOutConsumerDeps, processOptOutMessage, startOptOutConsumer)
+  - apps/platform/nurturing/worker.ts (added SQSClient, pino logger, startOptOutConsumer, stopOptOutConsumer cleanup in SIGTERM/SIGINT)
+- **Learnings for future iterations:**
+  - OPT_OUT_QUEUE_URL must be present at startup (throw if missing) — consistent with other env var guards in worker.ts
+  - `void (async () => { ... })()` IIFE pattern for fire-and-forget async in setInterval without unhandled promise rejection
+  - pino logger instantiated directly in worker.ts with `pino({ name: 'nurturing-worker' })` — no shared logger factory used
+  - unenrollDeps is assembled inline in worker.ts from already-available db/repos/queue/publisher; no new instances needed
+---

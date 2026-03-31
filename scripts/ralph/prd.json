@@ -862,7 +862,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 37,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-005] EventBridge messages delivered to SQS are wrapped in an EventBridge envelope. The message.Body is a JSON string with shape: { version: '0', id: '...', 'detail-type': 'opt_out.received', source: 'platform.messaging', time: '...', detail: { entity_id: '...', phone: '...' } }. The consumer only needs detail.entity_id. Validation must handle missing detail, missing entity_id, and JSON parse errors — all malformed messages must be deleted from SQS after logging (not left to retry infinitely). The long-poll WaitTimeSeconds: 20 on ReceiveMessageCommand is SQS long-polling — it blocks up to 20 seconds per call, reducing empty polls. The startOptOutConsumer uses setInterval as a simple driver; each poll tick is fire-and-forget (not awaited) to prevent the interval from falling behind. The entity_type in publishAllSequencesCancelled is taken from the first enrollment; if no enrollments existed, 'unknown' is acceptable (the event is still useful to Lead Service as a signal to set opt-out). Check if @aws-sdk/client-sqs is already a workspace dep (other services like the Automation Engine may already use it)."
     },
     {
