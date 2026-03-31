@@ -209,3 +209,15 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - InsertStepExecutionData uses literal types (job_id: null, status: 'pending', attempt: 0) so callers get compile-time enforcement
   - findBySequenceId cursor decoded as new Date(cursor) per acceptance criteria (not passed as raw string)
 ---
+
+## 2026-03-31 - US-016
+- Created ab-assigner service and unit tests
+- Files changed:
+  - apps/platform/nurturing/src/services/ab-assigner.ts (AbTestConfig type + assignVariant function)
+  - apps/platform/nurturing/test/unit/ab-assigner.test.ts (6 tests, all passing)
+- **Learnings for future iterations:**
+  - Weighted random selection: accumulate weights, compare with strict `r < acc` — 0-weight entries are naturally skipped
+  - Added floating-point fallback: iterate entries in reverse to return last non-zero-weight key (edge case when r == total)
+  - No randomness seeding needed in tests — 10000 samples with 40-60% bounds is sufficiently robust
+  - ab_test column is JSONB from Postgres — callers must cast `version.ab_test as AbTestConfig | null` before passing to assignVariant
+---

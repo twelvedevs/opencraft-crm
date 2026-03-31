@@ -394,7 +394,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 4, originally US-003] The accumulation loop: let acc = 0; for (const [key, weight] of Object.entries(split)) { acc += weight; if (r < acc) return key; } — the strict '<' comparison handles 0-weight entries naturally (acc never advances past their range). The ab_test column is stored as jsonb and returned from Knex as unknown — callers must cast to AbTestConfig | null before passing to assignVariant. No randomness seeding is needed in tests — with 10000 samples the 40-60% bounds are extremely robust."
     },
     {
