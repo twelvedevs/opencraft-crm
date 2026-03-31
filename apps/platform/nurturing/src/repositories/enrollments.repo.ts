@@ -129,4 +129,24 @@ export class EnrollmentsRepository {
       .where({ id })
       .update({ status: 'unenrolled', updated_at: qb.fn.now() });
   }
+
+  async findActiveWithAbTestEnabledByEntityId(
+    entityId: string,
+  ): Promise<Array<SequenceEnrollment & { ab_test: unknown }>> {
+    const VERSIONS_TABLE = `${SCHEMA}.sequence_versions`;
+    const rows = await this.db(`${ENROLLMENTS_TABLE} as se`)
+      .join(`${VERSIONS_TABLE} as sv`, function () {
+        this.on('sv.sequence_id', '=', 'se.sequence_id').andOn(
+          'sv.version',
+          '=',
+          'se.sequence_version',
+        );
+      })
+      .where('se.entity_id', entityId)
+      .where('se.status', 'active')
+      .whereNotNull('sv.ab_test')
+      .whereRaw("sv.ab_test->>'enabled' = 'true'")
+      .select('se.*', 'sv.ab_test as ab_test');
+    return rows as Array<SequenceEnrollment & { ab_test: unknown }>;
+  }
 }
