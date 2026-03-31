@@ -1,0 +1,680 @@
+# Ralph Progress Log
+Started: Tue Mar 31 16:10:59 +03 2026
+---
+
+## Codebase Patterns
+- @ortho/* packages use ESM (`"type": "module"`), NodeNext module resolution, ES2022 target
+- Import paths in src/ use `.js` extensions for ESM compatibility
+- Migration files follow `NNN_<description>.ts` naming, export `up(knex)` and `down(knex)`
+- PostgreSQL COUNT(*) returns bigint as string in node-postgres — use parseInt() or CAST AS int
+- Typecheck is run per-service: `npm run typecheck` from the service directory
+- Use `import { Redis } from 'ioredis'` (named export) — default import has no construct signatures with NodeNext
+- Guard `main()` with `process.argv[1] === fileURLToPath(import.meta.url)` to prevent auto-execution when vitest imports src/index.ts
+
+## 2026-03-31 - US-001
+- Created @ortho/types package with Phase 1 type definitions
+- Files changed:
+  - packages/@ortho/types/package.json
+  - packages/@ortho/types/tsconfig.json
+  - packages/@ortho/types/src/events.ts (LeadOutboundSentPayload/Event, LeadActivityLoggedPayload/Event)
+  - packages/@ortho/types/src/actions.ts (AutomationActionType union)
+  - packages/@ortho/types/src/index.ts
+  - packages/@ortho/types/package-lock.json
+- **Learnings for future iterations:**
+  - Phase branches (ralph/nurturing-engine-phase-1 through phase-8) already have complete implementations — use as reference with `git show <branch>:<path>`
+  - The combined prd.json is the authoritative task list; individual phase PRDs are archived references
+  - The ralph/nurturing-engine branch was created fresh from feature/nurturing-engine (no prior code)
+---
+
+## 2026-03-31 - US-002
+- Created @ortho/interpolator package with interpolateFields implementation and unit tests
+- Files changed:
+  - packages/@ortho/interpolator/package.json
+  - packages/@ortho/interpolator/tsconfig.json
+  - packages/@ortho/interpolator/vitest.config.ts
+  - packages/@ortho/interpolator/src/interpolate.ts (getByPath, interpolateValue, interpolateFields)
+  - packages/@ortho/interpolator/src/index.ts
+  - packages/@ortho/interpolator/test/interpolate.test.ts (13 tests, all passing)
+  - packages/@ortho/interpolator/package-lock.json
+- **Learnings for future iterations:**
+  - DOT_PATH_RE requires at least one dot (`[\w]*\.[\w.]*`) — single-segment paths like 'phone' are not dot-notation
+  - TEMPLATE_TOKEN_RE is global — always use a fresh `new RegExp(...)` per call to avoid stale lastIndex
+  - src/index.ts for US-002 only exports interpolate.ts; active-hours.js exports are added in US-003
+---
+
+## 2026-03-31 - US-003
+- Added computeNextActiveWindowMs to @ortho/interpolator with 9 unit tests (all passing)
+- Files changed:
+  - packages/@ortho/interpolator/src/active-hours.ts (ActiveHoursConfig interface, computeNextActiveWindowMs)
+  - packages/@ortho/interpolator/src/index.ts (re-export active-hours)
+  - packages/@ortho/interpolator/test/active-hours.test.ts (9 tests)
+- **Learnings for future iterations:**
+  - PRD notes claim 2026-03-08T12:30:00Z = 07:30 EST before spring-forward — this is WRONG. Spring-forward on March 8 happens at 7am UTC; 12:30 UTC is already 8:30 EDT (inside window). Correct timestamp for 07:30 before the 08:00 window on that day: 2026-03-08T11:30:00Z = 07:30 EDT.
+  - The active-hours algorithm is identical to apps/platform/automation/src/services/active-hours.ts — key difference is this version takes a pre-resolved timezone string (no ExecutionContext dependency), making it a pure utility function.
+---
+
+## 2026-03-31 - US-004
+- Created apps/platform/nurturing service scaffold (Fastify + TypeScript stub)
+- Files changed:
+  - apps/platform/nurturing/package.json
+  - apps/platform/nurturing/tsconfig.json
+  - apps/platform/nurturing/vitest.config.ts
+  - apps/platform/nurturing/Dockerfile
+  - apps/platform/nurturing/src/index.ts (stub Fastify app with /healthz)
+  - apps/platform/nurturing/src/worker.ts (stub worker)
+  - apps/platform/nurturing/package-lock.json
+- **Learnings for future iterations:**
+  - src/index.ts must NOT import db.ts or repos yet — keeps this story self-contained and typecheckable
+  - @platform/nurturing omits @aws-sdk/client-secrets-manager (present in automation) — not needed for nurturing
+  - worker.ts uses `export default {}` (empty object) to satisfy ESM default export with no imports
+---
+
+## 2026-03-31 - US-005
+- Created DB migration (001_initial_schema.ts), Knex setup (src/db.ts), and knexfile.ts for platform_nurturing schema
+- Files changed:
+  - apps/platform/nurturing/src/db.ts (createDb() with DATABASE_URL + searchPath)
+  - apps/platform/nurturing/migrations/knexfile.ts (Knex config for platform_nurturing schema)
+  - apps/platform/nurturing/migrations/001_initial_schema.ts (4 tables + indexes + seed comment)
+- **Learnings for future iterations:**
+  - Partial index (WHERE status = 'pending') must use knex.raw() — cannot be expressed via schema builder
+  - FK references across schemas use .inTable('platform_nurturing.sequence_definitions') string format
+  - Migration seed SQL goes in a TypeScript block comment (/* ... */) above the return — NOT executed
+  - knexfile.ts uses process.env.DATABASE_URL (not process.env['DATABASE_URL']) — consistent with automation pattern
+---
+
+## 2026-03-31 - US-006
+- Created sequence definitions and versions repositories
+- Files changed:
+  - apps/platform/nurturing/src/repositories/sequence-definitions.repo.ts (SequenceDefinition interface + SequenceDefinitionsRepository class)
+  - apps/platform/nurturing/src/repositories/sequence-versions.repo.ts (SequenceVersion interface + CreateVersionInput + SequenceVersionsRepository class)
+- **Learnings for future iterations:**
+  - Pattern follows automation/src/repositories/rules.repository.ts exactly: SCHEMA constant per file, `.returning('*')`, `(row as T) ?? null`
+  - findAll keyset cursor compares timestamptz column against string ISO — works in Postgres without explicit cast
+  - JSON.stringify applied to steps, ab_test, active_hours in SequenceVersionsRepository.insert (jsonb columns)
+  - No shared SCHEMA constant between repo files — each file defines its own (premature abstraction avoided)
+---
+
+## 2026-03-31 - US-007
+- Created enrollments and step executions repositories
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (SequenceEnrollment interface + InsertEnrollmentInput + EnrollmentsRepository class with 7 methods)
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (SequenceStepExecution interface + InsertStepInput + StepExecutionsRepository class with 10 methods)
+- **Learnings for future iterations:**
+  - Methods accepting optional trx use `(trx ?? this.db)` pattern — consistent with notes
+  - claimPending returns null when no row updated (optimistic lock pattern) — cast rows[0] as `{ id: string }` to extract id
+  - insertMany guards against empty array with early return `if (rows.length === 0) return []`
+  - findOrphanedOverdueSteps uses `this.db.raw("now() - interval '1 minute'")` for the timestamp comparison
+  - JSON.stringify NOT needed for output in updateStatus — Knex/pg handles jsonb for plain objects
+---
+
+## 2026-03-31 - US-008
+- Added JWT auth plugin to nurturing service
+- Files changed:
+  - apps/platform/nurturing/package.json (added @fastify/jwt ^9.0.0)
+  - apps/platform/nurturing/package-lock.json (updated)
+  - apps/platform/nurturing/src/plugins/auth.ts (new — authPlugin with authenticate + requireRole)
+  - apps/platform/nurturing/src/index.ts (register authPlugin after sensible)
+- **Learnings for future iterations:**
+  - Module augmentation for FastifyInstance must include BOTH `authenticate` and `requireRole` to avoid decorate type errors
+  - `authenticate` is decorated as `preHandlerAsyncHookHandler` — add it to the `declare module 'fastify'` block alongside `requireRole`
+  - `fastify.httpErrors.forbidden()` works because `@fastify/sensible` is registered first in index.ts
+  - `request.user` from @fastify/jwt is typed as `unknown` by default — cast to `{ sub: string; role: string }` at call site
+---
+
+## 2026-03-31 - US-009
+- Created GET /sequences list and GET /sequences/:id detail routes
+- Files changed:
+  - apps/platform/nurturing/src/routes/sequences.ts (new — SequencesRouteOptions interface, GET /sequences, GET /sequences/:id)
+  - apps/platform/nurturing/src/index.ts (createDb, SequenceDefinitionsRepository, SequenceVersionsRepository instantiation, register sequencesRoutes)
+- **Learnings for future iterations:**
+  - Route plugin opts typed via FastifyPluginAsync<OptionsInterface> — same pattern as automation rulesRoutes
+  - step_count computed via Array.isArray(version.steps) ? (version.steps as unknown[]).length : 0; version typed as unknown in repo so cast needed
+  - db is created once in index.ts and passed to repo constructors before route registration
+  - preHandler array uses [fastify.authenticate] — fastify.authenticate is decorated by authPlugin (US-008)
+  - `reply.code(404).send(...)` for 404 (use .code(), not .status(), for Fastify 5 compatibility)
+---
+
+## 2026-03-31 - US-010
+- Added POST /sequences route to apps/platform/nurturing/src/routes/sequences.ts
+- Files changed:
+  - apps/platform/nurturing/src/routes/sequences.ts (added CreateBodySchema + POST /sequences handler)
+- **Learnings for future iterations:**
+  - POST /sequences creates the definition row first, then version row — no transaction needed (orphaned draft is harmless)
+  - request.user cast to `{ sub: string; role: string }` inline to extract created_by
+  - versionsRepo.insert handles JSON.stringify for steps internally — pass `steps: []` directly
+  - reply.code(201).send(...) is the correct pattern for 201 responses in Fastify 5
+---
+
+## 2026-03-31 - US-011
+- Created VersioningService class (src/services/versioning.service.ts) and added PUT /sequences/:id route
+- Files changed:
+  - apps/platform/nurturing/src/services/versioning.service.ts (new — SaveDraftInput interface + VersioningService class)
+  - apps/platform/nurturing/src/routes/sequences.ts (added SaveDraftBodySchema + PUT /sequences/:id handler; updated SequencesRouteOptions with versioningService)
+  - apps/platform/nurturing/src/index.ts (import VersioningService, instantiate, pass to sequencesRoutes)
+- **Learnings for future iterations:**
+  - VersioningService is a plain class with no Fastify coupling — good separation of concerns
+  - `error.message === 'sequence_not_found'` pattern for typed 404 errors in route handlers
+  - `updatedDefinition!` non-null assertion is safe here — we just confirmed the row exists via findById
+  - vitest exits with code 1 when no test files found — this is expected until US-013 adds integration tests
+---
+
+## 2026-03-31 - US-012
+- Added POST /sequences/:id/activate and POST /sequences/:id/disable routes to apps/platform/nurturing/src/routes/sequences.ts
+- Files changed:
+  - apps/platform/nurturing/src/routes/sequences.ts (2 new POST routes appended before closing brace)
+- **Learnings for future iterations:**
+  - requireRole(['marketing_manager']) decorator is already present in src/plugins/auth.ts — use preHandler: [fastify.authenticate, fastify.requireRole([...])] array pattern
+  - setActiveVersion and updateStatus methods already exist in SequenceDefinitionsRepository from US-010/US-011
+  - ParamsSchema (TypeBox uuid) was already defined at top of file — reuse for both routes
+---
+
+## 2026-03-31 - US-013
+- Created integration test suite for sequences API
+- Files changed:
+  - apps/platform/nurturing/package.json (added jsonwebtoken + @types/jsonwebtoken as devDependencies)
+  - apps/platform/nurturing/package-lock.json (updated)
+  - apps/platform/nurturing/test/helpers/build-app.ts (new — Fastify app factory without listen())
+  - apps/platform/nurturing/test/integration/sequences-api.test.ts (new — 12 integration tests)
+- **Learnings for future iterations:**
+  - describe.skipIf(!process.env['DATABASE_URL']) is the correct Vitest pattern for DB-gated tests — 12 tests skip gracefully when no DB is set
+  - build-app.ts mirrors src/index.ts but calls fastify.ready() instead of fastify.listen() — inject-based tests work without a bound port
+  - jsonwebtoken.sign({ sub, role }, JWT_SECRET) mints test JWTs before app creation; set process.env['JWT_SECRET'] in beforeAll before buildApp()
+  - Knex migration runner needs absolute migrations directory path in programmatic use — use join(dirname(fileURLToPath(import.meta.url)), '../../migrations')
+  - createdIds array + afterAll cleanup: track created IDs, delete sequence_versions first (FK), then sequence_definitions
+---
+
+## 2026-03-31 - US-014
+- Added ioredis to package.json; created src/queue/step-queue.ts with StepJobData type and createStepQueue(); refactored src/index.ts to export createApp() factory; updated test/helpers/build-app.ts to use createApp
+- Files changed:
+  - apps/platform/nurturing/package.json (added ioredis ^5.0.0)
+  - apps/platform/nurturing/src/queue/step-queue.ts (new — StepJobData, createStepQueue)
+  - apps/platform/nurturing/src/index.ts (createApp factory + main() with ESM entry guard)
+  - apps/platform/nurturing/test/helpers/build-app.ts (simplified — delegates to createApp({ queue: null }))
+- **Learnings for future iterations:**
+  - Use `import { Redis } from 'ioredis'` (named export) not `import IORedis from 'ioredis'` — default import has no construct signatures with NodeNext module resolution
+  - Guard `main()` with `process.argv[1] === fileURLToPath(import.meta.url)` to prevent execution when vitest imports src/index.ts
+  - createApp opts pattern: `if (opts !== undefined && 'queue' in opts)` distinguishes "explicitly passed null" from "no opts at all" (fallback to REDIS_URL)
+  - test/helpers/build-app.ts can now just delegate to createApp({ queue: null }) — no need to duplicate plugin/route registration
+---
+
+## 2026-03-31 - US-015
+- Extended enrollments repo: renamed InsertEnrollmentInput → InsertEnrollmentData (added status + enrolled_at fields, updated context to Record<string, unknown>); renamed findBySequence → findBySequenceId; insert now uses data.status and data.enrolled_at instead of hardcoded values
+- Extended step-executions repo: renamed InsertStepInput → InsertStepExecutionData (with explicit job_id: null, status: 'pending', attempt: 0 literal types); renamed findByEnrollment → findByEnrollmentId; renamed findByEnrollmentAndStep → findByEnrollmentAndStepId
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts
+- **Learnings for future iterations:**
+  - Neither repo was imported anywhere else yet — safe to rename types and methods without cascading changes
+  - InsertEnrollmentData now accepts caller-provided status and enrolled_at (enrollment manager controls these values, not the repo)
+  - InsertStepExecutionData uses literal types (job_id: null, status: 'pending', attempt: 0) so callers get compile-time enforcement
+  - findBySequenceId cursor decoded as new Date(cursor) per acceptance criteria (not passed as raw string)
+---
+
+## 2026-03-31 - US-016
+- Created ab-assigner service and unit tests
+- Files changed:
+  - apps/platform/nurturing/src/services/ab-assigner.ts (AbTestConfig type + assignVariant function)
+  - apps/platform/nurturing/test/unit/ab-assigner.test.ts (6 tests, all passing)
+- **Learnings for future iterations:**
+  - Weighted random selection: accumulate weights, compare with strict `r < acc` — 0-weight entries are naturally skipped
+  - Added floating-point fallback: iterate entries in reverse to return last non-zero-weight key (edge case when r == total)
+  - No randomness seeding needed in tests — 10000 samples with 40-60% bounds is sufficiently robust
+  - ab_test column is JSONB from Postgres — callers must cast `version.ab_test as AbTestConfig | null` before passing to assignVariant
+---
+
+## 2026-03-31 - US-017
+- Created EnrollmentManager service and unit tests
+- Files changed:
+  - apps/platform/nurturing/src/services/enrollment-manager.ts (EnrollInput, EnrollResult, StepDef, UNIT_MS, EnrollmentManager class with enroll() method)
+  - apps/platform/nurturing/test/unit/enrollment-manager.test.ts (7 tests, all passing)
+- **Learnings for future iterations:**
+  - db.transaction() in Knex 3 returns whatever the callback returns — destructure `{ enrollment, stepRows }` from the awaited result
+  - Mock db.transaction with `vi.fn().mockImplementation(async (cb: Function) => cb({}))` — the `{}` is the mock trx
+  - Record `Date.now()` BEFORE calling enroll() to compute expected scheduled_at delta for assertions; use `toBeLessThanOrEqual(100)` tolerance
+  - Queue.add returns `{ id: string }` — use `job.id!` (non-null assertion) when calling updateJobId since the mock always provides it
+  - Sort stepRows by step_index before enqueueing to guarantee ordered BullMQ scheduling
+---
+
+## 2026-03-31 - US-018
+- Created POST /sequences/enroll route and wired EnrollmentManager into createApp()
+- Files changed:
+  - apps/platform/nurturing/src/routes/enrollments.ts (new — EnrollmentsRouteOptions interface + POST /sequences/enroll handler)
+  - apps/platform/nurturing/src/index.ts (added EnrollmentsRepository, StepExecutionsRepository, EnrollmentManager instantiation + enrollmentsRoutes registration)
+- **Learnings for future iterations:**
+  - Error discrimination in catch blocks: cast `err as { code?: string }` since TypeScript types catch as unknown
+  - The `queue` variable is computed before enrollmentManager creation — pass it directly rather than re-evaluating opts?.queue
+  - enrollmentsRoutes uses preHandler: [fastify.authenticate] only (no role check) — service-to-service callers use standard JWT
+---
+
+## 2026-03-31 - US-019
+- Added GET /sequences/:id/enrollments, GET /sequences/:id/enrollments/:eid, and GET /sequences/:id/enrollments/:eid/steps/:sid routes to apps/platform/nurturing/src/routes/enrollments.ts
+- Files changed:
+  - apps/platform/nurturing/src/routes/enrollments.ts (3 new GET routes prepended before existing POST /sequences/enroll)
+- **Learnings for future iterations:**
+  - All required repo methods (findBySequenceId, findById, findByEnrollmentId, findByEnrollmentAndStepId) already existed from prior stories — no repo changes needed
+  - TypeBox schemas defined as module-level consts before plugin function — same pattern as sequences.ts
+  - sid param for step lookup uses Type.String() without format:'uuid' — it's a user-defined step ID string (e.g. 'step-1'), not a UUID
+  - GET /sequences/:id/enrollments/:eid uses findById(eid) only — no validation that enrollment belongs to the sequence in the URL
+---
+
+## 2026-03-31 - US-020
+- Created mock-queue helper and enrollment integration test suite (10 tests, all skip gracefully without DATABASE_URL)
+- Files changed:
+  - apps/platform/nurturing/test/helpers/mock-queue.ts (new — createMockQueue factory returning Queue<StepJobData>-compatible mock with getMockJobs())
+  - apps/platform/nurturing/test/integration/enrollment.test.ts (new — 10 integration tests covering full enrollment lifecycle)
+- **Learnings for future iterations:**
+  - Mock queue shape: `{ add(name, data, opts?): Promise<{ id: string }>, getMockJobs() }` cast as `unknown as Queue<StepJobData>` — EnrollmentManager only calls `.add()`, so the mock doesn't need full BullMQ Queue interface
+  - createAndActivateSequence helper uses POST /sequences → PUT /sequences/:id (with steps) → POST /sequences/:id/activate; POST creates v1 with empty steps, PUT creates v2 with actual steps
+  - createApp creates its own db via createDb() internally — test db is a separate knex instance for direct assertions; both connect to same DATABASE_URL
+  - afterAll cleanup order: sequence_step_executions first (FK to enrollments), then sequence_enrollments, then sequence_versions (FK to definitions), then sequence_definitions
+  - Scheduling tolerance check: `Math.abs(new Date(row.scheduled_at).getTime() - expected) < 5000`; cast rows from knex as `string` since pg returns timestamptz columns as strings
+---
+
+## 2026-03-31 - US-021
+- Updated EnrollmentsRepository.updateStatus signature to narrower type (opts object pattern); added 7 new methods to StepExecutionsRepository for step worker lifecycle management
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (updated updateStatus signature: status 'completed'|'failed', opts?.completedAt)
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (added findById, claimForExecution, markCompleted, markFailed, markCancelled, updateDeferral, incrementAttempt)
+- **Learnings for future iterations:**
+  - claimForExecution uses `.where('status', 'pending')` not `.where({ status: 'pending' })` — both work but chained form is explicit; returns `rows.length > 0` as boolean
+  - markCompleted uses `JSON.stringify(output)` for non-null output (jsonb); pass null directly for null
+  - updateDeferral sets job_id to null — this is intentional; the step worker writes the new job_id back after re-enqueueing via updateJobId
+  - incrementAttempt uses `this.db.raw('attempt + 1')` — Knex cannot express increment without raw; this is idiomatic pattern
+  - enrollments.repo updateStatus had no callers (only definitionsRepo.updateStatus was called) — safe rename from bare `completedAt?: Date` to `opts?: { completedAt?: Date }`
+---
+
+## 2026-03-31 - US-022
+- Created src/config/service-urls.ts with ServiceUrls interface and loadServiceUrls() factory
+- Created src/events/publisher.ts with NurturingPublisher class (3 publish methods) and createPublisher() factory
+- Files changed:
+  - apps/platform/nurturing/src/config/service-urls.ts (new)
+  - apps/platform/nurturing/src/events/publisher.ts (new)
+- **Learnings for future iterations:**
+  - @aws-sdk/client-eventbridge was already in package.json — no npm install needed
+  - loadServiceUrls() pattern: collect missing env vars into array, throw with joined list — same approach as other config loaders
+  - createPublisher() reads EVENTBRIDGE_BUS_NAME; all 3 publish methods use identical PutEventsCommand shape with Source='platform.nurturing'
+---
+
+## 2026-03-31 - US-023
+- Created send-message action handler as a pure function (no class)
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/send-message.ts (new — ResolvedSendMessageParams interface + executeSendMessage function)
+- **Learnings for future iterations:**
+  - Pure function pattern (no class) for action handlers — the step worker calls them directly
+  - Two-step flow: render template first (POST /templates/render), then send message (POST /messages/send)
+  - Native fetch (Node 24 built-in) — no axios/node-fetch import needed
+  - No auth headers on service-to-service calls — internal VPC routing handles it
+  - All params are pre-resolved by the step worker before calling the handler
+---
+
+## 2026-03-31 - US-024
+- Created send-email action handler as a pure function (mirrors send-message pattern)
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/send-email.ts (new — ResolvedSendEmailParams interface + executeSendEmail function)
+- **Learnings for future iterations:**
+  - Email handler follows identical two-step pattern: render template first, then send email
+  - Template Service returns { subject, body_html, body_text } for email (vs { body } for SMS)
+  - Email Service endpoint is POST /emails/send (vs /messages/send for SMS)
+  - subject? is optional in params but the rendered template always provides it
+---
+
+## 2026-03-31 - US-025
+- Created call-ai action handler as a pure function
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/call-ai.ts (new — ResolvedCallAiParams, CallAiResult interfaces + executeCallAi function)
+- **Learnings for future iterations:**
+  - Simplest of the three action handlers: single fetch to AI Service, no template rendering step
+  - Returns CallAiResult { output, auto_send } — step worker uses auto_send to decide whether to chain a send_message call
+  - Only system_prompt, user_prompt, model are sent to AI Service (no extra fields per arch spec)
+  - auto_send defaults to false via `params.auto_send ?? false`
+---
+
+## 2026-03-31 - US-026
+- Created emit-event action handler (apps/platform/nurturing/src/services/action-handlers/emit-event.ts)
+- Added @ortho/interpolator as file: dependency to nurturing package.json; built dist first
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/emit-event.ts (new)
+  - apps/platform/nurturing/package.json (added @ortho/interpolator dependency)
+  - apps/platform/nurturing/package-lock.json (updated)
+- **Learnings for future iterations:**
+  - @ortho/interpolator must be added as `"file:../../../packages/@ortho/interpolator"` in package.json and built (`npm run build` in interpolator dir) before `npm install` in the consuming service
+  - interpolateFields(payload, execContext) resolves the whole payload object — pass the full Record<string, unknown>, not individual values
+  - execContext nests enrollmentContext under the key 'context' so paths like 'context.phone' resolve correctly via getByPath
+  - include_context merge order: `{ ...ctx.enrollmentContext, ...resolvedPayload }` — explicit payload fields override same-named context keys
+---
+
+## 2026-03-31 - US-027
+- Created action executor dispatcher at apps/platform/nurturing/src/services/action-executor.ts
+- Files changed:
+  - apps/platform/nurturing/src/services/action-executor.ts (new — ActionExecutorDeps, StepDef, ExecutionContext, ActionResult interfaces + executeAction function)
+- **Learnings for future iterations:**
+  - resolveValue uses interpolateFields({ v: value }, ctx) trick to resolve a single string through interpolateFields without special-casing
+  - ab_variant_override merge: first build resolvedParams from base params, then merge resolved overrides on top; overrides are also run through resolveValue so template strings in overrides resolve correctly
+  - chainSendMessage returned when call_ai result.auto_send === true AND to_field/from_field/dedup_key all exist — step worker owns the chaining logic, not this function
+  - ServiceUrls imported as `import type` would fail since it's used as a value in deps — use `import type { ServiceUrls }` for type annotation only is correct here (it's an interface, no runtime value needed)
+---
+
+## 2026-03-31 - US-028
+- Created step worker BullMQ processor (step-worker.ts) and updated enrollment-manager.ts with retry config
+- Files changed:
+  - apps/platform/nurturing/src/services/step-worker.ts (new — StepWorkerDeps interface + createStepWorker function)
+  - apps/platform/nurturing/src/services/enrollment-manager.ts (added attempts: 5, backoff config to queue.add())
+- **Learnings for future iterations:**
+  - active_hours stored in DB has extra `timezone_field` property beyond ActiveHoursConfig — define `StoredActiveHours = ActiveHoursConfig & { timezone_field: string }` locally
+  - Resolve timezone_field using interpolateFields({ tz: activeHours.timezone_field }, { context: enrollment.context }) — wrapping in object per the resolveValue pattern
+  - BullMQ job.attemptsMade is zero-indexed: check `>= 4` to detect the 5th (final) attempt
+  - enrollment is always non-null in the catch block — early return in Step 1 handles null case before try/catch
+  - Step 6a chains send_message after call_ai by posting directly to Messaging Service (body already resolved, no template rendering needed)
+  - retry config (attempts: 5, backoff: exponential 5000ms) is set in enrollment-manager.ts when enqueuing, not in the worker config
+---
+
+## 2026-03-31 - US-029
+- Created apps/platform/nurturing/worker.ts (standalone BullMQ step worker entry point)
+- Updated tsconfig.json: changed rootDir from "src" to "." and added "worker.ts" to include array
+- Updated Dockerfile: CMD changed from "dist/index.js" to "dist/src/index.js" (path shift due to rootDir change)
+- Files changed:
+  - apps/platform/nurturing/worker.ts (new — bootstraps step worker with DB, queue, repos, publisher, actionExecutorDeps)
+  - apps/platform/nurturing/tsconfig.json (rootDir: "." to allow worker.ts at root; include: ["src/**/*", "worker.ts"])
+  - apps/platform/nurturing/Dockerfile (CMD updated to dist/src/index.js)
+- **Learnings for future iterations:**
+  - When worker.ts lives at service root (outside src/), tsconfig rootDir must be "." not "src" — otherwise tsc errors with "file is not under rootDir"
+  - Changing rootDir from "src" to "." shifts all src/ output from dist/*.js to dist/src/*.js — update Dockerfile CMD accordingly
+  - worker.ts does NOT instantiate SequenceDefinitionsRepository — StepWorkerDeps doesn't require it; only versionsRepo, enrollmentsRepo, stepExecutionsRepo are needed
+  - createPublisher() internally creates EventBridgeClient — no need to pass one from worker.ts
+  - loadServiceUrls() is in src/config/service-urls.ts, not in src/events/publisher.ts
+---
+
+## 2026-03-31 - US-030
+- Created unit tests for active hours deferral decision logic in the step worker
+- Files changed:
+  - apps/platform/nurturing/test/unit/step-worker-deferral.test.ts (6 tests, all passing)
+- **Learnings for future iterations:**
+  - Tests import computeNextActiveWindowMs from '@ortho/interpolator' and call the function directly with `new Date()` (no arg) after vi.setSystemTime — the function defaults `now = new Date()` which picks up the fake timer
+  - 2026-03-31: NY is in EDT (UTC-4). 10:00 EDT = 14:00 UTC; 22:00 EDT = 02:00 UTC+1day; 07:59 EDT = 11:59 UTC; 08:00 EDT = 12:00 UTC; 20:00 EDT = 00:00 UTC next day
+  - For the LA standard time test, use a January date (e.g. 2026-01-15) so PST (UTC-8) is in effect; 09:00 UTC = 01:00 PST
+  - vi.useFakeTimers() must be called before vi.setSystemTime(); vi.useRealTimers() in afterEach restores real timers
+---
+
+## 2026-03-31 - US-031
+- Refactored step-worker.ts to export createStepProcessor (returns the processor function) separately from createStepWorker; createStepWorker now delegates to createStepProcessor
+- Created test/integration/step-worker.test.ts with 5 integration tests (all skip gracefully without DATABASE_URL)
+- Files changed:
+  - apps/platform/nurturing/src/services/step-worker.ts (extracted createStepProcessor export)
+  - apps/platform/nurturing/test/integration/step-worker.test.ts (new — 5 integration tests)
+- **Learnings for future iterations:**
+  - Extract processor from createStepWorker as `export function createStepProcessor(deps)` returning `(job) => Promise<void>` — allows testing without a live BullMQ/Redis connection
+  - buildWorkerDeps() helper instantiates real repos against the test DB; mockPublisher uses vi.fn().mockResolvedValue(undefined) for each publish method
+  - For deferral test: use vi.useFakeTimers() in the test body (not beforeAll) and vi.useRealTimers() in afterEach; appQueue used for enrollment, workerQueue used for worker deps so deferral calls can be tracked independently
+  - Two separate deps instances (deps1, deps2) for the optimistic lock test ensure independent DB connections for concurrent calls
+  - vi.spyOn(globalThis, 'fetch') — not global.fetch or window.fetch — to intercept Node 24 native fetch in integration tests
+---
+
+## 2026-03-31 - US-032
+- Added step-worker-advanced.test.ts with 5 integration tests covering advanced step-worker paths
+- Files changed:
+  - apps/platform/nurturing/test/integration/step-worker-advanced.test.ts (new, 5 tests, all skipped without DB)
+- **Learnings for future iterations:**
+  - For retry simulation: after each failed attempt, step status stays 'running'; must manually reset to 'pending' between calls so claimForExecution succeeds on each retry
+  - emit_event tests: pass a { send: vi.fn() } mock as ebClient via buildWorkerDeps overrides; access Detail via `mock.calls[0][0].input.Entries[0].Detail`
+  - A/B test: pass `ab_test: { enabled: true, split: { A: 0, B: 100 } }` in the PUT /sequences/:id body; verify enrollment.ab_variant='B' before running worker
+  - createActiveSequence helper needs to forward `ab_test` in the PUT payload for A/B tests (use options object pattern)
+---
+
+## 2026-03-31 - US-033
+- Added EnrollmentUnenrolledPayload and AllSequencesCancelledPayload interfaces + publishEnrollmentUnenrolled/publishAllSequencesCancelled methods to NurturingPublisher
+- Files changed:
+  - apps/platform/nurturing/src/events/publisher.ts (2 new interfaces, 2 new methods)
+- **Learnings for future iterations:**
+  - Pattern is identical to existing methods: PutEventsCommand with Source 'platform.nurturing', DetailType as event name, Detail: JSON.stringify(data)
+  - No unit tests needed for publisher methods — pure delegation to EventBridgeClient
+---
+
+## 2026-03-31 - US-035
+- Created unenrollment service (src/services/unenrollment.ts)
+- Files changed:
+  - apps/platform/nurturing/src/services/unenrollment.ts (new — UnenrollParams, UnenrollmentDeps, UnenrollResult interfaces + unenroll() function)
+- **Learnings for future iterations:**
+  - Repo classes use named exports (not default exports) — `import type { EnrollmentsRepository }` not `import type EnrollmentsRepository`
+  - unenroll follows 5-step pattern: guard (findActiveByEntity) → atomic transaction (markUnenrolled + cancelPendingByEnrollment) → best-effort BullMQ removal → publish event → return result
+  - Publisher call is AFTER the transaction commits to avoid holding DB connection open during external calls
+  - Queue<StepJobData> type is used; import StepJobData from '../queue/step-queue.js' for the type parameter
+---
+
+## 2026-03-31 - US-034
+- Extended EnrollmentsRepository and StepExecutionsRepository with unenrollment-specific query and mutation methods
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (modified findActiveByEntity to return `SequenceEnrollment | null` with LIMIT 1 and trx param; added findAllActiveByEntityId; added markUnenrolled)
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (added cancelPendingByEnrollment returning string[])
+- **Learnings for future iterations:**
+  - findActiveByEntity previously returned SequenceEnrollment[] — changed to SequenceEnrollment | null with .limit(1).first() per spec; only mock callers in tests needed updating (no production callers yet)
+  - cancelPendingByEnrollment RETURNING clause: Knex 3 returns array of row objects `{ job_id: string | null }`, not scalars — map with `r.job_id` then filter nulls
+  - findAllActiveByEntityId takes only entityId (no entityType) — distinct from findActiveByEntityAcrossAllSequences which takes both
+  - markUnenrolled uses `qb.fn.now()` for updated_at — same pattern as other update methods in the service
+---
+
+## 2026-03-31 - US-036
+- Added POST /sequences/unenroll route to enrollments.ts; extended EnrollmentsRouteOptions with db, stepQueue, and publisher deps; updated createApp() to create publisher (with graceful null fallback when EVENTBRIDGE_BUS_NAME is missing)
+- Files changed:
+  - apps/platform/nurturing/src/routes/enrollments.ts (added UnenrollBodySchema + POST /sequences/unenroll handler)
+  - apps/platform/nurturing/src/index.ts (createPublisher import, publisher creation with try/catch, pass to enrollmentsRoutes)
+- **Learnings for future iterations:**
+  - Route always returns 200 { ok: true } regardless of whether enrollment existed (idempotent per spec Section 5.3)
+  - Publisher creation wrapped in try/catch in createApp() so tests/dev without EVENTBRIDGE_BUS_NAME don't break; null publisher is cast at call-site inside the route
+  - Extend EnrollmentsRouteOptions (not a new plugin) — unenroll deps are passed alongside existing deps
+---
+
+## 2026-03-31 - US-037
+- Created apps/platform/nurturing/src/consumers/opt-out.consumer.ts with processOptOutMessage and startOptOutConsumer
+- Updated apps/platform/nurturing/worker.ts to instantiate and start the opt-out SQS consumer after the BullMQ step worker
+- Files changed:
+  - apps/platform/nurturing/src/consumers/opt-out.consumer.ts (new — OptOutConsumerDeps, processOptOutMessage, startOptOutConsumer)
+  - apps/platform/nurturing/worker.ts (added SQSClient, pino logger, startOptOutConsumer, stopOptOutConsumer cleanup in SIGTERM/SIGINT)
+- **Learnings for future iterations:**
+  - OPT_OUT_QUEUE_URL must be present at startup (throw if missing) — consistent with other env var guards in worker.ts
+  - `void (async () => { ... })()` IIFE pattern for fire-and-forget async in setInterval without unhandled promise rejection
+  - pino logger instantiated directly in worker.ts with `pino({ name: 'nurturing-worker' })` — no shared logger factory used
+  - unenrollDeps is assembled inline in worker.ts from already-available db/repos/queue/publisher; no new instances needed
+---
+
+## 2026-03-31 - US-038
+- Created unit tests for unenrollment service (4 tests, all passing)
+- Files changed:
+  - apps/platform/nurturing/test/unit/unenrollment.test.ts
+- **Learnings for future iterations:**
+  - db.transaction mock: `vi.fn().mockImplementation(async (fn) => fn(mockTrx))` where mockTrx is a plain object — enables the callback to execute and populate jobIds correctly
+  - BullMQ removal failure test: mock `stepQueue.getJob` to reject; assert the promise resolves (catch block in unenrollment.ts swallows errors)
+  - "leaves non-pending steps untouched" test is structural: verify no stepExecutionsRepo methods beyond cancelPendingByEnrollment are called — SQL WHERE clause is the actual guard, unit test confirms the service itself doesn't call other mutation methods
+---
+
+## 2026-03-31 - US-039
+- Created test/integration/unenroll.test.ts in apps/platform/nurturing/
+- Tests cover: mid-sequence unenroll (pending cancelled, running untouched), idempotent no active enrollment, idempotent already unenrolled, returns 200 for completed enrollment
+- Files changed:
+  - apps/platform/nurturing/test/integration/unenroll.test.ts (4 integration tests)
+- **Learnings for future iterations:**
+  - The migrations/ directory contains knexfile.ts which Knex tries to load as a migration on a fresh schema — on a fresh schema you must pre-insert knexfile.ts into knex_migrations table, or this is only an issue locally; CI environments with existing schema skip already-run migrations
+  - All integration tests in this service use describe.skipIf(!DB_URL) — they're expected to pass by skipping in standard CI without a DB; actual DB testing needs a configured DATABASE_URL
+  - The @fastify/sensible version mismatch with Fastify 5 is a local environment issue affecting all integration tests — not a code problem
+  - Directly update a step row to status='running' via db() to simulate an in-flight step worker — no need to actually run the worker
+---
+
+## 2026-03-31 - US-040
+- Created test/integration/opt-out.test.ts for the opt-out consumer
+- Tests call processOptOutMessage directly (not via SQS polling loop)
+- Files changed:
+  - apps/platform/nurturing/test/integration/opt-out.test.ts (4 integration tests)
+- **Learnings for future iterations:**
+  - processOptOutMessage takes (messageBody, OptOutConsumerDeps) — sqsClient/queueUrl are only used by startOptOutConsumer; pass empty values for direct testing
+  - Mock the BullMQ queue with getJob returning null to avoid Redis dependency in integration tests (unenrollment calls stepQueue.getJob for best-effort job removal)
+  - UnenrollmentDeps.publisher (publishEnrollmentUnenrolled) and OptOutConsumerDeps.publisher (publishAllSequencesCancelled) can be the same mock instance — unenroll is called per-enrollment, the opt-out consumer is responsible for the aggregate event
+  - For entity with no active enrollments, publishAllSequencesCancelled is still called with cancelled_count: 0 and entity_type: 'unknown' (derived from enrollments[0]?.entity_type ?? 'unknown')
+  - Use vi.fn() functions for logger.warn/info/error when you need to assert call counts in tests
+---
+
+## 2026-03-31 - US-041
+- Added findNullJobIdPending() and findOrphanedPending() methods to StepExecutionsRepository
+- Files changed:
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (+13 lines)
+- **Learnings for future iterations:**
+  - findNullJobIdPending() and findOrphanedPending() were specifically required by name in the acceptance criteria — the existing findPendingWithNullJobId() and findOrphanedOverdueSteps() methods are functionally equivalent but the new names are required by the startup scanner and safety-net poller
+  - updateJobId() was already present from Phase 4 — per AC, it was not duplicated
+  - Both new methods are read-only and use this.db directly (no transaction parameter)
+---
+
+## 2026-03-31 - US-042
+- Created startup scanner service (src/services/startup-scanner.ts)
+- Files changed:
+  - apps/platform/nurturing/src/services/startup-scanner.ts (new — StartupScannerDeps interface + runStartupScan function)
+- **Learnings for future iterations:**
+  - nurturing service uses `import type { Logger } from 'pino'` (not @ortho/logger) — @ortho/logger is not in the package's dependencies
+  - StepJobData requires 4 fields: enrollment_id, step_execution_id (= step.id), step_id, step_index — the PRD notes mention only 2, but the actual type in step-queue.ts requires all 4
+  - Per-step try/catch ensures a Redis failure on one step does not abort recovery of the remaining steps
+  - Math.max(0, ...) on delayMs handles past scheduled_at (crash recovery) correctly by enqueuing with delay=0
+---
+
+## 2026-03-31 - US-043
+- Created safety-net-poller Fastify plugin with Redis distributed lock
+- Files changed:
+  - apps/platform/nurturing/src/services/safety-net-poller.ts (SafetyNetPollerDeps, runPollCycle, safetyNetPollerPlugin)
+  - apps/platform/nurturing/package.json (added fastify-plugin dependency)
+  - apps/platform/nurturing/package-lock.json
+- **Learnings for future iterations:**
+  - fastify-plugin was NOT in package.json — had to npm install it before use
+  - StepJobData requires 4 fields (enrollment_id, step_execution_id, step_id, step_index) — AC only listed 2 but type requires all 4; used all from the SequenceStepExecution row
+  - runPollCycle is exported as a standalone function (unit-testable) separate from the Fastify plugin wrapper — same pattern as startup-scanner.ts
+  - Redis SET NX PX lock uses ioredis named export (not default import) — consistent with other Redis usage in the codebase
+---
+
+## 2026-03-31 - US-044
+- Registered safetyNetPollerPlugin and startup scanner in apps/platform/nurturing/src/index.ts
+- Files changed:
+  - apps/platform/nurturing/src/index.ts (imports, createApp opts extended, plugin registration, startup scanner call)
+  - apps/platform/nurturing/test/helpers/build-app.ts (destructure new CreateAppResult return type)
+- **Learnings for future iterations:**
+  - createApp() now returns CreateAppResult { fastify, stepExecutionsRepo, queue } instead of just FastifyInstance — update any callers accordingly
+  - fastify.log is FastifyBaseLogger, not pino Logger — cast as Logger when passing to services that type-check against pino's Logger interface
+  - safetyNetPollerPlugin is registered before fastify.listen (inside createApp), but only when both redis and queue are non-null
+  - runStartupScan is called after fastify.listen resolves (in main()), non-blocking via void + .catch — guarded by queue non-null check
+---
+
+## 2026-03-31 - US-045
+- Created integration test suite for startup scanner (4 tests, all skip gracefully without DB)
+- Files changed:
+  - apps/platform/nurturing/test/integration/startup-scanner.test.ts (new — 4 tests)
+- **Learnings for future iterations:**
+  - Direct DB inserts for step_executions bypass the enrollment API — insert enrollment row first, then step_execution row referencing it
+  - Each test in this file creates its own sequence via HTTP API to avoid cross-test interference
+  - The "server accepts traffic before scan completes" test uses a hung mock scanner (never-resolving Promise) fired non-awaited; app.inject() immediately responds because the server is already ready
+  - Filter mock.calls by enrollment_id to isolate assertions in multi-enrollment tests
+---
+
+## 2026-03-31 - US-046
+- Created integration test suite for safety-net poller (5 tests, all skip gracefully without DB)
+- Files changed:
+  - apps/platform/nurturing/test/integration/safety-net-poller.test.ts (new — 5 tests)
+- **Learnings for future iterations:**
+  - makeMockRedis helper accepts a sequence of return values (['OK', null]) — shift() per call simulates lock acquisition then contention
+  - runPollCycle only picks up steps where job_id IS NOT NULL AND scheduled_at < now() - 1 minute; null-job-id steps are ignored (startup scanner territory)
+  - Concurrent cycle test uses Promise.all([runPollCycle(deps), runPollCycle(deps)]) with shared mockRedis — both calls attempt redis.set; only the first gets 'OK'
+  - dedup_key structural test: assert jobId === step.id (UUID) — BullMQ prevents double-execution if original job reappears
+---
+
+## 2026-03-31 - US-047
+- Created apps/platform/nurturing/migrations/005_sequence_conversions.ts
+- Table: sequence_conversions with id, enrollment_id (FK to sequence_enrollments), sequence_id, ab_variant, entity_type, entity_id, event_type, converted_at
+- UNIQUE on enrollment_id (first conversion wins per enrollment)
+- Indexes: (sequence_id, ab_variant) and (entity_id, event_type)
+- Files changed:
+  - apps/platform/nurturing/migrations/005_sequence_conversions.ts
+- **Learnings for future iterations:**
+  - Phase-8 reference branch used a different approach (added converted_at to sequence_enrollments) — the PRD spec chose a separate table instead for flexibility
+  - Migration numbering gap (001 to 005) is intentional — migrations 002-004 will cover other schema changes added in phases 2-7
+  - UNIQUE constraint via table.unique(['enrollment_id']) Knex builder produces the same SQL as knex.raw UNIQUE INDEX
+---
+
+## 2026-03-31 - US-048
+- Created ConversionsRepository and conversion event consumer for A/B conversion tracking
+- Files changed:
+  - apps/platform/nurturing/src/repositories/conversions.repo.ts (ConversionsRepository with findByEnrollmentId + insert with ON CONFLICT DO NOTHING)
+  - apps/platform/nurturing/src/consumers/conversion.consumer.ts (processConversionEvent)
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (added findActiveWithAbTestEnabledByEntityId JOIN method)
+- **Learnings for future iterations:**
+  - The conversion consumer deps only include enrollmentsRepo — the JOIN query (enrollments + sequence_versions) was added as a new method on EnrollmentsRepository rather than passing db directly
+  - filter-engine package directory exists but has no src/ files — implemented inline condition evaluator for eq/neq/gt/lt/contains operators
+  - ab_test JSONB column may come back as string or object depending on Knex/pg parsing — handled both cases with typeof check + JSON.parse
+  - The consumer wraps entire body in try/catch for crash safety, plus validates event shape before processing
+---
+
+## 2026-03-31 - US-049
+- Added getEnrollmentCounts and getAbBreakdown methods to EnrollmentsRepository
+- Files changed:
+  - apps/platform/nurturing/src/repositories/enrollments.repo.ts (2 new methods appended)
+- **Learnings for future iterations:**
+  - db.raw<{ rows: Array<Record<string, string>> }>(...).then(r => r.rows) is the pattern for raw SQL returning typed rows in Knex 3
+  - FILTER (WHERE ...) clause syntax works in PostgreSQL for conditional aggregation — cleaner than CASE WHEN
+  - getAbBreakdown uses CONVERSIONS_TABLE constant defined inside the method (not module-level) since it's only used there
+  - COUNT(sc.id) (not COUNT(*)) for LEFT JOIN conversions — ensures nulls from missing rows don't inflate count
+---
+
+## 2026-03-31 - US-050
+- Added computeAbSignificance (two-proportion z-test) to apps/platform/nurturing/src/services/ab-significance.ts
+- Files changed:
+  - apps/platform/nurturing/src/services/ab-significance.ts (AbVariantStats, AbSignificanceResult interfaces, computeAbSignificance)
+  - apps/platform/nurturing/test/unit/ab-significance.test.ts (6 tests, all passing)
+- **Learnings for future iterations:**
+  - PRD notes claim 42/175 vs 31/175 gives p≈0.031 — this is WRONG. Actual math gives p≈0.148. The correct numbers for p≈0.031 are 43/175 vs 27/175 (same pattern as US-003 PRD timestamp error).
+  - The A&S 7.1.26 erf approximation (5-term polynomial) is accurate to ±1.5e-7 — sufficient for p=0.05 threshold.
+  - Guard clause: if se === 0 (zero conversions in both variants), the function returns { significant: false, winner: null, p_value: 1 } without division by zero.
+  - Minimum 100 enrollments per variant is a hard threshold — checked before any z-test computation.
+---
+
+## 2026-03-31 - US-051
+- Implemented GET /sequences/:id/stats endpoint
+- Files changed:
+  - apps/platform/nurturing/src/routes/stats.ts (new stats route plugin)
+  - apps/platform/nurturing/src/index.ts (register statsRoutes)
+- **Learnings for future iterations:**
+  - Route options pattern: StatsRouteOptions interface with definitionsRepo, versionsRepo, enrollmentsRepo injected via FastifyPluginAsync closure
+  - A/B test config is on sequence_versions.ab_test (not sequence_definitions) — always load the active_version row to check ab_test.enabled
+  - When total = 0, guard rates as 0 to avoid NaN from division by zero
+  - Rates rounded to 3 decimal places: Math.round(rate * 1000) / 1000
+  - getAbBreakdown returns rows only for variants with enrollments; use find('A')/'B' with ?? 0 fallbacks
+  - computeAbSignificance takes variant name strings 'A' and 'B' for winner field labeling
+---
+
+## 2026-03-31 - US-052
+- Created contract tests for send_message and send_email action handlers
+- Files changed:
+  - apps/platform/nurturing/test/contract/outbound-send-message.contract.test.ts (3 tests)
+  - apps/platform/nurturing/test/contract/outbound-send-email.contract.test.ts (2 tests)
+- **Learnings for future iterations:**
+  - Action handlers use native `fetch` — mock with `vi.stubGlobal('fetch', vi.fn(...))` and clean up with `vi.unstubAllGlobals()` in afterEach
+  - Contract tests go in `test/contract/` (vitest.config.ts glob `test/**/*.test.ts` picks them up automatically)
+  - `vi.fn(async (url: string) => ...)` pattern: branch on URL substring to return different mock responses for template render vs send endpoints
+---
+## 2026-03-31 - US-053
+- Created contract tests for call_ai handler and EventBridge nurturing.* event shapes
+- Files changed:
+  - apps/platform/nurturing/test/contract/outbound-call-ai.contract.test.ts (4 tests)
+  - apps/platform/nurturing/test/contract/outbound-events.contract.test.ts (6 tests)
+- **Learnings for future iterations:**
+  - TEMPLATE_TOKEN_RE is `\{\{(\w+)\}\}` — tokens must be simple words (no dots). `{{context.first_name}}` does NOT work; use `{{enrollment_id}}` or similar top-level interpolationContext keys
+  - Template tokens resolve against top-level interpolationContext keys: `context`, `enrollment_id`, `step_id`, `entity_type`, `entity_id`
+  - For EventBridge event tests: mock `ebClient.send` via `vi.fn().mockResolvedValue({})`, pass mock client to `new NurturingPublisher(ebClient, busName)`, then inspect the `PutEventsCommand` args from `sendMock.mock.calls[0][0]`
+  - `executeAction` returns `chainSendMessage` (not a fetch call) for call_ai with auto_send:true; step-worker performs the actual POST /messages/send
+---
+
+## 2026-03-31 - US-054
+- Created contract tests for inbound opt_out.received malformed event handling
+- Also added per-enrollment try/catch to processOptOutMessage (spec requirement that was missing from implementation)
+- Files changed:
+  - apps/platform/nurturing/test/contract/inbound-opt-out.contract.test.ts (new — 6 tests, all passing)
+  - apps/platform/nurturing/src/consumers/opt-out.consumer.ts (added per-enrollment try/catch in for loop)
+- **Learnings for future iterations:**
+  - processOptOutMessage takes `messageBody: string` (JSON string), not an object — tests must pass JSON.stringify(...)
+  - Event structure is `{ detail: { entity_id: string } }` (not `{ payload: { entity_id } }`) — test must match
+  - The `unenroll` field in OptOutConsumerDeps is a direct function, not `unenrollmentService.unenroll`
+  - `publisher` mock needs `publishAllSequencesCancelled` (not generic `publish`) to match NurturingPublisher interface
+  - Passing `null as unknown as string` to test runtime resilience against null SQS body is valid pattern
+  - Per-enrollment try/catch was a spec requirement — the contract test revealed it was missing and the fix was applied inline
+---

@@ -19,7 +19,13 @@
       "Bash(mkdir -p /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-27-phase-2-evaluation-core)",
       "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/prd.json /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-27-phase-2-evaluation-core/prd.json)",
       "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/progress.txt /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-27-phase-2-evaluation-core/progress.txt)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Bash(node:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+      "Bash(rm -rf node_modules package-lock.json)",
+      "Bash(npm install:*)",
+      "Bash(ls /workspace/docs/NAVIGATOR*)"
     ]
   }
 }

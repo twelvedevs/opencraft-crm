@@ -66,8 +66,13 @@ echo "Starting Ralph (Claude Code) - Max iterations: $MAX_ITERATIONS"
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
   echo "==============================================================="
-  echo "  Ralph Iteration $i of $MAX_ITERATIONS (Claude Code)"
+  echo "  Ralph Iteration $i of $MAX_ITERATIONS (Claude Code) $(date)"
   echo "==============================================================="
+
+  total_tasks=$( grep '"passes"' scripts/ralph/prd.json | wc -l | awk '{print $1}' )
+  finished_tasks=$( grep '"passes"' scripts/ralph/prd.json | grep true | wc -l | awk '{print $1}' )
+  pending_tasks=$( grep '"passes"' scripts/ralph/prd.json | grep false | wc -l | awk '{print $1}' )
+  echo "Progress: ${finished_tasks} stories finished, ${pending_tasks} remaining, ${total_tasks} stories total."
 
   # Use -p with --append-system-prompt so skills and project CLAUDE.md load normally
   OUTPUT=$(claude -p "Read CLAUDE.md and begin the next Ralph iteration" \
@@ -78,15 +83,15 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
     echo "Ralph completed all tasks!"
-    echo "Completed at iteration $i of $MAX_ITERATIONS"
+    echo "Completed at iteration $i of $MAX_ITERATIONS ($(date))"
     exit 0
   fi
 
-  echo "Iteration $i complete. Continuing..."
+  echo "Iteration $i complete ($(date)). Continuing..."
   sleep 2
 done
 
 echo ""
-echo "Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks."
+echo "Ralph reached max iterations ($MAX_ITERATIONS) without completing all tasks ($(date))."
 echo "Check $PROGRESS_FILE for status."
 exit 1

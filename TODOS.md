@@ -1,0 +1,6 @@
+- [ ] implement `@ortho/interpolator` , used by Automation Engine and Nurturing Engine
+- [ ] implement `@platform/sequence-ui` as part of Nurturing Engine
+- [ ] The Automation Engine's `unenroll_sequence` action is a new action type that requires amending the Automation Engine spec and implementation
+    - this raised by prd-questions skill while working on Nurturing Engine
+    - prd-questions-nurturing-engine.md
+    - C. Partially — add the action type definition/interface only, defer the full worker implementation
