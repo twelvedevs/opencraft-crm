@@ -430,7 +430,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 4, originally US-004] Import 'import { randomUUID } from \"node:crypto\"'. Import 'import type { Knex } from \"knex\"'. Import Queue from 'bullmq'; import StepJobData from '../queue/step-queue.js'. Import assignVariant and AbTestConfig from './ab-assigner.js'. Import all four repo types from their respective .repo.ts files. The db.transaction() pattern in Knex 3: db.transaction(async (trx) => { ... return result; }) — the promise resolves with the returned value on commit, or rejects and rolls back on throw. For the mock db.transaction in tests: mockDb.transaction = vi.fn().mockImplementation(async (cb: Function) => cb(mockTrx)) where mockTrx is {}. To capture enrolled_at for delta checks in tests, record Date.now() before calling enroll() and compare scheduledAt values against that timestamp."
     },
     {

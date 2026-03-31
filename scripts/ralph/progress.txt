@@ -221,3 +221,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - No randomness seeding needed in tests — 10000 samples with 40-60% bounds is sufficiently robust
   - ab_test column is JSONB from Postgres — callers must cast `version.ab_test as AbTestConfig | null` before passing to assignVariant
 ---
+
+## 2026-03-31 - US-017
+- Created EnrollmentManager service and unit tests
+- Files changed:
+  - apps/platform/nurturing/src/services/enrollment-manager.ts (EnrollInput, EnrollResult, StepDef, UNIT_MS, EnrollmentManager class with enroll() method)
+  - apps/platform/nurturing/test/unit/enrollment-manager.test.ts (7 tests, all passing)
+- **Learnings for future iterations:**
+  - db.transaction() in Knex 3 returns whatever the callback returns — destructure `{ enrollment, stepRows }` from the awaited result
+  - Mock db.transaction with `vi.fn().mockImplementation(async (cb: Function) => cb({}))` — the `{}` is the mock trx
+  - Record `Date.now()` BEFORE calling enroll() to compute expected scheduled_at delta for assertions; use `toBeLessThanOrEqual(100)` tolerance
+  - Queue.add returns `{ id: string }` — use `job.id!` (non-null assertion) when calling updateJobId since the mock always provides it
+  - Sort stepRows by step_index before enqueueing to guarantee ordered BullMQ scheduling
+---
