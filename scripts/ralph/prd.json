@@ -985,7 +985,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 44,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 7, originally US-004] The ordering is critical: fastify.register(safetyNetPollerPlugin) before fastify.listen so the plugin's onClose hook is registered in the Fastify lifecycle. The startup scanner runs after fastify.listen resolves so the server is already accepting health checks before the scan begins — this is the non-blocking requirement from spec Section 5.5. Check src/index.ts for the existing pattern of how stepExecutionsRepo and stepQueue are instantiated; the same variables should be passed directly to the plugin and scanner without creating new instances. If the server uses a graceful shutdown hook (SIGTERM), verify clearInterval is called via the onClose hook registered in safetyNetPollerPlugin — Fastify calls onClose hooks during fastify.close()."
     },
     {

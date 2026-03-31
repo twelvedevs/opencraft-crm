@@ -544,3 +544,15 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - runPollCycle is exported as a standalone function (unit-testable) separate from the Fastify plugin wrapper — same pattern as startup-scanner.ts
   - Redis SET NX PX lock uses ioredis named export (not default import) — consistent with other Redis usage in the codebase
 ---
+
+## 2026-03-31 - US-044
+- Registered safetyNetPollerPlugin and startup scanner in apps/platform/nurturing/src/index.ts
+- Files changed:
+  - apps/platform/nurturing/src/index.ts (imports, createApp opts extended, plugin registration, startup scanner call)
+  - apps/platform/nurturing/test/helpers/build-app.ts (destructure new CreateAppResult return type)
+- **Learnings for future iterations:**
+  - createApp() now returns CreateAppResult { fastify, stepExecutionsRepo, queue } instead of just FastifyInstance — update any callers accordingly
+  - fastify.log is FastifyBaseLogger, not pino Logger — cast as Logger when passing to services that type-check against pino's Logger interface
+  - safetyNetPollerPlugin is registered before fastify.listen (inside createApp), but only when both redis and queue are non-null
+  - runStartupScan is called after fastify.listen resolves (in main()), non-blocking via void + .catch — guarded by queue non-null check
+---
