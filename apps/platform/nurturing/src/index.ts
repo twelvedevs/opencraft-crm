@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'url';
 import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
+import { Redis } from 'ioredis';
 import type { FastifyInstance } from 'fastify';
 import type { Queue } from 'bullmq';
 import authPlugin from './plugins/auth.js';
@@ -11,12 +12,25 @@ import { EnrollmentsRepository } from './repositories/enrollments.repo.js';
 import { StepExecutionsRepository } from './repositories/step-executions.repo.js';
 import { VersioningService } from './services/versioning.service.js';
 import { EnrollmentManager } from './services/enrollment-manager.js';
+import { runStartupScan } from './services/startup-scanner.js';
+import safetyNetPollerPlugin from './services/safety-net-poller.js';
 import sequencesRoutes from './routes/sequences.js';
 import enrollmentsRoutes from './routes/enrollments.js';
 import { createStepQueue, type StepJobData } from './queue/step-queue.js';
+import type { Logger } from 'pino';
 import { createPublisher, type NurturingPublisher } from './events/publisher.js';
 
-export async function createApp(opts?: { queue?: Queue<StepJobData> | null; publisher?: NurturingPublisher | null }): Promise<FastifyInstance> {
+export interface CreateAppResult {
+  fastify: FastifyInstance;
+  stepExecutionsRepo: StepExecutionsRepository;
+  queue: Queue<StepJobData> | null;
+}
+
+export async function createApp(opts?: {
+  queue?: Queue<StepJobData> | null;
+  publisher?: NurturingPublisher | null;
+  redis?: Redis | null;
+}): Promise<CreateAppResult> {
   const fastify = Fastify({ logger: true });
   const db = createDb();
   const definitionsRepo = new SequenceDefinitionsRepository(db);
@@ -44,6 +58,8 @@ export async function createApp(opts?: { queue?: Queue<StepJobData> | null; publ
     }
   }
 
+  const redis = opts?.redis ?? null;
+
   const enrollmentManager = new EnrollmentManager(
     db,
     definitionsRepo,
@@ -58,21 +74,26 @@ export async function createApp(opts?: { queue?: Queue<StepJobData> | null; publ
   await fastify.register(sequencesRoutes, { definitionsRepo, versionsRepo, versioningService });
   await fastify.register(enrollmentsRoutes, { enrollmentManager, enrollmentsRepo, stepExecutionsRepo, db, stepQueue: queue, publisher });
 
+  if (redis && queue) {
+    await fastify.register(safetyNetPollerPlugin, { stepExecutionsRepo, stepQueue: queue, redis, logger: fastify.log as Logger });
+  }
+
   fastify.get('/healthz', async () => {
     return { ok: true };
   });
 
-  return fastify;
+  return { fastify, stepExecutionsRepo, queue };
 }
 
 async function main(): Promise<void> {
   const redisUrl = process.env['REDIS_URL'];
   if (!redisUrl) {
-    console.warn('REDIS_URL is not set — step queue will be disabled');
+    console.warn('REDIS_URL is not set — step queue and safety-net poller will be disabled');
   }
 
   const queue = redisUrl ? createStepQueue(redisUrl) : null;
-  const fastify = await createApp({ queue });
+  const redis = redisUrl ? new Redis(redisUrl) : null;
+  const { fastify, stepExecutionsRepo } = await createApp({ queue, redis });
   const port = parseInt(process.env['PORT'] ?? '3000', 10);
 
   try {
@@ -80,6 +101,12 @@ async function main(): Promise<void> {
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
+  }
+
+  if (queue) {
+    void runStartupScan({ stepExecutionsRepo, stepQueue: queue, logger: fastify.log as Logger }).catch(
+      (err) => fastify.log.error(err, 'startup-scanner: unhandled error'),
+    );
   }
 
   process.on('SIGTERM', async () => {
