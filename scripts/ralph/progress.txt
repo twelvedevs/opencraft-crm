@@ -12,6 +12,10 @@ Started: Tue Mar 31 19:22:35 UTC 2026
 - Route plugins: register WITHOUT prefix in app.ts, use full paths (e.g. `/numbers`) inside the plugin — email service `domainRoutes` uses this pattern
 - Unique constraint violations: catch with Knex error code `23505` via `isUniqueViolation()` helper
 - Knexfile: use `export default { ... }` for ESM compatibility
+- ioredis `scriptLoad` doesn't exist — use `redis.script('LOAD', luaScript) as string` for SCRIPT LOAD
+- buildApp signature: `(db, eventBus, redis, twilioClient, statusCallbackUrl)` — all 5 params required
+- vitest.config.ts: use `passWithNoTests: true` to avoid exit code 1 when no test files exist
+- TwilioClient uses interface + stub pattern for DI — stub is co-located in twilio-client.ts
 
 ---
 
@@ -31,4 +35,16 @@ Started: Tue Mar 31 19:22:35 UTC 2026
   - Don't use prefix option when registering route plugins — put full paths in the plugin itself (email service pattern)
   - Seed scripts use `onConflict().ignore()` for idempotent re-runs
   - Query param booleans come as strings — parse with `=== 'true'`
+---
+
+## 2026-03-31 - US-003
+- What was implemented: Full outbound send flow — template renderer, number resolver, opt-out registry, Redis token bucket rate limiter (Lua script), Twilio client (real + stub), SendMessageService orchestrating the 9-step pipeline, message routes (POST /messages/send, GET /messages/:id, GET /messages), vitest config, app/index wiring with TwilioClient + RateLimiter + statusCallbackUrl decorations
+- Files changed: apps/platform/messaging/src/services/template-renderer.ts (new), src/services/number-resolver.ts (new), src/services/opt-out-registry.ts (new), src/services/rate-limiter.lua (new), src/services/rate-limiter.ts (new), src/services/twilio-client.ts (new), src/services/send-message.ts (new), src/routes/messages.ts (new), src/app.ts (updated — added twilioClient/rateLimiter/statusCallbackUrl params + decorations + messageRoutes), src/index.ts (updated — create twilioClient, pass to buildApp), src/types.d.ts (updated — added twilioClient, rateLimiter, statusCallbackUrl), vitest.config.ts (new)
+- **Learnings for future iterations:**
+  - ioredis `scriptLoad` doesn't exist as a method — use `redis.script('LOAD', luaScript)` instead and cast result to string
+  - RateLimiter Lua script uses token bucket with HMGET/HMSET + TTL for auto-cleanup
+  - TwilioClient interface + stub pattern enables DI for testing — stub tracks calls array and supports setError()
+  - buildApp signature now takes (db, eventBus, redis, twilioClient, statusCallbackUrl) — 5 params
+  - vitest.config.ts with `passWithNoTests: true` prevents exit code 1 when no test files exist yet
+  - SendMessageService follows spec Section 5 pipeline: validate → opt-out → dedup → resolve → render → rate-limit → twilio → insert → return
 ---

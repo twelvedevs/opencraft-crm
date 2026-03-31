@@ -65,7 +65,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "The Messaging Service has NO BullMQ — sends are synchronous in the request path. The rate limiter Lua script must be loaded at startup via SCRIPT LOAD and called via evalsha. The TwilioClient interface enables DI for testing — the stub is co-located in the same file. For rate-limiter.lua, use fs.readFileSync with import.meta to resolve the path relative to the module. The statusCallback URL is passed to Twilio so it knows where to POST delivery status updates (handled in US-005)."
     },
     {
