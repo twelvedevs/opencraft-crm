@@ -126,7 +126,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 2, originally US-002] Use knex.schema.withSchema('platform_nurturing').createTable(...) pattern (same as automation migrations). For FK references use table.uuid('sequence_id').notNullable().references('id').inTable('platform_nurturing.sequence_definitions'). For unique constraint use table.unique(['sequence_id', 'version']). The partial index cannot be expressed via the schema builder — use knex.raw() directly. The seed SQL in the comment is documentation only — it must NOT be executed by the migration. Migrations are run with knex CLI: knex --knexfile migrations/knexfile.ts migrate:latest."
     },
     {

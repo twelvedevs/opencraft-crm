@@ -66,3 +66,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - @platform/nurturing omits @aws-sdk/client-secrets-manager (present in automation) — not needed for nurturing
   - worker.ts uses `export default {}` (empty object) to satisfy ESM default export with no imports
 ---
+
+## 2026-03-31 - US-005
+- Created DB migration (001_initial_schema.ts), Knex setup (src/db.ts), and knexfile.ts for platform_nurturing schema
+- Files changed:
+  - apps/platform/nurturing/src/db.ts (createDb() with DATABASE_URL + searchPath)
+  - apps/platform/nurturing/migrations/knexfile.ts (Knex config for platform_nurturing schema)
+  - apps/platform/nurturing/migrations/001_initial_schema.ts (4 tables + indexes + seed comment)
+- **Learnings for future iterations:**
+  - Partial index (WHERE status = 'pending') must use knex.raw() — cannot be expressed via schema builder
+  - FK references across schemas use .inTable('platform_nurturing.sequence_definitions') string format
+  - Migration seed SQL goes in a TypeScript block comment (/* ... */) above the return — NOT executed
+  - knexfile.ts uses process.env.DATABASE_URL (not process.env['DATABASE_URL']) — consistent with automation pattern
+---
