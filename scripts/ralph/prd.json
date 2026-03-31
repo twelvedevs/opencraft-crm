@@ -213,7 +213,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 3, originally US-001] JWT payload shape is { sub: string; role: string } — the role field carries 'marketing_staff' | 'marketing_manager' | 'service'. The authenticate prehandler is used on all management routes; requireRole is applied additionally on activate/disable. For the module augmentation, prehandlerAsyncHookHandler is imported from 'fastify'. Do NOT use @fastify/sensible's httpErrors unless it's already registered — check src/index.ts; @fastify/sensible is registered there from Phase 2 so fastify.httpErrors.forbidden() is available. The plugin file must use .ts extension and NodeNext moduleResolution — use import type where applicable to avoid runtime issues."
     },
     {

@@ -104,3 +104,17 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - findOrphanedOverdueSteps uses `this.db.raw("now() - interval '1 minute'")` for the timestamp comparison
   - JSON.stringify NOT needed for output in updateStatus — Knex/pg handles jsonb for plain objects
 ---
+
+## 2026-03-31 - US-008
+- Added JWT auth plugin to nurturing service
+- Files changed:
+  - apps/platform/nurturing/package.json (added @fastify/jwt ^9.0.0)
+  - apps/platform/nurturing/package-lock.json (updated)
+  - apps/platform/nurturing/src/plugins/auth.ts (new — authPlugin with authenticate + requireRole)
+  - apps/platform/nurturing/src/index.ts (register authPlugin after sensible)
+- **Learnings for future iterations:**
+  - Module augmentation for FastifyInstance must include BOTH `authenticate` and `requireRole` to avoid decorate type errors
+  - `authenticate` is decorated as `preHandlerAsyncHookHandler` — add it to the `declare module 'fastify'` block alongside `requireRole`
+  - `fastify.httpErrors.forbidden()` works because `@fastify/sensible` is registered first in index.ts
+  - `request.user` from @fastify/jwt is typed as `unknown` by default — cast to `{ sub: string; role: string }` at call site
+---
