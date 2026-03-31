@@ -8,6 +8,7 @@ import { RateLimiter } from './services/rate-limiter.js';
 import { healthRoutes } from './routes/health.js';
 import { numberRoutes } from './routes/numbers.js';
 import { messageRoutes } from './routes/messages.js';
+import { optOutRoutes } from './routes/opt-outs.js';
 
 export async function buildApp(
   db: Knex,
@@ -41,6 +42,7 @@ export async function buildApp(
   await app.register(healthRoutes);
   await app.register(numberRoutes);
   await app.register(messageRoutes);
+  await app.register(optOutRoutes);
 
   return app;
 }
