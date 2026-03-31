@@ -969,7 +969,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 43,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 7, originally US-003] The Redis lock (SET NX PX) ensures only one ECS instance runs the poll cycle at a time. LOCK_TTL_MS is set to 240000 (4 minutes) — shorter than the 5-minute poll interval so the lock expires before the next cycle even if the process holding it crashes mid-cycle. The ioredis client is the same Redis connection used by BullMQ — in Phase 4/5, BullMQ was instantiated with a connection option; check whether a bare ioredis client is already exported from src/queue/step-queue.ts or src/index.ts. If BullMQ was configured with a connection object literal rather than an ioredis instance, a separate ioredis instance needs to be created with the same REDIS_URL. The jobId: step.id pattern in stepQueue.add ensures BullMQ deduplication if the poller runs while the original job is actually still in Redis (shouldn't happen given the query condition, but is safe). fastify-plugin (fp) wraps the plugin to avoid Fastify's encapsulation boundary — it allows the plugin to access decorators from the parent scope. Check if fastify-plugin is already in package.json (it was likely added for other plugins in Phase 2/5)."
     },
     {

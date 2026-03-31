@@ -531,3 +531,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Per-step try/catch ensures a Redis failure on one step does not abort recovery of the remaining steps
   - Math.max(0, ...) on delayMs handles past scheduled_at (crash recovery) correctly by enqueuing with delay=0
 ---
+
+## 2026-03-31 - US-043
+- Created safety-net-poller Fastify plugin with Redis distributed lock
+- Files changed:
+  - apps/platform/nurturing/src/services/safety-net-poller.ts (SafetyNetPollerDeps, runPollCycle, safetyNetPollerPlugin)
+  - apps/platform/nurturing/package.json (added fastify-plugin dependency)
+  - apps/platform/nurturing/package-lock.json
+- **Learnings for future iterations:**
+  - fastify-plugin was NOT in package.json — had to npm install it before use
+  - StepJobData requires 4 fields (enrollment_id, step_execution_id, step_id, step_index) — AC only listed 2 but type requires all 4; used all from the SequenceStepExecution row
+  - runPollCycle is exported as a standalone function (unit-testable) separate from the Fastify plugin wrapper — same pattern as startup-scanner.ts
+  - Redis SET NX PX lock uses ioredis named export (not default import) — consistent with other Redis usage in the codebase
+---
