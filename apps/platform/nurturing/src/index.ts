@@ -7,8 +7,12 @@ import authPlugin from './plugins/auth.js';
 import { createDb } from './db.js';
 import { SequenceDefinitionsRepository } from './repositories/sequence-definitions.repo.js';
 import { SequenceVersionsRepository } from './repositories/sequence-versions.repo.js';
+import { EnrollmentsRepository } from './repositories/enrollments.repo.js';
+import { StepExecutionsRepository } from './repositories/step-executions.repo.js';
 import { VersioningService } from './services/versioning.service.js';
+import { EnrollmentManager } from './services/enrollment-manager.js';
 import sequencesRoutes from './routes/sequences.js';
+import enrollmentsRoutes from './routes/enrollments.js';
 import { createStepQueue, type StepJobData } from './queue/step-queue.js';
 
 export async function createApp(opts?: { queue?: Queue<StepJobData> | null }): Promise<FastifyInstance> {
@@ -16,6 +20,8 @@ export async function createApp(opts?: { queue?: Queue<StepJobData> | null }): P
   const db = createDb();
   const definitionsRepo = new SequenceDefinitionsRepository(db);
   const versionsRepo = new SequenceVersionsRepository(db);
+  const enrollmentsRepo = new EnrollmentsRepository(db);
+  const stepExecutionsRepo = new StepExecutionsRepository(db);
   const versioningService = new VersioningService(definitionsRepo, versionsRepo);
 
   let queue: Queue<StepJobData> | null;
@@ -26,9 +32,19 @@ export async function createApp(opts?: { queue?: Queue<StepJobData> | null }): P
     queue = redisUrl ? createStepQueue(redisUrl) : null;
   }
 
+  const enrollmentManager = new EnrollmentManager(
+    db,
+    definitionsRepo,
+    versionsRepo,
+    enrollmentsRepo,
+    stepExecutionsRepo,
+    queue,
+  );
+
   await fastify.register(sensible);
   await fastify.register(authPlugin);
   await fastify.register(sequencesRoutes, { definitionsRepo, versionsRepo, versioningService });
+  await fastify.register(enrollmentsRoutes, { enrollmentManager, enrollmentsRepo, stepExecutionsRepo });
 
   fastify.get('/healthz', async () => {
     return { ok: true };
