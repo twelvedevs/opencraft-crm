@@ -171,4 +171,14 @@ export class StepExecutionsRepository {
       attempt: this.db.raw('attempt + 1'),
     });
   }
+
+  async cancelPendingByEnrollment(enrollmentId: string, trx?: Knex.Transaction): Promise<string[]> {
+    const qb = trx ?? this.db;
+    const rows = await qb(STEPS_TABLE)
+      .where({ enrollment_id: enrollmentId })
+      .where('status', 'pending')
+      .update({ status: 'cancelled' })
+      .returning('job_id');
+    return rows.map((r: { job_id: string | null }) => r.job_id).filter((id): id is string => id !== null);
+  }
 }

@@ -90,10 +90,23 @@ export class EnrollmentsRepository {
     sequenceId: string,
     entityType: string,
     entityId: string,
-  ): Promise<SequenceEnrollment[]> {
+    trx?: Knex.Transaction,
+  ): Promise<SequenceEnrollment | null> {
+    const qb = trx ?? this.db;
+    const row = await qb(ENROLLMENTS_TABLE)
+      .where({
+        sequence_id: sequenceId,
+        entity_type: entityType,
+        entity_id: entityId,
+        status: 'active',
+      })
+      .limit(1)
+      .first();
+    return (row as SequenceEnrollment) ?? null;
+  }
+
+  async findAllActiveByEntityId(entityId: string): Promise<SequenceEnrollment[]> {
     return this.db(ENROLLMENTS_TABLE).where({
-      sequence_id: sequenceId,
-      entity_type: entityType,
       entity_id: entityId,
       status: 'active',
     }) as Promise<SequenceEnrollment[]>;
@@ -108,5 +121,12 @@ export class EnrollmentsRepository {
       entity_id: entityId,
       status: 'active',
     }) as Promise<SequenceEnrollment[]>;
+  }
+
+  async markUnenrolled(id: string, trx?: Knex.Transaction): Promise<void> {
+    const qb = trx ?? this.db;
+    await qb(ENROLLMENTS_TABLE)
+      .where({ id })
+      .update({ status: 'unenrolled', updated_at: qb.fn.now() });
   }
 }
