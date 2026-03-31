@@ -652,3 +652,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Contract tests go in `test/contract/` (vitest.config.ts glob `test/**/*.test.ts` picks them up automatically)
   - `vi.fn(async (url: string) => ...)` pattern: branch on URL substring to return different mock responses for template render vs send endpoints
 ---
+## 2026-03-31 - US-053
+- Created contract tests for call_ai handler and EventBridge nurturing.* event shapes
+- Files changed:
+  - apps/platform/nurturing/test/contract/outbound-call-ai.contract.test.ts (4 tests)
+  - apps/platform/nurturing/test/contract/outbound-events.contract.test.ts (6 tests)
+- **Learnings for future iterations:**
+  - TEMPLATE_TOKEN_RE is `\{\{(\w+)\}\}` — tokens must be simple words (no dots). `{{context.first_name}}` does NOT work; use `{{enrollment_id}}` or similar top-level interpolationContext keys
+  - Template tokens resolve against top-level interpolationContext keys: `context`, `enrollment_id`, `step_id`, `entity_type`, `entity_id`
+  - For EventBridge event tests: mock `ebClient.send` via `vi.fn().mockResolvedValue({})`, pass mock client to `new NurturingPublisher(ebClient, busName)`, then inspect the `PutEventsCommand` args from `sendMock.mock.calls[0][0]`
+  - `executeAction` returns `chainSendMessage` (not a fetch call) for call_ai with auto_send:true; step-worker performs the actual POST /messages/send
+---

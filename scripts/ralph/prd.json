@@ -1165,7 +1165,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 53,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 8, originally US-007] The 'only { system_prompt, user_prompt, model }' assertion is the most important for the call_ai contract — the spec is explicit that no extra fields are sent. Use expect(capturedBody).toEqual({ system_prompt: ..., user_prompt: ..., model: ... }) rather than expect.objectContaining(...) so extra fields would cause the test to fail. For EventBridge event shape tests, mock the @ortho/event-bus putEvent function (or the underlying AWS EventBridge client) at the module level with vi.mock('@ortho/event-bus'). Capture the call arguments and assert the event body matches the @ortho/types interface fields. The nurturing.* event types should already be defined in @ortho/types from earlier phases — check packages/@ortho/types/src/events/ for the relevant interfaces. If the @ortho/event-bus mock returns a resolved promise, the publisher functions should complete without error."
     },
     {
