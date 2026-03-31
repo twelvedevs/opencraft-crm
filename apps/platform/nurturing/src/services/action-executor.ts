@@ -53,21 +53,11 @@ export async function executeAction(
     entity_id: execCtx.entity_id,
   };
 
-  const resolveValue = (value: unknown): unknown => {
-    if (typeof value !== 'string') return value;
-    const resolved = interpolateFields({ v: value }, interpolationContext);
-    return resolved['v'];
-  };
-
-  let resolvedParams: Record<string, unknown> = Object.fromEntries(
-    Object.entries(stepDef.action.params).map(([k, v]) => [k, resolveValue(v)]),
-  );
+  let resolvedParams = interpolateFields(stepDef.action.params, interpolationContext);
 
   if (stepDef.ab_variant_override !== undefined && execCtx.abVariant !== null) {
     const overrides = stepDef.ab_variant_override[execCtx.abVariant] ?? {};
-    const resolvedOverrides = Object.fromEntries(
-      Object.entries(overrides).map(([k, v]) => [k, resolveValue(v)]),
-    );
+    const resolvedOverrides = interpolateFields(overrides, interpolationContext);
     resolvedParams = { ...resolvedParams, ...resolvedOverrides };
   }
 
