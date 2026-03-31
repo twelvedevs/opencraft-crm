@@ -510,3 +510,13 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - For entity with no active enrollments, publishAllSequencesCancelled is still called with cancelled_count: 0 and entity_type: 'unknown' (derived from enrollments[0]?.entity_type ?? 'unknown')
   - Use vi.fn() functions for logger.warn/info/error when you need to assert call counts in tests
 ---
+
+## 2026-03-31 - US-041
+- Added findNullJobIdPending() and findOrphanedPending() methods to StepExecutionsRepository
+- Files changed:
+  - apps/platform/nurturing/src/repositories/step-executions.repo.ts (+13 lines)
+- **Learnings for future iterations:**
+  - findNullJobIdPending() and findOrphanedPending() were specifically required by name in the acceptance criteria — the existing findPendingWithNullJobId() and findOrphanedOverdueSteps() methods are functionally equivalent but the new names are required by the startup scanner and safety-net poller
+  - updateJobId() was already present from Phase 4 — per AC, it was not duplicated
+  - Both new methods are read-only and use this.db directly (no transaction parameter)
+---

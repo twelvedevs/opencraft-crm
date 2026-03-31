@@ -930,7 +930,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 41,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 7, originally US-001] findNullJobIdPending is used by the startup scanner: it finds steps where the process crashed between the DB transaction commit (step 5 of enrollment) and the BullMQ enqueue (step 6). These steps have a committed DB row but no BullMQ job. scheduled_at may be in the future (normal) or in the past (crash happened after the step was due). findOrphanedPending is used by the safety-net poller: it finds steps where job_id IS NOT NULL (job was enqueued at some point) but the BullMQ job is now gone (Redis data loss or restart). The 1-minute grace period prevents re-enqueuing steps that are still waiting in BullMQ but whose scheduled_at just passed while the worker was momentarily busy. Both methods scan the global table without filtering by enrollment_id — they recover across all active enrollments. Check Phase 4's enrollment-manager.ts for the updateJobId pattern used post-enqueue to avoid introducing a duplicate."
     },
     {
