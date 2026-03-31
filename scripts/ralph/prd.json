@@ -102,7 +102,7 @@
         "Run npm install from apps/platform/nurturing to generate package-lock.json",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 1,
+      "priority": 4,
       "passes": false,
       "notes": "[Phase 2, originally US-001] Pattern mirrors apps/platform/automation exactly — same tsconfig, same Dockerfile, same package.json shape. Worker entry point is src/worker.ts (compiles to dist/worker.js); the ECS task definition for the worker overrides CMD to 'node dist/worker.js'. src/index.ts must NOT import db.ts or repos yet — those are added in later stories to keep this story self-contained and typecheckable."
     },
@@ -125,7 +125,7 @@
         "down(): drop tables in reverse dependency order: sequence_step_executions, sequence_enrollments, sequence_versions, sequence_definitions (use dropTableIfExists with schema prefix); then DROP SCHEMA IF EXISTS platform_nurturing",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 2,
+      "priority": 5,
       "passes": false,
       "notes": "[Phase 2, originally US-002] Use knex.schema.withSchema('platform_nurturing').createTable(...) pattern (same as automation migrations). For FK references use table.uuid('sequence_id').notNullable().references('id').inTable('platform_nurturing.sequence_definitions'). For unique constraint use table.unique(['sequence_id', 'version']). The partial index cannot be expressed via the schema builder — use knex.raw() directly. The seed SQL in the comment is documentation only — it must NOT be executed by the migration. Migrations are run with knex CLI: knex --knexfile migrations/knexfile.ts migrate:latest."
     },
@@ -154,7 +154,7 @@
         "Method findLatestForSequence(sequenceId: string): Promise<SequenceVersion | null> — returns the row with the highest version number for the given sequence_id, or null if none",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 3,
+      "priority": 6,
       "passes": false,
       "notes": "[Phase 2, originally US-003] Pattern mirrors apps/platform/automation/src/repositories/rules.repository.ts exactly — same SCHEMA constant prefix, same .returning('*') pattern, same Knex type annotations. Both repository files should be in src/repositories/ directory. SCHEMA constant should be defined once per file (not shared between files yet — sharing is premature). Use (row as SequenceDefinition) ?? null cast pattern from automation repo. For findAll keyset cursor, created_at is a Date in the TS interface but the cursor param from HTTP will be a string ISO timestamp — the WHERE clause comparing timestamptz column against a string literal works in Postgres."
     },
@@ -192,7 +192,7 @@
         "Method findOrphanedOverdueSteps(): Promise<SequenceStepExecution[]> — returns rows WHERE status = 'pending' AND scheduled_at < now() - interval '1 minute' AND job_id IS NOT NULL (for safety-net poller); use db.raw(\"now() - interval '1 minute'\") for the timestamp comparison",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 4,
+      "priority": 7,
       "passes": false,
       "notes": "[Phase 2, originally US-004] insertMany with an empty array must not crash — add a guard: if rows.length === 0 return []. claimPending uses the optimistic lock pattern: the UPDATE touches a row only if status is still 'pending'; returns null when another worker already claimed it (no row returned). Methods that accept a trx parameter should use (trx ?? this.db) as the query builder so they work both inside and outside transactions. updateScheduledAt sets status back to 'pending' as well as clearing/updating job_id — this is intentional: when a step is deferred mid-execution the worker resets it to pending with new schedule. JSON.stringify is NOT needed for output in updateStatus — Knex/pg handles jsonb serialization for plain objects."
     },
@@ -212,7 +212,7 @@
         "Register authPlugin in apps/platform/nurturing/src/index.ts before route registration: await fastify.register(authPlugin)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 1,
+      "priority": 8,
       "passes": false,
       "notes": "[Phase 3, originally US-001] JWT payload shape is { sub: string; role: string } — the role field carries 'marketing_staff' | 'marketing_manager' | 'service'. The authenticate prehandler is used on all management routes; requireRole is applied additionally on activate/disable. For the module augmentation, prehandlerAsyncHookHandler is imported from 'fastify'. Do NOT use @fastify/sensible's httpErrors unless it's already registered — check src/index.ts; @fastify/sensible is registered there from Phase 2 so fastify.httpErrors.forbidden() is available. The plugin file must use .ts extension and NodeNext moduleResolution — use import type where applicable to avoid runtime issues."
     },
@@ -230,7 +230,7 @@
         "GET /sequences/:id handler: calls definitionsRepo.findById(id); if null, reply.code(404).send({ error: 'sequence_not_found' }); loads active version row via versionsRepo.findBySequenceAndVersion(id, def.active_version) if def.active_version != null (else null); loads current version row via versionsRepo.findBySequenceAndVersion(id, def.current_version); returns 200 with { ...def, active_version_data: activeVersion, current_version_data: currentVersion }",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 2,
+      "priority": 9,
       "passes": false,
       "notes": "[Phase 3, originally US-002] The routes file takes repos as plugin opts — this is the same dependency-injection pattern used in the automation engine routes. The db instance is created once in src/index.ts and passed to all repos and route plugins. Import SequenceDefinitionsRepository and SequenceVersionsRepository from their repo files. Use @sinclair/typebox Type helpers for schema validation — import { Type, Static } from '@sinclair/typebox'. For the route schema, set schema: { querystring: QuerySchema } etc. The step_count is derived by parsing the 'steps' jsonb field — the repo returns it as unknown so cast via (version.steps as unknown[]) after checking Array.isArray. Fastify 5 uses the 'preHandler' key (camelCase) in route options."
     },
@@ -248,7 +248,7 @@
         "Returns 201 with { id: def.id, name: def.name, status: def.status, current_version: def.current_version, active_version: def.active_version, created_at: def.created_at }",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 3,
+      "priority": 10,
       "passes": false,
       "notes": "[Phase 3, originally US-003] No transaction needed here — if version insert fails after definition insert, the orphaned definition row is harmless (will appear as a draft with no version). The versionsRepo.insert already handles JSON.stringify for steps. The created_by comes from the JWT sub claim — request.user is typed as { sub: string; role: string } per the module augmentation from US-001."
     },
@@ -275,7 +275,7 @@
         "PUT handler: calls versioningService.saveDraft(id, body, request.user.sub); on 'sequence_not_found' error, reply 404; returns 200 with { definition, version }",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 4,
+      "priority": 11,
       "passes": false,
       "notes": "[Phase 3, originally US-004] active_version is NOT changed by saveDraft — it stays at whatever it was set to previously (null or a prior version number). Only POST /sequences/:id/activate changes active_version. The VersioningService is a plain class — no Fastify coupling. Import SequenceDefinition and SequenceVersion types from their respective repo files. For the 'sequence_not_found' error pattern, the handler catches the thrown error and checks error.message === 'sequence_not_found' to reply 404. Type.Unknown() in TypeBox accepts any JSON value — appropriate for DSL fields (active_hours, ab_test) that are validated at runtime by the step worker, not at the API layer."
     },
@@ -298,7 +298,7 @@
         "Handler: returns 200 with updated SequenceDefinition row",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 5,
+      "priority": 12,
       "passes": false,
       "notes": "[Phase 3, originally US-005] requireRole(['marketing_manager']) is the prehandler decorator added in US-001 — it reads request.user.role and throws 403 if the role is not in the allowed list. The preHandler array runs authenticate first (sets request.user) then requireRole (checks it). setActiveVersion sets both active_version and status = 'active' in a single UPDATE — this was defined in the SequenceDefinitionsRepository.setActiveVersion method from Phase 2 US-003. After disable, in-progress enrollments continue normally — the disable only blocks new enrollments (enforced by the enrollment manager in Phase 4)."
     },
@@ -327,7 +327,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 6,
+      "priority": 13,
       "passes": false,
       "notes": "[Phase 3, originally US-006] To avoid having to refactor src/index.ts, create apps/platform/nurturing/test/helpers/build-app.ts that imports and calls the same Fastify setup (register plugins + routes) returning the fastify instance without calling fastify.listen() — tests inject directly via fastify.inject(). To mint JWTs in tests without running a server first, use the 'jsonwebtoken' package (add as devDependency if not present) with the same JWT_SECRET value. The test.skipIf pattern in Vitest: import { it, describe, beforeAll } from 'vitest'; use describe.skipIf(!process.env['DATABASE_URL'])('sequences API integration', () => { ... }). Use a beforeAll to run migrations before the test suite if DATABASE_URL is set — run knex.migrate.latest() using the knexfile config. Each test should clean up its own created sequence using a direct DB call in afterEach or afterAll to keep the DB tidy between runs."
     },
@@ -345,7 +345,7 @@
         "Inside createApp: if opts.queue is provided use it; otherwise if REDIS_URL env var is set create via createStepQueue(REDIS_URL); otherwise use null",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 1,
+      "priority": 14,
       "passes": false,
       "notes": "[Phase 4, originally US-001] BullMQ v5 requires IORedis with { maxRetriesPerRequest: null } — omitting this causes worker connection errors. The createApp factory is the same pattern used in the automation engine: tests call createApp({ queue: mockQueue }) and inject requests via fastify.inject() without starting the HTTP server. Import Queue from 'bullmq'; import IORedis from 'ioredis'. The queue instance will be threaded into the EnrollmentManager in US-005 when routes are registered."
     },
@@ -368,7 +368,7 @@
         "Add method findByEnrollmentAndStepId(enrollmentId: string, stepId: string): Promise<SequenceStepExecution | null> — SELECT WHERE enrollment_id = ? AND step_id = ? LIMIT 1",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 2,
+      "priority": 15,
       "passes": false,
       "notes": "[Phase 4, originally US-002] Import 'import type { Knex } from \"knex\"' for the trx parameter type. The pattern (trx ?? this.db) means all methods work both inside and outside a Knex transaction. For insertMany, Knex 3 batch insert: db('table').insert(arrayOfRows).returning('*') returns the inserted rows typed as any[] — cast to SequenceStepExecution[]. The context field is JSONB in Postgres; Knex returns it already parsed as an object, so no JSON.parse needed. The existing repo classes from Phase 2 likely already have a constructor taking a Knex instance (this.db) — add these methods to those existing classes without restructuring."
     },
@@ -393,7 +393,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 3,
+      "priority": 16,
       "passes": false,
       "notes": "[Phase 4, originally US-003] The accumulation loop: let acc = 0; for (const [key, weight] of Object.entries(split)) { acc += weight; if (r < acc) return key; } — the strict '<' comparison handles 0-weight entries naturally (acc never advances past their range). The ab_test column is stored as jsonb and returned from Knex as unknown — callers must cast to AbTestConfig | null before passing to assignVariant. No randomness seeding is needed in tests — with 10000 samples the 40-60% bounds are extremely robust."
     },
@@ -429,7 +429,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 4,
+      "priority": 17,
       "passes": false,
       "notes": "[Phase 4, originally US-004] Import 'import { randomUUID } from \"node:crypto\"'. Import 'import type { Knex } from \"knex\"'. Import Queue from 'bullmq'; import StepJobData from '../queue/step-queue.js'. Import assignVariant and AbTestConfig from './ab-assigner.js'. Import all four repo types from their respective .repo.ts files. The db.transaction() pattern in Knex 3: db.transaction(async (trx) => { ... return result; }) — the promise resolves with the returned value on commit, or rejects and rolls back on throw. For the mock db.transaction in tests: mockDb.transaction = vi.fn().mockImplementation(async (cb: Function) => cb(mockTrx)) where mockTrx is {}. To capture enrolled_at for delta checks in tests, record Date.now() before calling enroll() and compare scheduledAt values against that timestamp."
     },
@@ -449,7 +449,7 @@
         "In apps/platform/nurturing/src/index.ts inside createApp: import and instantiate repos if not already done; create enrollmentManager = new EnrollmentManager(db, definitionsRepo, versionsRepo, enrollmentsRepo, stepExecutionsRepo, opts?.queue ?? null); register enrollmentsRoutes with { enrollmentManager, enrollmentsRepo, stepExecutionsRepo }",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 5,
+      "priority": 18,
       "passes": false,
       "notes": "[Phase 4, originally US-005] The service-to-service auth uses a standard JWT (same Identity Service JWT) — no special role is required. fastify.authenticate already validates the JWT; no role check is added on this route. Import EnrollmentManager from '../services/enrollment-manager.js'; import EnrollmentsRepository from '../repositories/enrollments.repo.js'; import StepExecutionsRepository from '../repositories/step-executions.repo.js'. For the error discrimination: TypeScript requires casting the caught value since catch(err) is unknown. The else branch re-throws unexpected errors so Fastify's default error handler returns 500."
     },
@@ -475,7 +475,7 @@
         "Returns 200 with { step_id: s.step_id, status: s.status, output: s.output, error: s.error, completed_at: s.completed_at }",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 6,
+      "priority": 19,
       "passes": false,
       "notes": "[Phase 4, originally US-006] The sid param is a user-defined step ID string (e.g. 'step-1') — NOT a UUID — so use Type.String() without format:'uuid'. The route path is /sequences/:id/enrollments/:eid/steps/:sid (not /output suffix) because the output is included in the step response body. This matches the spec Section 6 route: 'GET /sequences/:id/enrollments/:eid/steps/:sid/output' — use '/output' suffix if specified in spec; check spec Section 6 and match exactly. The GET /sequences/:id/enrollments/:eid route does not validate that the enrollment belongs to the sequence in the URL params — for simplicity, findById(eid) is sufficient."
     },
@@ -505,7 +505,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 7,
+      "priority": 20,
       "passes": false,
       "notes": "[Phase 4, originally US-007] For the scheduled_at tolerance check: const expected24h = Date.now() + 24 * 3600 * 1000; expect(Math.abs(step0.scheduled_at.getTime() - expected24h)).toBeLessThan(5000). The mock queue's add() returns { id: randomUUID() } synchronously wrapped in Promise.resolve() — since EnrollmentManager awaits queue.add() and then awaits updateJobId(), by the time the HTTP 201 response is sent, all job_id values are already written to the DB. The createAndActivateSequence helper must use the POST /sequences and POST /sequences/:id/activate routes (not direct DB calls) to exercise the full API path. Import createApp from '../../src/index.js'. Import createDb from '../../src/db.js'. Ensure jsonwebtoken is installed as a devDependency if not already present for minting JWTs in tests."
     },
@@ -524,7 +524,7 @@
         "Add method incrementAttempt(id: string): Promise<void> — UPDATE sequence_step_executions SET attempt = attempt + 1 WHERE id = ?",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 1,
+      "priority": 21,
       "passes": false,
       "notes": "[Phase 5, originally US-001] The updateStatus method on enrollments.repo is needed by the step worker to mark enrollment as 'completed' (when the last step finishes) or 'failed' (when max retries exhausted). The claimForExecution method is the optimistic lock — it atomically transitions the step from 'pending' to 'running' and returns false if another worker already claimed it, preventing duplicate execution. updateDeferral sets job_id = NULL so that, after the step worker writes the new job_id back, the safety-net poller can accurately track the step. The existing updateJobId(id, jobId) method from Phase 4 is used for writing the new job_id after re-enqueueing. Import 'import type { Knex } from \"knex\"' if needed for transaction parameter. In Knex 3 the raw UPDATE...RETURNING * pattern: await this.db('sequence_step_executions').where({ id }).where('status', 'pending').update({ status: 'running', started_at: new Date() }).returning('id') returns an array — length > 0 means the row was claimed."
     },
@@ -549,7 +549,7 @@
         "@aws-sdk/client-eventbridge must be listed as a dependency in apps/platform/nurturing/package.json; add it if not present (run npm install from that directory)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 2,
+      "priority": 22,
       "passes": false,
       "notes": "[Phase 5, originally US-002] The automation engine at apps/platform/automation/src/services/action-workers/emit-event.worker.ts uses this exact same pattern — EventBridgeClient + PutEventsCommand from @aws-sdk/client-eventbridge — so @aws-sdk/client-eventbridge is likely already a workspace dep. Check apps/platform/nurturing/package.json dependencies before running npm install. The Source field 'platform.nurturing' matches the naming convention (platform layer + service name). All three publish methods follow the same PutEventsCommand shape. The createPublisher factory is used by worker.ts to instantiate with the real EB client."
     },
@@ -565,7 +565,7 @@
         "Step 2 — send message: POST `${messagingServiceUrl}/messages/send` with body { body: rendered.body, to: params.to, from: params.from, dedup_key: params.dedup_key }; throw an Error with message 'messaging_send_failed' if response.ok is false",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 3,
+      "priority": 23,
       "passes": false,
       "notes": "[Phase 5, originally US-003] All params received here are ALREADY resolved — the step worker resolves dot-notation paths and template strings before calling the handler, so 'to', 'from', and 'dedup_key' are plain string values. The 'context' field is the raw enrollment.context object passed directly to the Template Service for merge-tag resolution. Use native fetch (Node 24 built-in). No auth header needed on service-to-service calls in this iteration — internal VPC routing. The handler is a pure function (no class); the action executor calls it directly."
     },
@@ -581,7 +581,7 @@
         "Step 2 — send email: POST `${emailServiceUrl}/emails/send` with body { subject: rendered.subject, body_html: rendered.body_html, body_text: rendered.body_text, to: params.to, from: params.from, dedup_key: params.dedup_key }; throw an Error with message 'email_send_failed' if response.ok is false",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 4,
+      "priority": 24,
       "passes": false,
       "notes": "[Phase 5, originally US-004] Same pattern as send-message: params are pre-resolved. The Email Service expects pre-rendered subject + body_html + body_text, not a template_id. Use native fetch. The Template Service renders the email template and returns all three fields."
     },
@@ -599,7 +599,7 @@
         "Return { output: responseBody.text, auto_send: params.auto_send ?? false }",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 5,
+      "priority": 25,
       "passes": false,
       "notes": "[Phase 5, originally US-005] The call-ai handler returns auto_send so the step worker can decide whether to chain a send_message call. Both system_prompt and user_prompt are template strings already resolved by the step worker before calling this handler. Only these three fields are sent to the AI Service: { system_prompt, user_prompt, model } — no extra fields per the arch spec (Section 3.2 sync calls table). The AI Service response shape { text: string } is assumed based on the @ortho/ai-service design."
     },
@@ -620,7 +620,7 @@
         "Publish: await ebClient.send(new PutEventsCommand({ Entries: [{ EventBusName: busName, Source: 'platform.nurturing', DetailType: params.event_type, Detail: JSON.stringify(finalPayload) }] }))",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 6,
+      "priority": 26,
       "passes": false,
       "notes": "[Phase 5, originally US-006] The event_type field is a literal string (no interpolation per spec Section 3.4). Only payload values are interpolated. The execContext structure mirrors the interpolator usage in the step worker — 'context' is a nested key so that 'context.entity_id' paths resolve correctly. The include_context merge order is { ...ctx.enrollmentContext, ...resolvedPayload } so that explicit payload fields win over same-named keys from context. Uses the same EventBridgeClient + PutEventsCommand pattern as the automation engine."
     },
@@ -648,7 +648,7 @@
         "Default: throw new Error(`Unknown action type: ${stepDef.action.type}`)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 7,
+      "priority": 27,
       "passes": false,
       "notes": "[Phase 5, originally US-007] The execCtx.abVariant is the variant stored on the enrollment row ('A', 'B', or null). The ab_variant_override merge: first merge overrides into resolvedParams (already-resolved base), then resolveValue is applied again to the newly merged keys so any override values that are paths/template strings also get resolved. The chainSendMessage return value allows the step worker to chain a send_message after call_ai without circular imports — the step worker owns the chaining logic. The execCtx.enrollmentContext is passed directly (not spread), preserving it as a named key 'context' for path resolution like 'context.phone'."
     },
@@ -678,7 +678,7 @@
         "Import executeAction and ExecutionContext from './action-executor.js'; import executeSendMessage from './action-handlers/send-message.js'; import createStepQueue and StepJobData from '../queue/step-queue.js'; import NurturingPublisher from '../events/publisher.js'; import EnrollmentsRepository from '../repositories/enrollments.repo.js'; import SequenceVersionsRepository from '../repositories/sequence-versions.repo.js'; import StepExecutionsRepository from '../repositories/step-executions.repo.js'; import ActionExecutorDeps from './action-executor.js'",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 8,
+      "priority": 28,
       "passes": false,
       "notes": "[Phase 5, originally US-008] The retry configuration (5 total attempts, exponential backoff) is set on the BullMQ job when it is enqueued by the enrollment manager. Update apps/platform/nurturing/src/services/enrollment-manager.ts: in the queue.add() call, add options: { delay: ..., jobId: ..., attempts: 5, backoff: { type: 'exponential', delay: 5000 } }. In BullMQ, job.attemptsMade is zero-indexed: 0 on first attempt, 4 on fifth. The active_hours.timezone_field is a dot-notation path like 'context.location_timezone' — interpolateFields resolves it against { context: enrollment.context }. The computeNextActiveWindowMs from @ortho/interpolator returns 0 when the current time is inside the window (proceed immediately) and a positive ms value when outside (defer). The step in Step 6a bypasses template rendering because the AI already generated the body text — post directly to Messaging Service without Template Service. The enrollment.id is available in the error catch block only if enrollment was loaded successfully in Step 1; if enrollment is null, there is no enrollment to mark failed (the step was already cancelled in Step 1)."
     },
@@ -702,7 +702,7 @@
         "Add 'worker.ts' as an additional entry point in apps/platform/nurturing/tsconfig.json (ensure it is included in the compilation); verify the tsconfig includes files or has include: ['src/**/*.ts', 'worker.ts']",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 9,
+      "priority": 29,
       "passes": false,
       "notes": "[Phase 5, originally US-009] The worker.ts is a separate process entry point — in production it runs as a separate ECS task definition using the same Docker image as the API, launched with 'node dist/worker.js' instead of 'node dist/src/index.js'. The step worker only needs db, stepExecutionsRepo, enrollmentsRepo, versionsRepo, and queue — it does NOT need definitionsRepo (it loads versions directly via versionsRepo.findBySequenceAndVersion). The StepWorkerDeps type should be updated if definitionsRepo is not needed, or accept it as optional. Check the existing src/index.ts for the createDb() import pattern. Verify tsconfig.json's 'include' field already covers worker.ts or update it accordingly."
     },
@@ -725,7 +725,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 10,
+      "priority": 30,
       "passes": false,
       "notes": "[Phase 5, originally US-010] These tests directly exercise the @ortho/interpolator computeNextActiveWindowMs function using Vitest's fake timer support. The function was implemented in Phase 1. The key invariant from the spec is 'always ≤ 24h' — if we're inside the window the return value must be 0; if outside it must be positive and at most 86400000ms. Use vi.setSystemTime(new Date('2026-03-31T15:00:00.000Z')) — UTC time — and remember that 15:00 UTC = 11:00 EDT (UTC-4 in DST) so within the 08:00–20:00 NY window. Adjust test times carefully for DST: New York is UTC-5 in standard time (Nov–Mar) and UTC-4 in DST (Mar–Nov). As of 2026-03-31, NY is in EDT (UTC-4)."
     },
@@ -749,7 +749,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 11,
+      "priority": 31,
       "passes": false,
       "notes": "[Phase 5, originally US-011] The processor function is tested by importing createStepWorker and extracting the processor, or by calling the step worker's internal processor directly. The cleanest approach: export the processor logic as a separate function testable without a live BullMQ connection, or test via createStepWorker with a mock Redis URL (the processor is just a function). For the deferred step test: after invoking processor(), updateDeferral sets status back to 'pending' and clears job_id, then the new BullMQ job is enqueued (mockQueue.add), then updateJobId writes the new job_id. The DB step should end with status='pending' and a new non-null job_id. To mock fetch: vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, opts) => { const urlStr = String(url); if (urlStr.includes('/templates/render')) return new Response(JSON.stringify({ body: 'Hello test' }), { status: 200 }); ... }). Remember to call vi.restoreAllMocks() in afterEach."
     },
@@ -767,7 +767,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 12,
+      "priority": 32,
       "passes": false,
       "notes": "[Phase 5, originally US-012] To simulate multiple retry attempts, create mock Job objects: const makeJob = (attemptsMade: number) => ({ data: jobData, attemptsMade, id: 'job-1' } as unknown as Job<StepJobData>). Call processor(makeJob(0)) through processor(makeJob(4)) sequentially. The incrementAttempt call happens on each failure, so after 5 calls the DB attempt column should be 5. For the emit_event test with EventBridge: spy on the ebClient.send method passed into ActionExecutorDeps — the step worker's ebClient is injected, so you can pass a mock. Alternative: spy on fetch if emit-event uses fetch (it does not — it uses @aws-sdk/client-eventbridge SDK calls). For A/B: the sequence definition must have ab_test configured so the enrollment manager assigns variant B (100% B split). Check enrollment row ab_variant = 'B' before running the worker test to confirm variant assignment."
     },
@@ -783,7 +783,7 @@
         "Both methods use the same this.ebClient and this.busName pattern as existing methods on the class",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 1,
+      "priority": 33,
       "passes": false,
       "notes": "[Phase 6, originally US-001] NurturingPublisher is at apps/platform/nurturing/src/events/publisher.ts, created in Phase 5. It already has publishStepOutputReady, publishEnrollmentCompleted, publishStepFailed — follow the exact same PutEventsCommand pattern. The all_sequences_cancelled event is published by the opt-out consumer (not the unenrollment service) after all per-enrollment unenrollments are done. The cancelled_count field carries how many enrollments were cancelled in the batch. The Lead Service subscribes to nurturing.all_sequences_cancelled to set the opt-out flag on the lead record."
     },
@@ -799,7 +799,7 @@
         "import type { Knex } from 'knex' must be present at the top of each repo file if not already imported",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 2,
+      "priority": 34,
       "passes": false,
       "notes": "[Phase 6, originally US-002] The trx parameter on findActiveByEntity, markUnenrolled, and cancelPendingByEnrollment enables the unenrollment service to run all three within a single Knex transaction using deps.db.transaction(async (trx) => { ... }). findAllActiveByEntityId has no trx parameter because the opt-out consumer calls it outside any transaction — it iterates the results and calls unenroll() per enrollment, each with its own transaction. The cancelPendingByEnrollment RETURNING clause returns an array of row objects in Knex 3 (not raw scalars), so map with r.job_id. The filter to non-null job_ids is important: steps with job_id = NULL were never enqueued (crash recovery path), so there is nothing to remove from BullMQ for them. Entity type is included in findActiveByEntity to prevent collision between different entity types that share the same entity_id string (spec Section 5.3 note)."
     },
@@ -821,7 +821,7 @@
         "Import type { Knex } from 'knex'; import { Queue } from 'bullmq'; import type EnrollmentsRepository from '../repositories/enrollments.repo.js'; import type StepExecutionsRepository from '../repositories/step-executions.repo.js'; import type { NurturingPublisher } from '../events/publisher.js'",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 3,
+      "priority": 35,
       "passes": false,
       "notes": "[Phase 6, originally US-003] The transaction atomically sets enrollment status = 'unenrolled' AND cancels all pending steps. Any step already in 'running' status is untouched (cancelPendingByEnrollment only touches status = 'pending'). If a running step worker later calls enrollmentsRepo.findById and sees status = 'unenrolled', it was already past the Step 1 guard check in the step worker (which checks before the optimistic lock) — this is fine; the step completes normally. The best-effort BullMQ removal is wrapped in individual try/catch per job_id to ensure a failed removal does not abort the rest. If a removed job is somehow still fired later, the step worker guard (Step 1: enrollment.status !== 'active') will cancel it cleanly. The stepQueue type is Queue<StepJobData> imported from '../queue/step-queue.js' — use the same type as in Phase 5's enrollment manager. The publisher.publishEnrollmentUnenrolled is called AFTER the transaction commits, not inside it, to avoid holding the DB transaction open during an external HTTP call."
     },
@@ -839,7 +839,7 @@
         "The unenrollmentDeps (db, enrollmentsRepo, stepExecutionsRepo, stepQueue, publisher) must be injected — follow the same dependency injection pattern used for enrollmentDeps in the existing enrollment route (likely passed via fastify.decorate or route-level context)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 4,
+      "priority": 36,
       "passes": false,
       "notes": "[Phase 6, originally US-004] The route is added to the existing enrollments.ts routes file which already has GET /sequences/:id/enrollments and GET /sequences/:id/enrollments/:eid from Phase 4. Check how deps (db, repos, publisher, queue) are threaded through to the enrollment route handlers and replicate that pattern for unenroll. The body schema uses format: 'uuid' on sequence_id — if other route bodies don't use format validators, drop it to keep consistency. The 200-always behavior is intentional per spec: callers should not branch on whether an enrollment existed."
     },
@@ -861,7 +861,7 @@
         "In apps/platform/nurturing/worker.ts, import startOptOutConsumer and call it after the BullMQ step worker is created; pass OPT_OUT_QUEUE_URL from process.env (throw if missing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 5,
+      "priority": 37,
       "passes": false,
       "notes": "[Phase 6, originally US-005] EventBridge messages delivered to SQS are wrapped in an EventBridge envelope. The message.Body is a JSON string with shape: { version: '0', id: '...', 'detail-type': 'opt_out.received', source: 'platform.messaging', time: '...', detail: { entity_id: '...', phone: '...' } }. The consumer only needs detail.entity_id. Validation must handle missing detail, missing entity_id, and JSON parse errors — all malformed messages must be deleted from SQS after logging (not left to retry infinitely). The long-poll WaitTimeSeconds: 20 on ReceiveMessageCommand is SQS long-polling — it blocks up to 20 seconds per call, reducing empty polls. The startOptOutConsumer uses setInterval as a simple driver; each poll tick is fire-and-forget (not awaited) to prevent the interval from falling behind. The entity_type in publishAllSequencesCancelled is taken from the first enrollment; if no enrollments existed, 'unknown' is acceptable (the event is still useful to Lead Service as a signal to set opt-out). Check if @aws-sdk/client-sqs is already a workspace dep (other services like the Automation Engine may already use it)."
     },
@@ -879,7 +879,7 @@
         "Test 'unenroll — BullMQ removal failure does not throw': mock stepQueue.getJob to throw new Error('redis error'); call unenroll; assert it resolves successfully (does not re-throw); publishEnrollmentUnenrolled still called",
         "Tests pass (npm run test from apps/platform/nurturing)"
       ],
-      "priority": 6,
+      "priority": 38,
       "passes": false,
       "notes": "[Phase 6, originally US-006] The db.transaction mock is the trickiest part. In Knex, db.transaction(async (trx) => { ... }) executes the callback with a transaction object. The mock must call the callback fn(trx) and return the result, so the service's jobIds variable is populated correctly. Use vi.fn().mockImplementation((fn) => fn(mockTrx)) where mockTrx can be a plain object passed as the trx arg to repo methods. The test for 'leaves non-pending steps untouched' is structural — it confirms the service does not call any other step-execution mutation methods beyond cancelPendingByEnrollment. This guarantees non-pending steps are untouched by the service itself (the SQL WHERE clause is the actual guard, which is tested in integration). The BullMQ removal failure test ensures the catch block swallows errors, not re-throws — important because Redis may be unavailable without stopping the unenrollment."
     },
@@ -896,7 +896,7 @@
         "Test 'unenroll — returns 200 after enrollment was completed': insert an enrollment with status='completed'; POST /sequences/unenroll; assert 200 (not 404); DB state unchanged",
         "Typecheck passes; Tests pass"
       ],
-      "priority": 7,
+      "priority": 39,
       "passes": false,
       "notes": "[Phase 6, originally US-007] The integration test directly inserts rows into sequence_step_executions with status='running' to simulate an in-flight step worker. This is the easiest way to verify that cancelPendingByEnrollment's WHERE status='pending' clause correctly leaves running steps alone. There is no need to run an actual step worker for this test. The test for 'already completed' enrollment verifies the idempotent path: findActiveByEntity returns null (since status='completed', not 'active'), so the service returns { found: false } and the route returns 200. Follow the integration test setup pattern from Phase 3 and Phase 4 tests — use the test DB client and seed factories from @ortho/testing if available, or direct Knex inserts. Mock or stub the BullMQ Queue.getJob call (integration test does not need a live Redis for unenrollment)."
     },
@@ -913,7 +913,7 @@
         "Test 'opt_out.received — entity with no active enrollments': call processOptOutMessage for entity with no active enrollments; assert: resolves normally; publishAllSequencesCancelled called with cancelled_count: 0",
         "Tests pass"
       ],
-      "priority": 8,
+      "priority": 40,
       "passes": false,
       "notes": "[Phase 6, originally US-008] The key design choice: test processOptOutMessage directly instead of spinning up SQS polling. This function is the unit-testable core of the consumer (separated from the SQS polling loop in US-005). Pass all deps as arguments so tests can use a real DB for enrollment/step state and mock the publisher. The EventBridge envelope format passed to processOptOutMessage: JSON.stringify({ 'detail-type': 'opt_out.received', source: 'platform.messaging', detail: { entity_id: 'entity-1' } }). The test for 'entity with no active enrollments' validates that publishAllSequencesCancelled is still called (cancelled_count: 0) — this is important for the Lead Service to reliably set the opt-out flag even when no sequences were active. Mock BullMQ Queue.getJob to return null (no jobs to remove) to avoid Redis dependency in this integration test."
     },
@@ -929,7 +929,7 @@
         "Return types use the existing SequenceStepExecution interface already defined in the repo file",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 1,
+      "priority": 41,
       "passes": false,
       "notes": "[Phase 7, originally US-001] findNullJobIdPending is used by the startup scanner: it finds steps where the process crashed between the DB transaction commit (step 5 of enrollment) and the BullMQ enqueue (step 6). These steps have a committed DB row but no BullMQ job. scheduled_at may be in the future (normal) or in the past (crash happened after the step was due). findOrphanedPending is used by the safety-net poller: it finds steps where job_id IS NOT NULL (job was enqueued at some point) but the BullMQ job is now gone (Redis data loss or restart). The 1-minute grace period prevents re-enqueuing steps that are still waiting in BullMQ but whose scheduled_at just passed while the worker was momentarily busy. Both methods scan the global table without filtering by enrollment_id — they recover across all active enrollments. Check Phase 4's enrollment-manager.ts for the updateJobId pattern used post-enqueue to avoid introducing a duplicate."
     },
@@ -948,7 +948,7 @@
         "Import Queue from 'bullmq'; import type StepExecutionsRepository from '../repositories/step-executions.repo.js'; import type { StepJobData } from '../queue/step-queue.js'; import type { Logger } from '@ortho/logger'",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 2,
+      "priority": 42,
       "passes": false,
       "notes": "[Phase 7, originally US-002] The delayMs computation uses Math.max(0, ...) so that steps whose scheduled_at is already in the past are enqueued with delay 0 (fire immediately). Steps with a future scheduled_at get the correct remaining delay. The jobId option in stepQueue.add is set to step.id (the UUID of the step execution row) — this makes BullMQ job IDs deterministic and idempotent: if runStartupScan is called twice before the job fires, BullMQ will return the existing job rather than creating a duplicate (BullMQ deduplicates on jobId). Check step-queue.ts created in Phase 4/5 for the exact StepJobData interface shape ({ enrollment_id: string; step_id: string }) and Queue instantiation pattern. The per-step try/catch is critical: a Redis error on one step should not prevent recovery of others. The logger is the Pino instance from @ortho/logger — check how it is passed in the enrollment manager to replicate the pattern."
     },
@@ -968,7 +968,7 @@
         "Export default fp(async function safetyNetPollerPlugin(fastify, opts: SafetyNetPollerDeps) { const timer = setInterval(() => { void runPollCycle(opts).catch(err => fastify.log.error(err, 'safety-net-poller: poll cycle error')); }, 5 * 60 * 1000); fastify.addHook('onClose', async () => { clearInterval(timer); }); }, { name: 'safety-net-poller' })",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 3,
+      "priority": 43,
       "passes": false,
       "notes": "[Phase 7, originally US-003] The Redis lock (SET NX PX) ensures only one ECS instance runs the poll cycle at a time. LOCK_TTL_MS is set to 240000 (4 minutes) — shorter than the 5-minute poll interval so the lock expires before the next cycle even if the process holding it crashes mid-cycle. The ioredis client is the same Redis connection used by BullMQ — in Phase 4/5, BullMQ was instantiated with a connection option; check whether a bare ioredis client is already exported from src/queue/step-queue.ts or src/index.ts. If BullMQ was configured with a connection object literal rather than an ioredis instance, a separate ioredis instance needs to be created with the same REDIS_URL. The jobId: step.id pattern in stepQueue.add ensures BullMQ deduplication if the poller runs while the original job is actually still in Redis (shouldn't happen given the query condition, but is safe). fastify-plugin (fp) wraps the plugin to avoid Fastify's encapsulation boundary — it allows the plugin to access decorators from the parent scope. Check if fastify-plugin is already in package.json (it was likely added for other plugins in Phase 2/5)."
     },
@@ -984,7 +984,7 @@
         "The redis instance passed to safetyNetPollerPlugin must be the same ioredis client connection used by BullMQ (or a new Redis(process.env.REDIS_URL) if no bare client is already exported); if creating a new client, throw on missing REDIS_URL",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 4,
+      "priority": 44,
       "passes": false,
       "notes": "[Phase 7, originally US-004] The ordering is critical: fastify.register(safetyNetPollerPlugin) before fastify.listen so the plugin's onClose hook is registered in the Fastify lifecycle. The startup scanner runs after fastify.listen resolves so the server is already accepting health checks before the scan begins — this is the non-blocking requirement from spec Section 5.5. Check src/index.ts for the existing pattern of how stepExecutionsRepo and stepQueue are instantiated; the same variables should be passed directly to the plugin and scanner without creating new instances. If the server uses a graceful shutdown hook (SIGTERM), verify clearInterval is called via the onClose hook registered in safetyNetPollerPlugin — Fastify calls onClose hooks during fastify.close()."
     },
@@ -1002,7 +1002,7 @@
         "mockStepQueue is a Vitest mock: const mockStepQueue = { add: vi.fn().mockResolvedValue({ id: 'mock-job-id' }), getJob: vi.fn() } — typed as Queue<StepJobData>",
         "Tests pass (npm run test from apps/platform/nurturing)"
       ],
-      "priority": 5,
+      "priority": 45,
       "passes": false,
       "notes": "[Phase 7, originally US-005] The 'server accepts traffic before scan completes' test is the most architecturally important one — it verifies the non-blocking design. The simplest way to implement it: create a slow mock scanner (returns a Promise that resolves after a timeout), start the server with that mock, make an HTTP request to /health (or the sequences list endpoint) immediately, assert the response arrives before the scanner resolves. Use a short artificial delay (e.g. 200ms) in the mock so the test completes quickly. The DB test for re-enqueueing uses runStartupScan directly (not through the HTTP server) — faster and avoids needing a full Fastify instance. The mockStepQueue.add mock returns { id: 'mock-job-id' } — match the BullMQ Job type's id property (it is a string). Check Phase 4 integration tests for the DB setup pattern (how enrollments and step_executions are inserted directly)."
     },
@@ -1022,7 +1022,7 @@
         "mockStepQueue is a Vitest mock: const mockStepQueue = { add: vi.fn().mockResolvedValue({ id: 'mock-job-id' }) } — typed as Queue<StepJobData>",
         "Tests pass (npm run test from apps/platform/nurturing)"
       ],
-      "priority": 6,
+      "priority": 46,
       "passes": false,
       "notes": "[Phase 7, originally US-006] runPollCycle is tested directly (not through the Fastify plugin wrapper) for the same reason processOptOutMessage was tested directly in Phase 6 — it avoids needing a live setInterval and makes test execution fast and deterministic. The dedup_key no-duplicate-send test is a structural assertion about jobId usage rather than a full end-to-end test: the spec says 'no duplicate send (Messaging Service dedup_key guard)' — in practice this means both the step worker's dedup_key field AND BullMQ's job deduplication on jobId = step.id prevent double execution. The test verifies the latter (correct jobId) because the former (dedup_key passed to Messaging Service) is already covered by Phase 5 step-worker integration tests. The 'Redis lock prevents concurrent cycle' test uses Promise.all([runPollCycle(deps), runPollCycle(deps)]) with mock.set returning 'OK' then null in sequence — verify with mockRedis.set.mock.calls.length === 2 and stepQueue.add.mock.calls.length === 1."
     },
@@ -1039,7 +1039,7 @@
         "Migration is reversible — down() drops the table",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 1,
+      "priority": 47,
       "passes": false,
       "notes": "[Phase 8, originally US-001] The sequence_conversions table is separate from sequence_enrollments to keep the enrollment row narrow and allow multiple future conversion types if needed. The UNIQUE constraint on enrollment_id means only the first conversion event per enrollment is recorded — consistent with treating A/B conversion as a binary outcome. The ab_variant column is denormalized from enrollment_id for faster aggregation in the stats query (avoids joining back to sequence_enrollments). sequence_id is also denormalized for the same reason. Follow the migration file naming and export pattern from migrations/001_initial_schema.ts."
     },
@@ -1059,7 +1059,7 @@
         "Validate + handle malformed events without crashing (try/catch wrapping the entire body)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 2,
+      "priority": 48,
       "passes": false,
       "notes": "[Phase 8, originally US-002] The conversion consumer's SQS queue registration follows the same pattern as the opt-out consumer introduced in Phase 6 (src/consumers/opt-out.consumer.ts). The consumer is wired into the worker entry point (worker.ts) or into index.ts if the project bootstraps all consumers there — check how processOptOutMessage is invoked in Phase 6 to replicate the pattern. The tracked_condition evaluation only needs to support the subset of operators defined in @ortho/types / @platform/filter-engine: eq, neq, gt, lt, contains. The @platform/filter-engine package already implements evaluateCondition — import and reuse it rather than re-implementing. If the package is not available or its interface differs, implement a minimal inline evaluator for the three operators needed. The ab_test.tracked_event and ab_test.tracked_condition fields live in the sequence_versions row (sv.ab_test JSONB column). Parse with JSON.parse if Knex does not auto-parse JSONB."
     },
@@ -1075,7 +1075,7 @@
         "Both methods return parsed numbers (not strings) — use parseInt() or cast in SQL since PostgreSQL COUNT returns bigint as string in node-postgres",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 3,
+      "priority": 49,
       "passes": false,
       "notes": "[Phase 8, originally US-003] PostgreSQL COUNT(*) returns a bigint which node-postgres serialises as a string. Wrap each count column with parseInt(row.total, 10) etc. after the query, or use CAST(COUNT(*) AS int) in the SQL. Check how the enrollments repo handles numeric columns elsewhere in the project to replicate the pattern. The getAbBreakdown query groups by ab_variant — only rows where ab_variant IS NOT NULL are included (enrollments from sequences with no A/B test have ab_variant = null and are excluded from the A/B block). ConversionsRepository is imported in enrollments.repo.ts only if needed for a joined query — otherwise the JOIN is done inline in getAbBreakdown since both tables are in the same schema."
     },
@@ -1105,7 +1105,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 4,
+      "priority": 50,
       "passes": false,
       "notes": "[Phase 8, originally US-004] The Abramowitz and Stegun erf approximation (A&S 7.1.26) is accurate to ±1.5e-7 which is more than sufficient for a p-value threshold of 0.05. The p-value for the design spec example (42/175 vs 31/175) is stated as 0.031 — use this as the primary regression test. The approximation implementation: function erf(x: number): number { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))); const result = 1 - poly * Math.exp(-x * x); return x >= 0 ? result : -result; } — this is the simpler 5-term version (A&S 7.1.26). Implement normalCdf as: function normalCdf(z: number): number { return 0.5 * (1 + erf(z / Math.SQRT2)); }. No external statistics library — pure TS implementation only."
     },
@@ -1124,7 +1124,7 @@
         "Register route in apps/platform/nurturing/src/index.ts with the same auth middleware (JWT required) as the other sequence routes",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 5,
+      "priority": 51,
       "passes": false,
       "notes": "[Phase 8, originally US-005] The route needs ConversionsRepository and EnrollmentsRepository injected — check how other routes in src/routes/ receive repository dependencies (likely via Fastify decorators or closure-based factory). The ab_test configuration is on sequence_versions, not sequence_definitions — load the active_version row to check ab_test.enabled. When total = 0, return rates as 0 rather than NaN (division by zero guard). The winner field in the A/B block uses the variant key names from the breakdown ('A' and 'B') — pass those as variantAName and variantBName to computeAbSignificance. Round rates to 3 decimal places: Math.round(rate * 1000) / 1000 — consistent with the spec example values (0.629, 0.571, etc.)."
     },
@@ -1144,7 +1144,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 6,
+      "priority": 52,
       "passes": false,
       "notes": "[Phase 8, originally US-006] Contract tests verify the request shape sent to downstream services — they do not need a live service. Use vi.fn() or Vitest's spy utilities to intercept the HTTP client used by the action handlers. Check what HTTP client the action handlers use (likely node-fetch, undici, or a thin wrapper imported from a shared package) — mock at that level. The test setup needs a minimal enrollment context object with the fields that send_message and send_email step params reference (phone, location_number, location_timezone, etc. matching the no-response follow-up sequence DSL in spec Section 3.1). The template render mock should return { subject: 'Test Subject', body_html: '<p>Test</p>', body_text: 'Test', body: 'Test SMS body' } so send_message and send_email handlers can extract their respective fields. These tests import the action handlers directly (src/services/action-handlers/send-message.ts and send-email.ts) rather than going through the full step worker — faster and more focused."
     },
@@ -1164,7 +1164,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 7,
+      "priority": 53,
       "passes": false,
       "notes": "[Phase 8, originally US-007] The 'only { system_prompt, user_prompt, model }' assertion is the most important for the call_ai contract — the spec is explicit that no extra fields are sent. Use expect(capturedBody).toEqual({ system_prompt: ..., user_prompt: ..., model: ... }) rather than expect.objectContaining(...) so extra fields would cause the test to fail. For EventBridge event shape tests, mock the @ortho/event-bus putEvent function (or the underlying AWS EventBridge client) at the module level with vi.mock('@ortho/event-bus'). Capture the call arguments and assert the event body matches the @ortho/types interface fields. The nurturing.* event types should already be defined in @ortho/types from earlier phases — check packages/@ortho/types/src/events/ for the relevant interfaces. If the @ortho/event-bus mock returns a resolved promise, the publisher functions should complete without error."
     },
@@ -1185,7 +1185,7 @@
         "Tests pass (npm run test from apps/platform/nurturing)",
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
-      "priority": 8,
+      "priority": 54,
       "passes": false,
       "notes": "[Phase 8, originally US-008] These are inbound contract tests — they verify that the consumer is robust against malformed SQS messages. SQS standard queues guarantee at-least-once delivery and can deliver duplicate or corrupted messages; a throwing consumer will cause the message to remain in the queue and be redelivered endlessly. The 'handles completely invalid JSON structure — does not throw' test passes null because AWS Lambda SQS event parsing can produce null body in edge cases. Check processOptOutMessage's actual function signature from Phase 6 — the deps parameter shape may differ slightly from the mock above; adjust the mock to match the real interface. The 'continues processing others' test verifies per-enrollment try/catch which was a spec requirement in Phase 6 — this contract test is verifying that requirement is actually met."
     }
