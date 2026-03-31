@@ -497,3 +497,16 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - The @fastify/sensible version mismatch with Fastify 5 is a local environment issue affecting all integration tests — not a code problem
   - Directly update a step row to status='running' via db() to simulate an in-flight step worker — no need to actually run the worker
 ---
+
+## 2026-03-31 - US-040
+- Created test/integration/opt-out.test.ts for the opt-out consumer
+- Tests call processOptOutMessage directly (not via SQS polling loop)
+- Files changed:
+  - apps/platform/nurturing/test/integration/opt-out.test.ts (4 integration tests)
+- **Learnings for future iterations:**
+  - processOptOutMessage takes (messageBody, OptOutConsumerDeps) — sqsClient/queueUrl are only used by startOptOutConsumer; pass empty values for direct testing
+  - Mock the BullMQ queue with getJob returning null to avoid Redis dependency in integration tests (unenrollment calls stepQueue.getJob for best-effort job removal)
+  - UnenrollmentDeps.publisher (publishEnrollmentUnenrolled) and OptOutConsumerDeps.publisher (publishAllSequencesCancelled) can be the same mock instance — unenroll is called per-enrollment, the opt-out consumer is responsible for the aggregate event
+  - For entity with no active enrollments, publishAllSequencesCancelled is still called with cancelled_count: 0 and entity_type: 'unknown' (derived from enrollments[0]?.entity_type ?? 'unknown')
+  - Use vi.fn() functions for logger.warn/info/error when you need to assert call counts in tests
+---

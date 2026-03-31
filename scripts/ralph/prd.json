@@ -914,7 +914,7 @@
         "Tests pass"
       ],
       "priority": 40,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-008] The key design choice: test processOptOutMessage directly instead of spinning up SQS polling. This function is the unit-testable core of the consumer (separated from the SQS polling loop in US-005). Pass all deps as arguments so tests can use a real DB for enrollment/step state and mock the publisher. The EventBridge envelope format passed to processOptOutMessage: JSON.stringify({ 'detail-type': 'opt_out.received', source: 'platform.messaging', detail: { entity_id: 'entity-1' } }). The test for 'entity with no active enrollments' validates that publishAllSequencesCancelled is still called (cancelled_count: 0) — this is important for the Lead Service to reliably set the opt-out flag even when no sequences were active. Mock BullMQ Queue.getJob to return null (no jobs to remove) to avoid Redis dependency in this integration test."
     },
     {
