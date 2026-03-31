@@ -520,3 +520,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - updateJobId() was already present from Phase 4 — per AC, it was not duplicated
   - Both new methods are read-only and use this.db directly (no transaction parameter)
 ---
+
+## 2026-03-31 - US-042
+- Created startup scanner service (src/services/startup-scanner.ts)
+- Files changed:
+  - apps/platform/nurturing/src/services/startup-scanner.ts (new — StartupScannerDeps interface + runStartupScan function)
+- **Learnings for future iterations:**
+  - nurturing service uses `import type { Logger } from 'pino'` (not @ortho/logger) — @ortho/logger is not in the package's dependencies
+  - StepJobData requires 4 fields: enrollment_id, step_execution_id (= step.id), step_id, step_index — the PRD notes mention only 2, but the actual type in step-queue.ts requires all 4
+  - Per-step try/catch ensures a Redis failure on one step does not abort recovery of the remaining steps
+  - Math.max(0, ...) on delayMs handles past scheduled_at (crash recovery) correctly by enqueuing with delay=0
+---

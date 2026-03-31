@@ -949,7 +949,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 42,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 7, originally US-002] The delayMs computation uses Math.max(0, ...) so that steps whose scheduled_at is already in the past are enqueued with delay 0 (fire immediately). Steps with a future scheduled_at get the correct remaining delay. The jobId option in stepQueue.add is set to step.id (the UUID of the step execution row) — this makes BullMQ job IDs deterministic and idempotent: if runStartupScan is called twice before the job fires, BullMQ will return the existing job rather than creating a duplicate (BullMQ deduplicates on jobId). Check step-queue.ts created in Phase 4/5 for the exact StepJobData interface shape ({ enrollment_id: string; step_id: string }) and Queue instantiation pattern. The per-step try/catch is critical: a Redis error on one step should not prevent recovery of others. The logger is the Pino instance from @ortho/logger — check how it is passed in the enrollment manager to replicate the pattern."
     },
     {
