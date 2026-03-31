@@ -306,3 +306,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - No auth headers on service-to-service calls — internal VPC routing handles it
   - All params are pre-resolved by the step worker before calling the handler
 ---
+
+## 2026-03-31 - US-024
+- Created send-email action handler as a pure function (mirrors send-message pattern)
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/send-email.ts (new — ResolvedSendEmailParams interface + executeSendEmail function)
+- **Learnings for future iterations:**
+  - Email handler follows identical two-step pattern: render template first, then send email
+  - Template Service returns { subject, body_html, body_text } for email (vs { body } for SMS)
+  - Email Service endpoint is POST /emails/send (vs /messages/send for SMS)
+  - subject? is optional in params but the rendered template always provides it
+---

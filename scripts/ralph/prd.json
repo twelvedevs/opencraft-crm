@@ -582,7 +582,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 24,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-004] Same pattern as send-message: params are pre-resolved. The Email Service expects pre-rendered subject + body_html + body_text, not a template_id. Use native fetch. The Template Service renders the email template and returns all three fields."
     },
     {
