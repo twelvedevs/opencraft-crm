@@ -621,7 +621,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 26,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-006] The event_type field is a literal string (no interpolation per spec Section 3.4). Only payload values are interpolated. The execContext structure mirrors the interpolator usage in the step worker — 'context' is a nested key so that 'context.entity_id' paths resolve correctly. The include_context merge order is { ...ctx.enrollmentContext, ...resolvedPayload } so that explicit payload fields win over same-named keys from context. Uses the same EventBridgeClient + PutEventsCommand pattern as the automation engine."
     },
     {

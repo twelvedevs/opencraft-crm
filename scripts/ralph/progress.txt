@@ -328,3 +328,17 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - Only system_prompt, user_prompt, model are sent to AI Service (no extra fields per arch spec)
   - auto_send defaults to false via `params.auto_send ?? false`
 ---
+
+## 2026-03-31 - US-026
+- Created emit-event action handler (apps/platform/nurturing/src/services/action-handlers/emit-event.ts)
+- Added @ortho/interpolator as file: dependency to nurturing package.json; built dist first
+- Files changed:
+  - apps/platform/nurturing/src/services/action-handlers/emit-event.ts (new)
+  - apps/platform/nurturing/package.json (added @ortho/interpolator dependency)
+  - apps/platform/nurturing/package-lock.json (updated)
+- **Learnings for future iterations:**
+  - @ortho/interpolator must be added as `"file:../../../packages/@ortho/interpolator"` in package.json and built (`npm run build` in interpolator dir) before `npm install` in the consuming service
+  - interpolateFields(payload, execContext) resolves the whole payload object — pass the full Record<string, unknown>, not individual values
+  - execContext nests enrollmentContext under the key 'context' so paths like 'context.phone' resolve correctly via getByPath
+  - include_context merge order: `{ ...ctx.enrollmentContext, ...resolvedPayload }` — explicit payload fields override same-named context keys
+---
