@@ -74,10 +74,14 @@ export class EnrollmentsRepository {
     return query as Promise<SequenceEnrollment[]>;
   }
 
-  async updateStatus(id: string, status: string, completedAt?: Date): Promise<void> {
+  async updateStatus(
+    id: string,
+    status: 'completed' | 'failed',
+    opts?: { completedAt?: Date },
+  ): Promise<void> {
     const updates: Record<string, unknown> = { status };
-    if (completedAt !== undefined) {
-      updates['completed_at'] = completedAt;
+    if (opts?.completedAt !== undefined) {
+      updates['completed_at'] = opts.completedAt;
     }
     await this.db(ENROLLMENTS_TABLE).where({ id }).update(updates);
   }

@@ -120,4 +120,55 @@ export class StepExecutionsRepository {
       .whereNotNull('job_id')
       .where('scheduled_at', '<', this.db.raw("now() - interval '1 minute'")) as Promise<SequenceStepExecution[]>;
   }
+
+  async findById(id: string): Promise<SequenceStepExecution | null> {
+    const row = await this.db(STEPS_TABLE).where({ id }).first();
+    return (row as SequenceStepExecution) ?? null;
+  }
+
+  async claimForExecution(id: string): Promise<boolean> {
+    const rows = await this.db(STEPS_TABLE)
+      .where({ id })
+      .where('status', 'pending')
+      .update({ status: 'running', started_at: this.db.fn.now() })
+      .returning('id');
+    return rows.length > 0;
+  }
+
+  async markCompleted(id: string, output: unknown | null): Promise<void> {
+    await this.db(STEPS_TABLE).where({ id }).update({
+      status: 'completed',
+      completed_at: this.db.fn.now(),
+      output: output !== null ? JSON.stringify(output) : null,
+    });
+  }
+
+  async markFailed(id: string, error: string): Promise<void> {
+    await this.db(STEPS_TABLE).where({ id }).update({
+      status: 'failed',
+      error,
+      completed_at: this.db.fn.now(),
+    });
+  }
+
+  async markCancelled(id: string): Promise<void> {
+    await this.db(STEPS_TABLE)
+      .where({ id })
+      .where('status', 'pending')
+      .update({ status: 'cancelled' });
+  }
+
+  async updateDeferral(id: string, scheduledAt: Date): Promise<void> {
+    await this.db(STEPS_TABLE).where({ id }).update({
+      scheduled_at: scheduledAt,
+      status: 'pending',
+      job_id: null,
+    });
+  }
+
+  async incrementAttempt(id: string): Promise<void> {
+    await this.db(STEPS_TABLE).where({ id }).update({
+      attempt: this.db.raw('attempt + 1'),
+    });
+  }
 }
