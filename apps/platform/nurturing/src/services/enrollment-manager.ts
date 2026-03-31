@@ -131,6 +131,8 @@ export class EnrollmentManager {
           {
             delay: Math.max(0, stepRow.scheduled_at.getTime() - Date.now()),
             jobId: randomUUID(),
+            attempts: 5,
+            backoff: { type: 'exponential', delay: 5000 },
           },
         );
         await this.stepExecutionsRepo.updateJobId(stepRow.id, job.id!);
