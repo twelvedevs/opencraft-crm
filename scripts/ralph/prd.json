@@ -649,7 +649,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 27,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-007] The execCtx.abVariant is the variant stored on the enrollment row ('A', 'B', or null). The ab_variant_override merge: first merge overrides into resolvedParams (already-resolved base), then resolveValue is applied again to the newly merged keys so any override values that are paths/template strings also get resolved. The chainSendMessage return value allows the step worker to chain a send_message after call_ai without circular imports — the step worker owns the chaining logic. The execCtx.enrollmentContext is passed directly (not spread), preserving it as a named key 'context' for path resolution like 'context.phone'."
     },
     {

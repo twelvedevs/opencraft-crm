@@ -342,3 +342,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - execContext nests enrollmentContext under the key 'context' so paths like 'context.phone' resolve correctly via getByPath
   - include_context merge order: `{ ...ctx.enrollmentContext, ...resolvedPayload }` — explicit payload fields override same-named context keys
 ---
+
+## 2026-03-31 - US-027
+- Created action executor dispatcher at apps/platform/nurturing/src/services/action-executor.ts
+- Files changed:
+  - apps/platform/nurturing/src/services/action-executor.ts (new — ActionExecutorDeps, StepDef, ExecutionContext, ActionResult interfaces + executeAction function)
+- **Learnings for future iterations:**
+  - resolveValue uses interpolateFields({ v: value }, ctx) trick to resolve a single string through interpolateFields without special-casing
+  - ab_variant_override merge: first build resolvedParams from base params, then merge resolved overrides on top; overrides are also run through resolveValue so template strings in overrides resolve correctly
+  - chainSendMessage returned when call_ai result.auto_send === true AND to_field/from_field/dedup_key all exist — step worker owns the chaining logic, not this function
+  - ServiceUrls imported as `import type` would fail since it's used as a value in deps — use `import type { ServiceUrls }` for type annotation only is correct here (it's an interface, no runtime value needed)
+---
