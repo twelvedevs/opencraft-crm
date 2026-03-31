@@ -282,3 +282,15 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - incrementAttempt uses `this.db.raw('attempt + 1')` — Knex cannot express increment without raw; this is idiomatic pattern
   - enrollments.repo updateStatus had no callers (only definitionsRepo.updateStatus was called) — safe rename from bare `completedAt?: Date` to `opts?: { completedAt?: Date }`
 ---
+
+## 2026-03-31 - US-022
+- Created src/config/service-urls.ts with ServiceUrls interface and loadServiceUrls() factory
+- Created src/events/publisher.ts with NurturingPublisher class (3 publish methods) and createPublisher() factory
+- Files changed:
+  - apps/platform/nurturing/src/config/service-urls.ts (new)
+  - apps/platform/nurturing/src/events/publisher.ts (new)
+- **Learnings for future iterations:**
+  - @aws-sdk/client-eventbridge was already in package.json — no npm install needed
+  - loadServiceUrls() pattern: collect missing env vars into array, throw with joined list — same approach as other config loaders
+  - createPublisher() reads EVENTBRIDGE_BUS_NAME; all 3 publish methods use identical PutEventsCommand shape with Source='platform.nurturing'
+---

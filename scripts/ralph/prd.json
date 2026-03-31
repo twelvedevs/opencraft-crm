@@ -550,7 +550,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 22,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-002] The automation engine at apps/platform/automation/src/services/action-workers/emit-event.worker.ts uses this exact same pattern — EventBridgeClient + PutEventsCommand from @aws-sdk/client-eventbridge — so @aws-sdk/client-eventbridge is likely already a workspace dep. Check apps/platform/nurturing/package.json dependencies before running npm install. The Source field 'platform.nurturing' matches the naming convention (platform layer + service name). All three publish methods follow the same PutEventsCommand shape. The createPublisher factory is used by worker.ts to instantiate with the real EB client."
     },
     {
