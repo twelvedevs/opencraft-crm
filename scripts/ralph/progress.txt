@@ -641,3 +641,14 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - getAbBreakdown returns rows only for variants with enrollments; use find('A')/'B' with ?? 0 fallbacks
   - computeAbSignificance takes variant name strings 'A' and 'B' for winner field labeling
 ---
+
+## 2026-03-31 - US-052
+- Created contract tests for send_message and send_email action handlers
+- Files changed:
+  - apps/platform/nurturing/test/contract/outbound-send-message.contract.test.ts (3 tests)
+  - apps/platform/nurturing/test/contract/outbound-send-email.contract.test.ts (2 tests)
+- **Learnings for future iterations:**
+  - Action handlers use native `fetch` — mock with `vi.stubGlobal('fetch', vi.fn(...))` and clean up with `vi.unstubAllGlobals()` in afterEach
+  - Contract tests go in `test/contract/` (vitest.config.ts glob `test/**/*.test.ts` picks them up automatically)
+  - `vi.fn(async (url: string) => ...)` pattern: branch on URL substring to return different mock responses for template render vs send endpoints
+---

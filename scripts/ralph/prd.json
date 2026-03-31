@@ -1145,7 +1145,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 52,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 8, originally US-006] Contract tests verify the request shape sent to downstream services — they do not need a live service. Use vi.fn() or Vitest's spy utilities to intercept the HTTP client used by the action handlers. Check what HTTP client the action handlers use (likely node-fetch, undici, or a thin wrapper imported from a shared package) — mock at that level. The test setup needs a minimal enrollment context object with the fields that send_message and send_email step params reference (phone, location_number, location_timezone, etc. matching the no-response follow-up sequence DSL in spec Section 3.1). The template render mock should return { subject: 'Test Subject', body_html: '<p>Test</p>', body_text: 'Test', body: 'Test SMS body' } so send_message and send_email handlers can extract their respective fields. These tests import the action handlers directly (src/services/action-handlers/send-message.ts and send-email.ts) rather than going through the full step worker — faster and more focused."
     },
     {
