@@ -103,7 +103,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 2, originally US-001] Pattern mirrors apps/platform/automation exactly — same tsconfig, same Dockerfile, same package.json shape. Worker entry point is src/worker.ts (compiles to dist/worker.js); the ECS task definition for the worker overrides CMD to 'node dist/worker.js'. src/index.ts must NOT import db.ts or repos yet — those are added in later stories to keep this story self-contained and typecheckable."
     },
     {

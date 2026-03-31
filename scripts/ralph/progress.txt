@@ -50,3 +50,19 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - PRD notes claim 2026-03-08T12:30:00Z = 07:30 EST before spring-forward — this is WRONG. Spring-forward on March 8 happens at 7am UTC; 12:30 UTC is already 8:30 EDT (inside window). Correct timestamp for 07:30 before the 08:00 window on that day: 2026-03-08T11:30:00Z = 07:30 EDT.
   - The active-hours algorithm is identical to apps/platform/automation/src/services/active-hours.ts — key difference is this version takes a pre-resolved timezone string (no ExecutionContext dependency), making it a pure utility function.
 ---
+
+## 2026-03-31 - US-004
+- Created apps/platform/nurturing service scaffold (Fastify + TypeScript stub)
+- Files changed:
+  - apps/platform/nurturing/package.json
+  - apps/platform/nurturing/tsconfig.json
+  - apps/platform/nurturing/vitest.config.ts
+  - apps/platform/nurturing/Dockerfile
+  - apps/platform/nurturing/src/index.ts (stub Fastify app with /healthz)
+  - apps/platform/nurturing/src/worker.ts (stub worker)
+  - apps/platform/nurturing/package-lock.json
+- **Learnings for future iterations:**
+  - src/index.ts must NOT import db.ts or repos yet — keeps this story self-contained and typecheckable
+  - @platform/nurturing omits @aws-sdk/client-secrets-manager (present in automation) — not needed for nurturing
+  - worker.ts uses `export default {}` (empty object) to satisfy ESM default export with no imports
+---
