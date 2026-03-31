@@ -419,3 +419,12 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - A/B test: pass `ab_test: { enabled: true, split: { A: 0, B: 100 } }` in the PUT /sequences/:id body; verify enrollment.ab_variant='B' before running worker
   - createActiveSequence helper needs to forward `ab_test` in the PUT payload for A/B tests (use options object pattern)
 ---
+
+## 2026-03-31 - US-033
+- Added EnrollmentUnenrolledPayload and AllSequencesCancelledPayload interfaces + publishEnrollmentUnenrolled/publishAllSequencesCancelled methods to NurturingPublisher
+- Files changed:
+  - apps/platform/nurturing/src/events/publisher.ts (2 new interfaces, 2 new methods)
+- **Learnings for future iterations:**
+  - Pattern is identical to existing methods: PutEventsCommand with Source 'platform.nurturing', DetailType as event name, Detail: JSON.stringify(data)
+  - No unit tests needed for publisher methods — pure delegation to EventBridgeClient
+---

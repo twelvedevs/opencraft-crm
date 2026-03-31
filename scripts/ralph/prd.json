@@ -784,7 +784,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 33,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 6, originally US-001] NurturingPublisher is at apps/platform/nurturing/src/events/publisher.ts, created in Phase 5. It already has publishStepOutputReady, publishEnrollmentCompleted, publishStepFailed — follow the exact same PutEventsCommand pattern. The all_sequences_cancelled event is published by the opt-out consumer (not the unenrollment service) after all per-enrollment unenrollments are done. The cancelled_count field carries how many enrollments were cancelled in the batch. The Lead Service subscribes to nurturing.all_sequences_cancelled to set the opt-out flag on the lead record."
     },
     {
