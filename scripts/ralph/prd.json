@@ -679,7 +679,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 28,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 5, originally US-008] The retry configuration (5 total attempts, exponential backoff) is set on the BullMQ job when it is enqueued by the enrollment manager. Update apps/platform/nurturing/src/services/enrollment-manager.ts: in the queue.add() call, add options: { delay: ..., jobId: ..., attempts: 5, backoff: { type: 'exponential', delay: 5000 } }. In BullMQ, job.attemptsMade is zero-indexed: 0 on first attempt, 4 on fifth. The active_hours.timezone_field is a dot-notation path like 'context.location_timezone' — interpolateFields resolves it against { context: enrollment.context }. The computeNextActiveWindowMs from @ortho/interpolator returns 0 when the current time is inside the window (proceed immediately) and a positive ms value when outside (defer). The step in Step 6a bypasses template rendering because the AI already generated the body text — post directly to Messaging Service without Template Service. The enrollment.id is available in the error catch block only if enrollment was loaded successfully in Step 1; if enrollment is null, there is no enrollment to mark failed (the step was already cancelled in Step 1)."
     },
     {

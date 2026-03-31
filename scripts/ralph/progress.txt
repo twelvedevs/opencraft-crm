@@ -353,3 +353,17 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - chainSendMessage returned when call_ai result.auto_send === true AND to_field/from_field/dedup_key all exist — step worker owns the chaining logic, not this function
   - ServiceUrls imported as `import type` would fail since it's used as a value in deps — use `import type { ServiceUrls }` for type annotation only is correct here (it's an interface, no runtime value needed)
 ---
+
+## 2026-03-31 - US-028
+- Created step worker BullMQ processor (step-worker.ts) and updated enrollment-manager.ts with retry config
+- Files changed:
+  - apps/platform/nurturing/src/services/step-worker.ts (new — StepWorkerDeps interface + createStepWorker function)
+  - apps/platform/nurturing/src/services/enrollment-manager.ts (added attempts: 5, backoff config to queue.add())
+- **Learnings for future iterations:**
+  - active_hours stored in DB has extra `timezone_field` property beyond ActiveHoursConfig — define `StoredActiveHours = ActiveHoursConfig & { timezone_field: string }` locally
+  - Resolve timezone_field using interpolateFields({ tz: activeHours.timezone_field }, { context: enrollment.context }) — wrapping in object per the resolveValue pattern
+  - BullMQ job.attemptsMade is zero-indexed: check `>= 4` to detect the 5th (final) attempt
+  - enrollment is always non-null in the catch block — early return in Step 1 handles null case before try/catch
+  - Step 6a chains send_message after call_ai by posting directly to Messaging Service (body already resolved, no template rendering needed)
+  - retry config (attempts: 5, backoff: exponential 5000ms) is set in enrollment-manager.ts when enqueuing, not in the worker config
+---
