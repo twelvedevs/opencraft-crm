@@ -155,3 +155,13 @@ Started: Tue Mar 31 16:10:59 +03 2026
   - `updatedDefinition!` non-null assertion is safe here — we just confirmed the row exists via findById
   - vitest exits with code 1 when no test files found — this is expected until US-013 adds integration tests
 ---
+
+## 2026-03-31 - US-012
+- Added POST /sequences/:id/activate and POST /sequences/:id/disable routes to apps/platform/nurturing/src/routes/sequences.ts
+- Files changed:
+  - apps/platform/nurturing/src/routes/sequences.ts (2 new POST routes appended before closing brace)
+- **Learnings for future iterations:**
+  - requireRole(['marketing_manager']) decorator is already present in src/plugins/auth.ts — use preHandler: [fastify.authenticate, fastify.requireRole([...])] array pattern
+  - setActiveVersion and updateStatus methods already exist in SequenceDefinitionsRepository from US-010/US-011
+  - ParamsSchema (TypeBox uuid) was already defined at top of file — reuse for both routes
+---

@@ -299,7 +299,7 @@
         "Typecheck passes (npm run typecheck from apps/platform/nurturing)"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "[Phase 3, originally US-005] requireRole(['marketing_manager']) is the prehandler decorator added in US-001 — it reads request.user.role and throws 403 if the role is not in the allowed list. The preHandler array runs authenticate first (sets request.user) then requireRole (checks it). setActiveVersion sets both active_version and status = 'active' in a single UPDATE — this was defined in the SequenceDefinitionsRepository.setActiveVersion method from Phase 2 US-003. After disable, in-progress enrollments continue normally — the disable only blocks new enrollments (enforced by the enrollment manager in Phase 4)."
     },
     {
