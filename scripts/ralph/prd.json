@@ -258,7 +258,7 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "AudiencePreview is read-only and simple. The filter summary is best-effort human-readable text — no need for a fully polished natural language renderer. The component uses the same AudienceApiClient pattern for fetching (but takes `audienceEngineUrl` directly per SegmentBuilderProps shape — instantiate AudienceApiClient internally using the provided URL). This is the final story — after this, run typecheck across all new packages and services."
     }
   ]

@@ -259,3 +259,18 @@ Started: Wed Apr 01 00:00:00 UTC 2026
   - SegmentBuilder uses useState(() => new AudienceApiClient(url)) to create client once on mount
   - AudienceApiClient.getSegment needed name in return type for SegmentEditor to populate the name field
 ---
+
+## 2026-04-01 - US-016
+- Implemented AudiencePreview read-only component and summarizeFilter utility
+- Files created:
+  - `packages/@platform/audience-ui/src/AudiencePreview.tsx` (read-only segment preview with name, status badge, filter condition list)
+  - `packages/@platform/audience-ui/src/utils/filter-summary.ts` (summarizeFilter: walks filter tree, returns human-readable condition strings)
+- Files modified:
+  - `packages/@platform/audience-ui/src/index.ts` (added AudiencePreview and summarizeFilter exports)
+- **Learnings for future iterations:**
+  - summarizeFilter flattens group/NOT nodes and only renders leaf conditions — keeps summary simple
+  - OPERATOR_LABELS map converts operator codes to readable text (eq → "equals", within_last → "within last")
+  - AudiencePreview instantiates AudienceApiClient internally from audienceEngineUrl prop — matches SegmentBuilderProps pattern
+  - useEffect cleanup with `cancelled` flag prevents state updates after unmount
+  - Manual browser verification needed for UI components (no browser testing tools configured)
+---
