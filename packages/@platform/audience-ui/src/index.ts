@@ -6,6 +6,8 @@ export type { FilterTreeProps, FilterNode, GroupNode, NotNode, ConditionNode } f
 export { SegmentEditor } from './SegmentEditor.js';
 export type { SegmentEditorProps } from './SegmentEditor.js';
 export { SegmentBuilder } from './SegmentBuilder.js';
+export { AudiencePreview } from './AudiencePreview.js';
+export { summarizeFilter } from './utils/filter-summary.js';
 export type {
   SegmentStatus,
   SegmentSummary,
