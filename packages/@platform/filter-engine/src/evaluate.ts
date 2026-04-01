@@ -1,6 +1,7 @@
 import type { FilterNode, EvalContext } from './types.js';
 import { isGroup, isNot } from './types.js';
 import { evaluateBase } from './operators/base.js';
+import { evaluateTemporal } from './operators/temporal.js';
 
 const TEMPORAL_OPS = new Set([
   'within_last',
@@ -30,10 +31,9 @@ export function evaluate(
   // Leaf node
   if (TEMPORAL_OPS.has(filter.op)) {
     if (!context) {
-      throw new Error('Temporal operator requires EvalContext');
+      throw new Error('EvalContext with { now: Date } is required for temporal operators');
     }
-    // Temporal operators will be handled in US-002
-    throw new Error(`Temporal operator requires EvalContext`);
+    return evaluateTemporal(filter, entity, context);
   }
 
   return evaluateBase(filter, entity);

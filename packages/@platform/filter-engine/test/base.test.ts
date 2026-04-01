@@ -188,6 +188,6 @@ describe('filter-engine edge cases', () => {
 
   it('temporal op without context throws descriptive error', () => {
     const filter: FilterNode = { field: 'created_at', op: 'within_last', value: { amount: 5, unit: 'days' } };
-    expect(() => evaluate(filter, { created_at: '2024-01-01' })).toThrow('Temporal operator requires EvalContext');
+    expect(() => evaluate(filter, { created_at: '2024-01-01' })).toThrow('EvalContext with { now: Date } is required for temporal operators');
   });
 });
