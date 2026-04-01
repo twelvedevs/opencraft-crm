@@ -1,0 +1,20 @@
+# Ralph Progress Log
+Started: Wed Apr 01 00:00:00 UTC 2026
+
+## Codebase Patterns
+- Use `{ Redis } from 'ioredis'` (named import, NOT default import) — default import fails typecheck
+- Follow email service (`apps/platform/email/`) patterns for env.ts, db.ts, app.ts, index.ts, types.d.ts, health.ts
+- TypeBox schemas use `Type.Union([Type.String(), Type.Null()])` for nullable columns
+- Repositories follow class pattern with Knex constructor injection, `returning('*')` on inserts
+- Migrations use `.ts` extension with `export async function up/down(knex: Knex)` pattern
+- Use `knex.raw('gen_random_uuid()')` for UUID PKs, `knex.fn.now()` for timestamps
+- Route plugins: register WITHOUT prefix in app.ts, use full paths inside the plugin
+- Unique constraint violations: catch Knex error code `23505`
+- Knexfile: use `export default { ... }` for ESM compatibility
+- ioredis `scriptLoad` doesn't exist — use `redis.script('LOAD', luaScript) as string` for SCRIPT LOAD
+- vitest.config.ts: use `passWithNoTests: true` to avoid exit code 1 when no test files exist
+- ESM throughout: `"type": "module"` in package.json, `moduleResolution: NodeNext`
+- BullMQ: import `{ Queue, Worker }` from 'bullmq' — use `autorun: false` on Worker for manual start
+- `@platform/filter-engine` is a zero-runtime-dependency pure TypeScript package in `packages/@platform/filter-engine`
+- JSON:API error format for all error responses: `{ errors: [{ status: string, code: string, title: string, detail?: string }] }`
+- In-memory cache: use `Map<string, { value: T, expiresAt: number }>` with `Date.now()` TTL check on get

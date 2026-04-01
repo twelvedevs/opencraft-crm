@@ -27,7 +27,10 @@
       "Bash(npm install:*)",
       "Bash(ls /workspace/docs/NAVIGATOR*)",
       "Bash(find /workspace/docs -type f -name *event*)",
-      "Bash(find /workspace -maxdepth 3 -name knexfile.* -type f)"
+      "Bash(find /workspace -maxdepth 3 -name knexfile.* -type f)",
+      "Bash(mkdir -p /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-04-01-messaging-service)",
+      "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/prd.json /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-04-01-messaging-service/)",
+      "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/progress.txt /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-04-01-messaging-service/)"
     ]
   }
 }
