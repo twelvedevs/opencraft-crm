@@ -223,3 +223,21 @@ Started: Wed Apr 01 00:00:00 UTC 2026
   - Filter snapshot audit: after PUT + activate, must call `ctx.app.segmentRepository.invalidate(id)` to clear cache before next evaluate
   - Knex returns jsonb columns as parsed JS objects — no need for JSON.parse when comparing filter_snapshot
 ---
+
+## 2026-04-01 - US-014
+- Implemented @platform/audience-ui package scaffold with SegmentLibrary component
+- Files created:
+  - `packages/@platform/audience-ui/package.json` (peerDependencies: react, react-dom; devDependencies: typescript, @types/react, vitest)
+  - `packages/@platform/audience-ui/tsconfig.json` (jsx: react-jsx, NodeNext module)
+  - `packages/@platform/audience-ui/vitest.config.ts` (passWithNoTests: true)
+  - `packages/@platform/audience-ui/src/types.ts` (SegmentStatus, SegmentSummary, FieldDefinition, SegmentBuilderProps, AudiencePreviewProps)
+  - `packages/@platform/audience-ui/src/api.ts` (AudienceApiClient with listSegments, createSegment, activateSegment, disableSegment, getSegment)
+  - `packages/@platform/audience-ui/src/SegmentLibrary.tsx` (table component with loading/empty/error states, activate/disable actions)
+  - `packages/@platform/audience-ui/src/index.ts` (re-exports all public API)
+- **Learnings for future iterations:**
+  - React UI packages use peerDependencies for react/react-dom, not regular dependencies
+  - `jsx: 'react-jsx'` in tsconfig enables JSX transform without React import
+  - AudienceApiClient uses plain fetch() — no axios dependency, zero runtime deps
+  - Inline styles only for standalone platform UI packages — no Tailwind, no external CSS
+  - SegmentLibrary uses useEffect on mount for initial data load, with manual reload after activate/disable
+---

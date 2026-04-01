@@ -229,7 +229,7 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "No Tailwind in this package — it's a standalone platform component. Use minimal inline styles or HTML-native styles. The component will be consumed by the CRM web app which handles theming. peerDependencies for React — don't bundle React. The AudienceApiClient uses plain fetch() (not axios) to keep zero runtime dependencies. The CRM web app will mount this component and pass its own audienceEngineUrl. No auth token passed here — the assumption is the browser already has a valid JWT in cookies or the fetch calls will be enriched by the CRM shell via interceptors."
     },
     {
