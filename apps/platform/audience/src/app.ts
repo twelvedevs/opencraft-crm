@@ -10,6 +10,7 @@ import { healthRoutes } from './routes/health.js';
 import { segmentRoutes } from './routes/segments.js';
 import { checkRoutes } from './routes/check.js';
 import { evaluateRoutes } from './routes/evaluate.js';
+import { snapshotRoutes } from './routes/snapshots.js';
 
 export async function buildApp(
   db: Knex,
@@ -39,6 +40,7 @@ export async function buildApp(
   await app.register(segmentRoutes);
   await app.register(checkRoutes);
   await app.register(evaluateRoutes);
+  await app.register(snapshotRoutes);
 
   return app;
 }
