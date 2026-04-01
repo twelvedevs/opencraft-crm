@@ -4,3 +4,5 @@
     - this raised by prd-questions skill while working on Nurturing Engine
     - prd-questions-nurturing-engine.md
     - C. Partially — add the action type definition/interface only, defer the full worker implementation
+- [ ] Build `@platform/filter-engine` as part of Audience Engine, but migrate the Automation Engine in a follow-up
+- [ ] ### `@platform/audience-ui` React Component

@@ -1,0 +1,91 @@
+# Ralph Progress Log
+Started: Tue Mar 31 19:22:35 UTC 2026
+
+## Codebase Patterns
+- Use `{ Redis } from 'ioredis'` (named import, NOT default import) — default import fails typecheck
+- Follow email service (`apps/platform/email/`) patterns for env.ts, db.ts, app.ts, index.ts, types.d.ts, health.ts
+- TypeBox schemas use `Type.Union([Type.String(), Type.Null()])` for nullable columns
+- Repositories follow class pattern with Knex constructor injection, `returning('*')` on inserts
+- Migrations use `.ts` extension with `export async function up/down(knex: Knex)` pattern
+- Use `knex.raw('gen_random_uuid()')` for UUID PKs, `knex.fn.now()` for timestamps
+- Cursor-based pagination: base64-encode `{ created_at, id }` JSON for keyset pagination
+- Route plugins: register WITHOUT prefix in app.ts, use full paths (e.g. `/numbers`) inside the plugin — email service `domainRoutes` uses this pattern
+- Unique constraint violations: catch with Knex error code `23505` via `isUniqueViolation()` helper
+- Knexfile: use `export default { ... }` for ESM compatibility
+- ioredis `scriptLoad` doesn't exist — use `redis.script('LOAD', luaScript) as string` for SCRIPT LOAD
+- buildApp signature: `(db, eventBus, redis, twilioClient, statusCallbackUrl)` — all 5 params required
+- vitest.config.ts: use `passWithNoTests: true` to avoid exit code 1 when no test files exist
+- TwilioClient uses interface + stub pattern for DI — stub is co-located in twilio-client.ts
+- Twilio webhook signature validation: HMAC-SHA1 with URL + sorted key-value params, base64 encoded, compared with timingSafeEqual
+- Use `@fastify/formbody` for parsing `application/x-www-form-urlencoded` Twilio webhook bodies
+- Webhook routes use preHandler for signature validation — keeps validation DRY across inbound + status routes
+- Integration tests: use `checkInfra()` guard with `describe.skipIf(!infraAvailable)` to gracefully skip when Postgres/Redis aren't running
+- Integration tests: use `EventBusImpl` + `MockDriver` from `@ortho/event-bus` — check `mockDriver.published` array for event assertions
+- Integration tests: use `generateTwilioSignature()` helper to create valid HMAC-SHA1 signatures for webhook testing
+- Integration tests: use `app.inject()` with `content-type: application/x-www-form-urlencoded` + `URLSearchParams.toString()` for webhook payloads
+- Event publishing: wrap all `eventBus.publish()` calls in try/catch — log errors but don't fail the webhook response (non-critical)
+
+---
+
+## 2026-03-31 - US-001
+- What was implemented: Full project scaffold for messaging service — package.json, tsconfig, env parsing, db module, Knex migration (messaging_numbers, messaging_messages, messaging_opt_outs), three repositories (NumbersRepository, MessagesRepository, OptOutsRepository), Fastify app bootstrap with health check, index.ts entry point
+- Files changed: 13 files in apps/platform/messaging/ (package.json, tsconfig.json, src/env.ts, src/db.ts, src/app.ts, src/index.ts, src/types.d.ts, src/routes/health.ts, src/repositories/numbers.repo.ts, src/repositories/messages.repo.ts, src/repositories/opt-outs.repo.ts, migrations/001_initial_schema.ts, package-lock.json)
+- **Learnings for future iterations:**
+  - ioredis uses named import `{ Redis }`, not default — default causes TS2351
+  - The messaging service has NO BullMQ queues — Redis is only for rate limiting
+  - Email service is the closest pattern reference for this service
+---
+
+## 2026-03-31 - US-002
+- What was implemented: Phone number pool CRUD routes (POST/GET/DELETE /numbers, GET /numbers/resolve), dev seed script with 4 test numbers, knexfile.ts for Knex CLI
+- Files changed: apps/platform/messaging/src/routes/numbers.ts (new), apps/platform/messaging/src/app.ts (register numberRoutes), apps/platform/messaging/seeds/dev-numbers.ts (new), apps/platform/messaging/knexfile.ts (new), apps/platform/messaging/package.json (seed script)
+- **Learnings for future iterations:**
+  - Don't use prefix option when registering route plugins — put full paths in the plugin itself (email service pattern)
+  - Seed scripts use `onConflict().ignore()` for idempotent re-runs
+  - Query param booleans come as strings — parse with `=== 'true'`
+---
+
+## 2026-03-31 - US-003
+- What was implemented: Full outbound send flow — template renderer, number resolver, opt-out registry, Redis token bucket rate limiter (Lua script), Twilio client (real + stub), SendMessageService orchestrating the 9-step pipeline, message routes (POST /messages/send, GET /messages/:id, GET /messages), vitest config, app/index wiring with TwilioClient + RateLimiter + statusCallbackUrl decorations
+- Files changed: apps/platform/messaging/src/services/template-renderer.ts (new), src/services/number-resolver.ts (new), src/services/opt-out-registry.ts (new), src/services/rate-limiter.lua (new), src/services/rate-limiter.ts (new), src/services/twilio-client.ts (new), src/services/send-message.ts (new), src/routes/messages.ts (new), src/app.ts (updated — added twilioClient/rateLimiter/statusCallbackUrl params + decorations + messageRoutes), src/index.ts (updated — create twilioClient, pass to buildApp), src/types.d.ts (updated — added twilioClient, rateLimiter, statusCallbackUrl), vitest.config.ts (new)
+- **Learnings for future iterations:**
+  - ioredis `scriptLoad` doesn't exist as a method — use `redis.script('LOAD', luaScript)` instead and cast result to string
+  - RateLimiter Lua script uses token bucket with HMGET/HMSET + TTL for auto-cleanup
+  - TwilioClient interface + stub pattern enables DI for testing — stub tracks calls array and supports setError()
+  - buildApp signature now takes (db, eventBus, redis, twilioClient, statusCallbackUrl) — 5 params
+  - vitest.config.ts with `passWithNoTests: true` prevents exit code 1 when no test files exist yet
+  - SendMessageService follows spec Section 5 pipeline: validate → opt-out → dedup → resolve → render → rate-limit → twilio → insert → return
+---
+
+## 2026-03-31 - US-004
+- What was implemented: Opt-out CRUD routes (GET/POST/DELETE /opt-outs), unit tests for template-renderer (6 tests), number-resolver (4 tests), and twilio-webhook placeholder (todo for US-005)
+- Files changed: apps/platform/messaging/src/routes/opt-outs.ts (new), src/app.ts (register optOutRoutes), test/unit/template-renderer.test.ts (new), test/unit/number-resolver.test.ts (new), test/unit/twilio-webhook.test.ts (new)
+- **Learnings for future iterations:**
+  - OptOutRegistry.register() + repo.findByPhone() is the pattern for POST opt-outs since register uses ON CONFLICT DO NOTHING and may not return the row
+  - Mock repositories use `vi.fn()` for each method cast via `as unknown as RepoType`
+  - `vi.mocked()` wrapper needed to type mock return values properly
+---
+
+## 2026-03-31 - US-005
+- What was implemented: Twilio webhook service (HMAC-SHA1 signature validation, STOP/UNSTOP keyword detection, message classification), webhook routes (POST /webhooks/twilio/inbound for inbound SMS, POST /webhooks/twilio/status for delivery status callbacks), @fastify/formbody for form-encoded body parsing, 10 unit tests covering signature validation and keyword classification
+- Files changed: apps/platform/messaging/src/services/twilio-webhook.ts (new), src/routes/webhooks.ts (new), src/app.ts (added formbody + webhookRoutes registration), package.json (added @fastify/formbody), test/unit/twilio-webhook.test.ts (replaced placeholder with 10 tests)
+- **Learnings for future iterations:**
+  - Twilio sends webhooks as application/x-www-form-urlencoded — need @fastify/formbody plugin
+  - HMAC-SHA1 validation per Twilio spec: URL + sorted key-value pairs concatenated, HMAC with auth token, base64 encoded
+  - Use crypto.timingSafeEqual for signature comparison — requires Buffer.from on both sides and length check first
+  - Media URLs come as MediaUrl0..MediaUrl9 — iterate and collect into array
+  - Empty TwiML `<Response></Response>` prevents Twilio auto-reply
+  - preHandler hook pattern keeps signature validation DRY across multiple webhook routes
+---
+
+## 2026-03-31 - US-006
+- What was implemented: EventBridge event publishing for all 5 events (inbound_message.received, message.delivered, message.failed, opt_out.received, opt_out.removed). Created typed publish helpers in src/events/publisher.ts. Updated webhooks.ts to publish events after DB operations with try/catch for non-critical failure handling. Added NumbersRepository to webhooks for location_id resolution. Created comprehensive integration tests for send flow (6 tests) and webhooks (8 tests) with test helpers including checkInfra guard, generateTwilioSignature, and full TestContext setup using MockDriver.
+- Files changed: apps/platform/messaging/src/events/publisher.ts (new), src/routes/webhooks.ts (updated — added event publishing + NumbersRepository), vitest.config.ts (added fileParallelism: false), test/integration/helpers.ts (new), test/integration/send-flow.test.ts (new), test/integration/webhooks.test.ts (new)
+- **Learnings for future iterations:**
+  - EventBusImpl + MockDriver from @ortho/event-bus is the standard way to test event publishing — MockDriver.published array holds all published events
+  - Integration tests need Postgres + Redis running — use checkInfra() guard with describe.skipIf to gracefully skip
+  - For webhook integration tests, reconstruct the full URL (http://localhost:{port}/path) for signature generation, matching what the preHandler computes
+  - Twilio webhook payloads must be sent as application/x-www-form-urlencoded with URLSearchParams.toString()
+  - location_id resolution: for status callbacks, resolve from from_number (the practice's number); for inbound, resolve from to_number (the practice's number)
+  - Event publish failures are non-critical: wrap in try/catch, log error, but still return 200 to Twilio
+---

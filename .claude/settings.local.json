@@ -25,7 +25,9 @@
       "Bash(npm test:*)",
       "Bash(rm -rf node_modules package-lock.json)",
       "Bash(npm install:*)",
-      "Bash(ls /workspace/docs/NAVIGATOR*)"
+      "Bash(ls /workspace/docs/NAVIGATOR*)",
+      "Bash(find /workspace/docs -type f -name *event*)",
+      "Bash(find /workspace -maxdepth 3 -name knexfile.* -type f)"
     ]
   }
 }
