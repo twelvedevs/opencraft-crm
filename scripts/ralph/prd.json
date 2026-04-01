@@ -85,7 +85,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "The number-resolver unit tests need a mock NumbersRepository — create a simple mock object with vi.fn() for each method. The template-renderer tests are pure function tests with no mocks needed. Opt-out routes have no auth for now (deferred @ortho/auth-middleware integration)."
     },
     {
@@ -107,7 +107,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Twilio sends webhook bodies as application/x-www-form-urlencoded. Fastify needs @fastify/formbody or manual content-type parser registered. Add @fastify/formbody to package.json dependencies. The HMAC-SHA1 validation uses Node crypto module (import { createHmac, timingSafeEqual } from 'node:crypto'). Media URLs come as MediaUrl0, MediaUrl1, etc. — collect into an array. The empty TwiML response prevents Twilio from sending an auto-reply."
     },
     {
@@ -127,7 +127,7 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Use @ortho/event-bus MockDriver in integration tests to verify event publishing — check eventBus.publishedEvents or similar API from the package. Integration tests need Docker Compose Postgres and Redis running (project-level docker-compose.yml). The test setup should run migrations before tests and clean tables between tests. For the send-flow integration tests, inject the stub Twilio client. For webhook integration tests, generate valid HMAC-SHA1 signatures using a known auth token."
     }
   ]
