@@ -138,6 +138,57 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  // POST /audiences/segments/:id/activate
+  // TODO: Add Marketing Manager role check (403) when @ortho/auth-middleware is wired up
+  app.post('/audiences/segments/:id/activate', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const segment = await segmentsRepo.findById(id);
+    if (!segment) {
+      return reply.status(404).send(
+        jsonApiError(404, 'NOT_FOUND', 'Segment not found'),
+      );
+    }
+
+    // Verify a version row exists for current_version
+    const versionRow = await segmentsRepo.findVersionRow(id, segment.current_version);
+    if (!versionRow) {
+      return reply.status(400).send(
+        jsonApiError(400, 'NO_FILTER_VERSION', 'No filter version for current_version'),
+      );
+    }
+
+    await segmentsRepo.updateStatus(id, 'active', segment.current_version);
+    app.segmentRepository.invalidate(id);
+
+    return reply.status(200).send({
+      segment_id: id,
+      active_version: segment.current_version,
+      status: 'active',
+    });
+  });
+
+  // POST /audiences/segments/:id/disable
+  // TODO: Add Marketing Manager role check (403) when @ortho/auth-middleware is wired up
+  app.post('/audiences/segments/:id/disable', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const segment = await segmentsRepo.findById(id);
+    if (!segment) {
+      return reply.status(404).send(
+        jsonApiError(404, 'NOT_FOUND', 'Segment not found'),
+      );
+    }
+
+    await segmentsRepo.updateStatus(id, 'disabled');
+    app.segmentRepository.invalidate(id);
+
+    return reply.status(200).send({
+      segment_id: id,
+      status: 'disabled',
+    });
+  });
+
   // GET /audiences/segments/:id
   app.get('/audiences/segments/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
