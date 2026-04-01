@@ -244,7 +244,7 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "The FilterTree is the most complex component here — keep it functional and correct, even if styling is minimal. The debounced preview is implemented with useRef for the timer: `const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)`. In the filter onChange callback, clear the previous timer and set a new 500ms timeout. If onFetchEntities throws or the evaluate call returns non-2xx, set previewError and clear previewCount — the editor stays functional (error is advisory only per spec)."
     },
     {

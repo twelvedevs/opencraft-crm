@@ -241,3 +241,21 @@ Started: Wed Apr 01 00:00:00 UTC 2026
   - Inline styles only for standalone platform UI packages — no Tailwind, no external CSS
   - SegmentLibrary uses useEffect on mount for initial data load, with manual reload after activate/disable
 ---
+
+## 2026-04-01 - US-015
+- Implemented FilterTree.tsx (recursive AND/OR/NOT/leaf editor), SegmentEditor.tsx (name + filter + save + preview), SegmentBuilder.tsx (library/editor view manager)
+- Added updateSegment and evaluateInline methods to AudienceApiClient
+- Files created:
+  - `packages/@platform/audience-ui/src/FilterTree.tsx` (recursive component with GroupEditor, NotEditor, ConditionEditor, ValueInput)
+  - `packages/@platform/audience-ui/src/SegmentEditor.tsx` (edit/create segment with debounced preview)
+  - `packages/@platform/audience-ui/src/SegmentBuilder.tsx` (top-level view state manager)
+- Files modified:
+  - `packages/@platform/audience-ui/src/api.ts` (added updateSegment, evaluateInline, updated getSegment return type to include name)
+  - `packages/@platform/audience-ui/src/index.ts` (added exports for FilterTree, SegmentEditor, SegmentBuilder)
+- **Learnings for future iterations:**
+  - FilterNode types are redefined locally in audience-ui to avoid cross-package import issues with @platform/filter-engine
+  - OPERATORS_BY_TYPE maps field types to valid operators — when adding new field types, add an entry here
+  - Debounced preview uses useRef<ReturnType<typeof setTimeout>> pattern to clear/reset timers
+  - SegmentBuilder uses useState(() => new AudienceApiClient(url)) to create client once on mount
+  - AudienceApiClient.getSegment needed name in return type for SegmentEditor to populate the name field
+---
