@@ -5,6 +5,7 @@ import type { Knex } from './db.js';
 import { SegmentRepository } from './services/segment-repository.js';
 import { healthRoutes } from './routes/health.js';
 import { segmentRoutes } from './routes/segments.js';
+import { checkRoutes } from './routes/check.js';
 
 export async function buildApp(
   db: Knex,
@@ -24,6 +25,7 @@ export async function buildApp(
 
   await app.register(healthRoutes);
   await app.register(segmentRoutes);
+  await app.register(checkRoutes);
 
   return app;
 }
