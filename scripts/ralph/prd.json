@@ -21,7 +21,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "This is a pure-function package — no Fastify, no Knex, no Redis. Zero runtime dependencies. The evaluate.ts file contains the routing logic (AND/OR/NOT dispatch + temporal guard), while base.ts contains only the leaf operator evaluation. Dot-notation field resolution: split on '.', reduce over entity object. A null intermediate node (e.g. entity.address is null when resolving address.city) should return undefined (not throw)."
     },
     {
@@ -36,7 +36,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "The `within_last` boundary semantics from spec: `timestamp >= now - N` (inclusive). So a field exactly N days ago (to the millisecond) matches `within_last N days`. For day arithmetic: subtract `amount * 24 * 60 * 60 * 1000` milliseconds from `context.now.getTime()`. The `before` operator is strictly less-than (not <=). The `date_range` operator is inclusive on both ends (>= start && <= end)."
     },
     {
@@ -58,7 +58,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "No EventBridge / event-bus dependency — the audience engine is purely synchronous REST. No @ortho/event-bus in dependencies. Redis is only for BullMQ snapshot cleanup workers (added in US-010). The health endpoint is intentionally liveness-only (always 200) — this differs from the email service which does DB/Redis connectivity checks. The audience_snapshots.id is caller-supplied (no gen_random_uuid() default). audience_snapshot_members uses composite PK. Use `knex.raw('gen_random_uuid()')` as default for segment/version tables."
     },
     {
@@ -71,7 +71,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "The segment repository cache is per-ECS-instance (not Redis). 30s TTL means a newly activated segment or a disabled segment may be stale for up to 30s — this is an accepted design trade-off per the spec. The cache is a simple Map with expiry check on read, no eviction timer. The filter-evaluator wrapper always passes `{ now: new Date() }` context so temporal operators work correctly. The `filter` column comes from the LEFT JOIN on audience_segment_versions at the active_version."
     },
     {
@@ -90,7 +90,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "JWT sub extraction: check `request.headers.authorization` or use a helper. For now (no auth middleware), default `created_by` to null if no JWT is present — don't fail requests without auth. The spec says `created_by` is auto-populated from JWT sub; in practice without @ortho/auth-middleware wired up, just pass null. The versioning rule: compare `current_version` and `active_version` on the loaded segment row. `active_version IS NULL` = never activated = overwrite draft. `current_version === active_version` = activated version exists = create new version. Use crypto.randomUUID() from Node built-ins (no uuid package needed). The SegmentRepository (with cache) from US-004 is separate from the SegmentsRepository (raw DB ops) here — instantiate both in app.ts and pass to routes."
     },
     {
@@ -103,7 +103,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "The spec mentions Marketing Manager role check for activate and disable (403 if not that role). Since @ortho/auth-middleware is not yet wired up, skip the role check for now and note it as a TODO comment. The spec also says activate returns 403 if not Marketing Manager — add TODO comment. The key functional behavior (version promotion, cache invalidation) must be correct. Cache invalidation after activate/disable ensures the membership check endpoint picks up the new state within TTL."
     },
     {
@@ -116,7 +116,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "No snapshot created, no DB write on the hot path. The SegmentRepository from US-004 is the cache-backed one. The FilterEvaluator from US-004 injects `now` automatically. If the filter-engine throws (malformed filter stored in DB), let the error bubble up to Fastify's error handler as a 500. The 30s cache staleness (disabled segment still returns results for up to 30s) is accepted per spec."
     },
     {
@@ -131,7 +131,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "The `addMembers` query uses unnest to efficiently insert multiple rows in one query: `knex.raw('INSERT INTO audience_snapshot_members (snapshot_id, entity_id) SELECT ?, unnest(?::text[]) ON CONFLICT DO NOTHING', [snapshotId, entityIds])` — returns count by checking rowCount. The `enqueueCleanup` callback is injected to keep snapshot-manager free of BullMQ dependency (BullMQ wired in US-010). In US-008, pass a no-op stub for `enqueueCleanup` in app.ts until US-010 wires it properly. The `SegmentMismatchError` and `SnapshotSizeExceededError` are custom error classes (extend Error, set a name property)."
     },
     {
@@ -145,7 +145,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Filter mismatch check for inline snapshot: load the existing snapshot row's `filter_snapshot` and compare against the incoming `filter` using `JSON.stringify(existing) !== JSON.stringify(incoming)`. This is a simple string comparison — not deep equal — consistent with how the filter was stored as jsonb and retrieved. The inline `snapshot: false` path never writes any DB rows — it's pure in-memory filter evaluation. The spec says `snapshot_id` is null for inline one-off snapshots in the GET response."
     },
     {
@@ -161,7 +161,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "BullMQ Worker with `autorun: true` (default) starts processing immediately on instantiation. The sweep worker adds its own repeatable job on first run — this is idempotent (BullMQ deduplicates repeatable jobs by key). The `DELETE FROM audience_snapshots WHERE id = ?` cascades to `audience_snapshot_members` via ON DELETE CASCADE — no separate delete needed. Workers use the same Redis connection as the queue. Follow email service worker pattern: `new Worker('queue-name', async (job) => { ... }, { connection })`. The `cleanupQueue` parameter threads through app.ts because snapshotManager needs the enqueue callback — this avoids importing BullMQ directly in snapshot-manager.ts."
     },
     {
@@ -178,7 +178,7 @@
         "Tests pass"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Use `vi.fn()` and `vi.spyOn()` from Vitest for mocking. The snapshot-manager tests inject a mock `enqueueCleanup` function and verify it's called with correct arguments. For the cache TTL test, override `Date.now` or set `expiresAt` directly on the private cache map (cast to `any` if needed). The versioning tests test the route handler logic — can either call the handler directly with mock db or test the SegmentsRepository methods individually."
     },
     {
@@ -195,7 +195,7 @@
         "Tests pass"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Integration tests need Postgres and Redis running — use environment variables `TEST_DATABASE_URL` and `TEST_REDIS_URL` (or the same DATABASE_URL/REDIS_URL if set). The test database should use a separate schema or test database (e.g., postgres://localhost/ortho_test_audience). Clean tables between tests using `TRUNCATE audience_segments, audience_segment_versions, audience_snapshots, audience_snapshot_members CASCADE` in beforeEach. For the 100,000 cap test, don't actually insert 100,000 entities — mock the `getMatchedCount` repository method to return 99,999 and submit a batch of 2 matching entities."
     },
     {
@@ -210,7 +210,7 @@
         "Tests pass"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "For BullMQ job testing: you can directly call the worker's job processor function by passing a mock job object `{ data: { snapshotId } }` — no need to go through the full BullMQ queue infrastructure. Alternatively use a test Redis and process jobs with `worker.processJob()` if BullMQ exposes that. Keep cleanup tests simple and focused. The filter_snapshot audit test is important — it verifies that the snapshot records the filter at evaluation time, not whatever the segment's filter is later."
     },
     {

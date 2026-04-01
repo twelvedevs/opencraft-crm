@@ -18,3 +18,208 @@ Started: Wed Apr 01 00:00:00 UTC 2026
 - `@platform/filter-engine` is a zero-runtime-dependency pure TypeScript package in `packages/@platform/filter-engine`
 - JSON:API error format for all error responses: `{ errors: [{ status: string, code: string, title: string, detail?: string }] }`
 - In-memory cache: use `Map<string, { value: T, expiresAt: number }>` with `Date.now()` TTL check on get
+- tsconfig.json for packages: do NOT include `test/**/*` in `include` — conflicts with `rootDir: 'src'`. Vitest handles test TS compilation independently.
+- `@platform/filter-engine` must be built (`npm run build`) before audience engine typecheck — the `file:` dependency resolves to the dist/ directory
+- Integration tests: use `describe.skipIf(!DB_URL)` to skip when no database is available; use `truncateTables` with CASCADE in beforeEach
+
+## 2026-04-01 - US-001
+- Implemented `@platform/filter-engine` package: types, base operators, evaluate function, and 27 unit tests
+- Files created:
+  - `packages/@platform/filter-engine/package.json`
+  - `packages/@platform/filter-engine/tsconfig.json`
+  - `packages/@platform/filter-engine/vitest.config.ts`
+  - `packages/@platform/filter-engine/src/types.ts` (FilterNode, GroupNode, NotNode, ConditionNode, EvalContext, type guards)
+  - `packages/@platform/filter-engine/src/operators/base.ts` (evaluateBase with dot-notation field resolver)
+  - `packages/@platform/filter-engine/src/evaluate.ts` (main evaluate with AND/OR/NOT dispatch, temporal guard)
+  - `packages/@platform/filter-engine/src/index.ts` (re-exports)
+  - `packages/@platform/filter-engine/test/base.test.ts` (27 tests)
+- **Learnings for future iterations:**
+  - Temporal operators (within_last, etc.) throw placeholder error in evaluate.ts — US-002 will add evaluateTemporal
+  - Dot-notation resolver: splits on '.', reduces over entity, returns undefined for null intermediates
+  - The evaluate function uses short-circuit logic for AND (every) and OR (some)
+---
+
+## 2026-04-01 - US-002
+- Implemented temporal operators: within_last, not_within_last, before, after, date_range
+- Created `packages/@platform/filter-engine/src/operators/temporal.ts` with evaluateTemporal function
+- Updated `packages/@platform/filter-engine/src/evaluate.ts` to route temporal ops to evaluateTemporal
+- Created `packages/@platform/filter-engine/test/temporal.test.ts` with 15 tests
+- Updated base.test.ts error message to match new temporal error text
+- **Learnings for future iterations:**
+  - within_last boundary is inclusive: `fieldDate.getTime() >= threshold`
+  - before is strictly less-than, date_range is inclusive on both ends
+  - Day arithmetic: `amount * 24 * 60 * 60 * 1000` ms from context.now
+  - The resolveField helper is duplicated in base.ts and temporal.ts — could be extracted to a shared util in future if needed
+  - Updating error messages in evaluate.ts requires updating corresponding test assertions in base.test.ts
+---
+
+## 2026-04-01 - US-003
+- Implemented Audience Engine service scaffold: Fastify bootstrap, DB schema, migrations, health endpoint
+- Files created:
+  - `apps/platform/audience/package.json` (dependencies: fastify, knex, pg, ioredis, bullmq, @platform/filter-engine, @ortho/logger, @sinclair/typebox)
+  - `apps/platform/audience/tsconfig.json`
+  - `apps/platform/audience/vitest.config.ts`
+  - `apps/platform/audience/knexfile.ts`
+  - `apps/platform/audience/src/env.ts` (TypeBox-validated: DATABASE_URL, REDIS_URL, PORT)
+  - `apps/platform/audience/src/db.ts` (Knex PG factory)
+  - `apps/platform/audience/src/types.d.ts` (Fastify module augmentation: db + redis, no eventBus)
+  - `apps/platform/audience/src/routes/health.ts` (liveness-only, always 200)
+  - `apps/platform/audience/src/app.ts` (buildApp with db + redis decoration)
+  - `apps/platform/audience/src/index.ts` (entrypoint with SIGTERM handler)
+  - `apps/platform/audience/migrations/001_initial_schema.ts` (4 tables: audience_segments, audience_segment_versions, audience_snapshots, audience_snapshot_members)
+- **Learnings for future iterations:**
+  - Health endpoint is liveness-only (always 200) — differs from email service which checks DB/Redis
+  - audience_snapshots.id has no default (caller-supplied UUID) — unlike other tables
+  - audience_snapshot_members uses composite PK (snapshot_id, entity_id) not a UUID PK
+  - No @ortho/event-bus dependency — audience engine is purely synchronous REST
+  - buildApp takes (db, redis) — will expand to (db, redis, cleanupQueue) in US-010
+---
+
+## 2026-04-01 - US-004
+- Implemented SegmentRepository with 30s TTL in-memory cache and FilterEvaluator wrapper
+- Files created:
+  - `apps/platform/audience/src/services/segment-repository.ts` (SegmentWithFilter interface, SegmentRepository class with Map-based cache)
+  - `apps/platform/audience/src/services/filter-evaluator.ts` (FilterEvaluator class wrapping @platform/filter-engine evaluate)
+- **Learnings for future iterations:**
+  - `@platform/filter-engine` must be built before audience engine typecheck (file: dependency resolves to dist/)
+  - SegmentRepository uses `db.raw()` for the JOIN query — returns `row.rows[0]` not `row[0]`
+  - FilterEvaluator always injects `{ now: new Date() }` as EvalContext for temporal operator support
+  - SegmentRepository (cache-backed read) is separate from SegmentsRepository (raw CRUD) added in US-005
+---
+
+## 2026-04-01 - US-005
+- Implemented segment CRUD routes: POST create, PUT update, GET list, GET by id
+- Files created:
+  - `apps/platform/audience/src/repositories/segments.repository.ts` (SegmentsRepository class with create, createVersion, findById, findVersionRow, updateCurrentVersionFilter, incrementVersion, updateStatus, list)
+  - `apps/platform/audience/src/errors.ts` (jsonApiError helper for JSON:API error format)
+  - `apps/platform/audience/src/routes/segments.ts` (segmentRoutes plugin with 4 endpoints)
+- Files modified:
+  - `apps/platform/audience/src/app.ts` (registered segmentRoutes, decorate with segmentRepository)
+  - `apps/platform/audience/src/types.d.ts` (added segmentRepository to FastifyInstance)
+- **Learnings for future iterations:**
+  - Versioning logic: `active_version == null || current_version > active_version` means overwrite draft; `current_version === active_version` means create new version
+  - Use `app.db.transaction(async (trx) => { ... })` with a new repo instance wrapping `trx` for transactional writes
+  - SegmentsRepository (raw CRUD, no cache) is distinct from SegmentRepository (cache-backed reads for hot path)
+  - `createVersion` needs `JSON.stringify(filter)` for jsonb columns via Knex insert
+  - List endpoint: use `countQuery.count('* as count')` and destructure `[{ count }]` for total
+  - GET /:id returns filter only when status='active' with a valid active_version — draft/disabled return `filter: null`
+---
+
+## 2026-04-01 - US-006
+- Implemented segment lifecycle routes: POST /audiences/segments/:id/activate and POST /audiences/segments/:id/disable
+- Files modified:
+  - `apps/platform/audience/src/routes/segments.ts` (added activate and disable routes)
+- **Learnings for future iterations:**
+  - Activate route verifies a version row exists for `current_version` before promoting — returns 400 NO_FILTER_VERSION if missing
+  - Disable route does not clear `active_version` — it only sets status='disabled'
+  - Both routes call `segmentRepository.invalidate(id)` to clear the 30s cache
+  - Role checks (Marketing Manager) are deferred as TODO comments until @ortho/auth-middleware is wired up
+  - SegmentsRepository.updateStatus already handles optional `activeVersion` parameter cleanly
+---
+
+## 2026-04-01 - US-007
+- Implemented POST /audiences/segments/:id/check membership check route
+- Files created:
+  - `apps/platform/audience/src/routes/check.ts` (checkRoutes plugin with single endpoint)
+- Files modified:
+  - `apps/platform/audience/src/app.ts` (registered checkRoutes)
+- **Learnings for future iterations:**
+  - Check route uses SegmentRepository (cache-backed) for fast lookups, FilterEvaluator for evaluation
+  - Pattern: route plugins instantiate their own service classes (FilterEvaluator) in plugin scope
+  - The check route is very lightweight — no DB writes, no snapshot creation, just cache read + filter eval
+---
+
+## 2026-04-01 - US-008
+- Implemented SnapshotsRepository, SnapshotManager, and named segment batch evaluate route
+- Files created:
+  - `apps/platform/audience/src/repositories/snapshots.repository.ts` (SnapshotsRepository with createIfNotExists, findById, addMembers via unnest, incrementMatchedCount, getMatchedCount, seal, findMembers, validateSegmentId)
+  - `apps/platform/audience/src/services/snapshot-manager.ts` (SnapshotManager with processBatch, SegmentMismatchError, SnapshotSizeExceededError)
+  - `apps/platform/audience/src/routes/evaluate.ts` (evaluateRoutes plugin with POST /audiences/segments/:id/evaluate)
+- Files modified:
+  - `apps/platform/audience/src/app.ts` (added SnapshotsRepository, SnapshotManager, FilterEvaluator instantiation; no-op enqueueCleanup stub; registered evaluateRoutes)
+  - `apps/platform/audience/src/types.d.ts` (added snapshotsRepository + snapshotManager to FastifyInstance)
+- **Learnings for future iterations:**
+  - SnapshotManager takes an injected `enqueueCleanup` callback to stay decoupled from BullMQ — US-010 will replace the no-op stub
+  - addMembers uses `unnest(?::text[])` for efficient bulk insert with ON CONFLICT DO NOTHING
+  - Snapshot cap check (100,000) happens before addMembers — no partial write on exceeded cap
+  - evaluateRoutes checks snapshot sealed status before calling processBatch to return SNAPSHOT_ALREADY_SEALED error
+  - Custom error classes (SegmentMismatchError, SnapshotSizeExceededError) use `.name` property for instanceof checks
+---
+
+## 2026-04-01 - US-009
+- Implemented inline evaluate route (POST /audiences/evaluate) and snapshot retrieval route (GET /audiences/snapshots/:snapshot_id)
+- Files created:
+  - `apps/platform/audience/src/routes/snapshots.ts` (snapshotRoutes plugin with GET /audiences/snapshots/:snapshot_id)
+- Files modified:
+  - `apps/platform/audience/src/routes/evaluate.ts` (added POST /audiences/evaluate inline route with snapshot:true/false modes)
+  - `apps/platform/audience/src/app.ts` (registered snapshotRoutes)
+- **Learnings for future iterations:**
+  - Inline evaluate with `snapshot:false` does pure in-memory filter evaluation — no DB writes at all
+  - Filter mismatch check for inline snapshots uses `JSON.stringify` comparison on both existing and incoming filter
+  - The `snapshot` body param defaults to `false` when not provided
+  - Snapshot retrieval returns `segment_id: null` and `segment_version: null` for inline snapshots (no named segment)
+  - Route plugins can instantiate their own FilterEvaluator for inline paths independent of app-level instances
+---
+
+## 2026-04-01 - US-010
+- Implemented BullMQ snapshot cleanup: per-snapshot delayed job queue + hourly safety-net sweep worker
+- Files created:
+  - `apps/platform/audience/src/services/snapshot-cleanup.ts` (createSnapshotCleanupQueue, enqueueSnapshotCleanup, createSnapshotCleanupWorker)
+  - `apps/platform/audience/src/services/snapshot-cleanup-sweep.ts` (createCleanupSweepWorker with repeatable hourly job)
+- Files modified:
+  - `apps/platform/audience/src/app.ts` (accepts cleanupQueue as 3rd param, wires real enqueueCleanup, closes queue onClose)
+  - `apps/platform/audience/src/index.ts` (creates queue + both workers, starts workers after listen, closes workers on SIGTERM)
+- **Learnings for future iterations:**
+  - BullMQ Worker with `autorun: false` requires explicit `worker.run()` call — use this to control startup timing
+  - Sweep worker creates its own Queue internally to add the repeatable job — BullMQ deduplicates repeatables by key
+  - `buildApp` now takes 3 args (db, redis, cleanupQueue) — update test setup accordingly in US-011/US-012
+  - DELETE on audience_snapshots cascades to audience_snapshot_members via ON DELETE CASCADE
+---
+
+## 2026-04-01 - US-011
+- Implemented 4 unit test files with 20 tests total covering segment repository cache, filter evaluator wrapper, snapshot manager batch logic, and versioning
+- Files created:
+  - `apps/platform/audience/test/unit/segment-repository.test.ts` (5 tests: cache hit, TTL expiry, draft returns null, no active_version returns null, invalidate)
+  - `apps/platform/audience/test/unit/filter-evaluator.test.ts` (4 tests: eq match, temporal filter, EvalContext injection, error passthrough)
+  - `apps/platform/audience/test/unit/snapshot-manager.test.ts` (7 tests: first batch, second batch, seal+cleanup, filter miss, duplicate entity, cap exceeded, segment mismatch)
+  - `apps/platform/audience/test/unit/versioning.test.ts` (4 tests: overwrite draft, increment+create version, activate, disable)
+- **Learnings for future iterations:**
+  - SegmentRepository cache can be manipulated via `(repo as any).cache` Map for TTL tests
+  - Mock @platform/filter-engine with `vi.mock()` at module level, then import the mock for assertions
+  - SnapshotsRepository mock needs all methods even if not tested — TypeScript won't complain with `as unknown as` cast
+  - Versioning tests work well at the repository method level rather than route handler level — simpler mock setup
+  - `updateStatus` without `activeVersion` param should NOT include `active_version` in the update object — use `expect.not.objectContaining`
+---
+
+## 2026-04-01 - US-012
+- Implemented 5 integration test files: setup.ts, segments.test.ts, evaluate.test.ts, check.test.ts, inline-edge-cases.test.ts
+- 28 integration tests covering: segment CRUD lifecycle, named segment batch evaluate flow, inline evaluate, membership check, pagination, status filtering, snapshot deduplication, sealed snapshot rejection, 100k cap, cross-segment pollution, filter mismatch, edge cases
+- Files created:
+  - `apps/platform/audience/test/integration/setup.ts` (setupTestApp, truncateTables, createTestDb, runMigrations)
+  - `apps/platform/audience/test/integration/segments.test.ts` (11 tests: create, reject no filter, draft GET, PUT draft overwrite, activate, GET after activate, PUT after activate creates v2, disable, status filter, multi-status filter, pagination)
+  - `apps/platform/audience/test/integration/evaluate.test.ts` (9 tests: full named flow, accumulating partial, inline no-snapshot, inline with snapshot null segment, dedup entity, sealed reject, >1000 413, 100k cap, cross-segment mismatch)
+  - `apps/platform/audience/test/integration/check.test.ts` (4 tests: match true, match false, draft 404, disabled 404)
+  - `apps/platform/audience/test/integration/inline-edge-cases.test.ts` (4 tests: snapshot:false+done:false, snapshot:true no id, filter mismatch, health)
+- **Learnings for future iterations:**
+  - Use `describe.skipIf(!DB_URL)` pattern for integration tests requiring real Postgres/Redis
+  - Integration test setup: `setupTestApp()` creates real Knex + Redis + BullMQ Queue, runs migrations, builds app
+  - `truncateTables` in `beforeEach` with `CASCADE` clears all 4 tables between tests
+  - For 100k cap test: insert one entity via API, then manually UPDATE matched_count to 99999 via direct DB access
+  - `app.segmentRepository.invalidate(id)` needed in check tests after disabling to bypass 30s cache
+  - All integration tests skip cleanly when DATABASE_URL is not set (28 skipped, 0 failed)
+---
+
+## 2026-04-01 - US-013
+- Implemented 3 integration test files: cleanup.test.ts, error-format.test.ts, filter-snapshot-audit.test.ts
+- 10 integration tests covering: snapshot cleanup with cascade delete, cleanup on non-existent snapshot, safety-net sweep of expired snapshots, JSON:API error format validation (400/404/413/MISSING_SNAPSHOT_ID/NO_FILTER_VERSION), filter_snapshot audit (snapshot retains original filter after segment update, new evaluate uses new filter)
+- Files created:
+  - `apps/platform/audience/test/integration/cleanup.test.ts` (3 tests)
+  - `apps/platform/audience/test/integration/error-format.test.ts` (5 tests)
+  - `apps/platform/audience/test/integration/filter-snapshot-audit.test.ts` (2 tests)
+- **Learnings for future iterations:**
+  - Cleanup tests: directly execute the DELETE query logic rather than trying to spin up BullMQ workers — simpler and more deterministic
+  - For expired snapshot sweep test: use `ctx.db.raw("NOW() - interval '1 minute'")` to set expires_at in the past
+  - NO_FILTER_VERSION test: insert segment row directly into DB without version row to test the edge case
+  - Filter snapshot audit: after PUT + activate, must call `ctx.app.segmentRepository.invalidate(id)` to clear cache before next evaluate
+  - Knex returns jsonb columns as parsed JS objects — no need for JSON.parse when comparing filter_snapshot
+---
