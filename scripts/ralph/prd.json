@@ -87,7 +87,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Use raw pg PoolClient (not Knex) for the transaction-level operations so handlers can join inserts and upserts in a single BEGIN/COMMIT block. The insertEvent return value (inserted: boolean) is the idempotency gate: handlers skip the rollup write when inserted=false."
     },
     {
@@ -103,7 +103,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

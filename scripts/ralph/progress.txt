@@ -1,3 +1,28 @@
+## 2026-04-02 - US-006
+- Created src/handlers/lead-created.ts: extracts location_id + channel from payload, inserts analytics_events row (entity_type='lead'), increments metrics_leads_daily.count in one transaction
+- Created src/handlers/lead-archived.ts: extracts location_id, hardcodes channel='unknown', increments metrics_leads_daily.archived
+- Created src/handlers/lead-converted.ts: extracts location_id + channel, increments metrics_conversions_daily.count
+- All three handlers use pool.connect() + BEGIN/COMMIT, call insertEvent, gate rollup on inserted=true
+- Also rebuilt packages/@ortho/event-bus (dist was stale — event_id field wasn't in compiled types)
+- Files changed: apps/platform/analytics/src/handlers/lead-created.ts, lead-archived.ts, lead-converted.ts; packages/@ortho/event-bus/dist/types.d.ts
+- **Learnings for future iterations:**
+  - After adding fields to @ortho/event-bus types.ts, must run `npm run build` in that package to update dist/ before dependent services can typecheck
+  - occurred_at is read from payload['occurred_at'] (string → Date) with fallback to new Date(); date string for rollup keys derived via .toISOString().slice(0, 10)
+  - All handlers import OrthoEvent from @ortho/event-bus and Pool from pg (not PoolClient)
+---
+
+## 2026-04-02 - US-005
+- Created src/repositories/events.ts: insertEvent using INSERT ... ON CONFLICT (event_id) DO NOTHING; returns { inserted: boolean }
+- Created src/repositories/rollups.ts: 8 typed upsert functions (upsertLeadDaily, upsertPipelineDaily, upsertConversionDaily, upsertMessageDaily, upsertAdSpendDaily, upsertCampaignDaily, upsertReferralDaily, upsertCoordinatorDaily)
+- All increment upserts use ON CONFLICT DO UPDATE SET col = table.col + EXCLUDED.col pattern
+- upsertAdSpendDaily overwrites full row (not increment) per spec
+- Files changed: apps/platform/analytics/src/repositories/events.ts, apps/platform/analytics/src/repositories/rollups.ts
+- **Learnings for future iterations:**
+  - insertEvent returns { inserted: boolean } by checking rowCount > 0 after ON CONFLICT DO NOTHING
+  - All params typed as interfaces and exported — handlers will import these types directly
+  - upsertAdSpendDaily comment documents relaxed idempotency rationale inline
+---
+
 ## 2026-04-02 - US-004
 - Created 002_create_rollup_tables.ts with all 8 rollup tables in platform_analytics schema
 - All tables use knex.raw() for DDL; UNIQUE constraints match spec exactly
