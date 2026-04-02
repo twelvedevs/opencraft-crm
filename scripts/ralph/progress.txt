@@ -14,6 +14,10 @@ Started: Thu Apr  2 14:55:56 UTC 2026
 - All platform services live under `apps/platform/<service-name>/`
 - Workspace refs use `file:../../../packages/@ortho/<pkg>` format
 - Repository pattern: standalone exported async functions with PoolClient as first arg, schema-qualified table names
+- @ortho/types must be built (`npm run build` in packages/@ortho/types) before dependent services can typecheck against it
+- ConnectorRegistry is a value (Map), not a type — use `typeof ConnectorRegistry` for parameter types in workers/services
+- Connectors handle token decryption internally — callers of fetchSpend/fetchSpendRange don't need encryption keys
+- ioredis: use `{ Redis }` named import (not default import) — consistent across all services
 ---
 
 ## 2026-04-02 - US-001
@@ -166,4 +170,163 @@ Started: Thu Apr  2 14:55:56 UTC 2026
   - Meta has no token refresh flow — refreshTokens() throws, caller must handle reconnect
   - MetaInsightRow returns string values for spend/impressions/clicks — must parseFloat/parseInt when mapping to SpendRecord
   - Registration in ConnectorRegistry happens in index.ts at startup (not in the connector module itself) — US-024 will wire this up
+---
+
+## 2026-04-02 - US-015
+- Created event publisher wrappers: publishAdLeadReceived and publishAdSpendSynced in src/services/event-publisher.ts
+- Created createBus() factory in src/services/event-bus.ts (publish-only, no bus.start())
+- Files created: apps/platform/integration-hub/src/services/{event-publisher.ts, event-bus.ts}
+- **Learnings for future iterations:**
+  - Follow messaging service pattern: publisher functions take EventBus as first arg, typed payload as second, cast payload to Record<string,unknown>
+  - @ortho/types package must be built (`npm run build` in packages/@ortho/types) before integration-hub typecheck can resolve its types
+  - createEventBus() from @ortho/event-bus reads EVENT_BUS_DRIVER env var internally — no need to pass config
+  - Integration Hub is publish-only (spec §2.1) — never call bus.start() which sets up subscriptions/consumers
+---
+
+## 2026-04-02 - US-016
+- Created poll-ad-spend BullMQ worker and poll-scheduler service
+- Worker: loads account, calls connector.fetchSpend for today+yesterday, groups by location via campaign_location_mappings, publishes ad_spend.synced events per (platform, location_id, date)
+- On success: updates last_polled_at; on failure: sets status='error' with last_error
+- Poll scheduler: upsertPollJob creates 4h repeatable job, removePollJob removes it
+- Files created: apps/platform/integration-hub/src/jobs/poll-ad-spend.ts, apps/platform/integration-hub/src/services/poll-scheduler.ts
+- **Learnings for future iterations:**
+  - ConnectorRegistry is a value (Map instance), not a type — use `typeof ConnectorRegistry` when typing parameters
+  - Connectors handle their own token decryption internally (in fetchSpend/fetchSpendRange) — workers don't need the encryption key
+  - BullMQ Worker constructor takes `{ connection: { host, port } }` for Redis config
+  - poll-scheduler also exports removePollJob for account disconnection (US-020 will need this)
+  - Error handling pattern: catch in worker, set account error via separate DB connection (original may be in bad state), then re-throw for BullMQ retry
+---
+
+## 2026-04-02 - US-017
+- Created refresh-token BullMQ worker and scheduleTokenRefresh/removeTokenRefreshJob helpers
+- Worker: loads account, calls connector.refreshTokens(), encrypts new tokens, updates DB via accountsRepo.updateTokens, schedules next refresh 30min before new expiry
+- On failure: sets status='error' with last_error via separate DB connection, re-throws for BullMQ retry
+- scheduleTokenRefresh: adds delayed job with ID `refresh-token:{account.id}`, removes existing job first to prevent duplicates
+- removeTokenRefreshJob: gets job by ID and removes it (for account disconnection)
+- Files created: apps/platform/integration-hub/src/jobs/refresh-token.ts
+- **Learnings for future iterations:**
+  - scheduleTokenRefresh and removeTokenRefreshJob live in refresh-token.ts (not poll-scheduler.ts) to keep scheduling co-located with the worker
+  - Worker needs credentialEncryptionKey to encrypt new tokens (connectors decrypt internally but new tokens from OAuth response are plaintext)
+  - Worker needs refreshQueue reference to schedule next job after successful refresh
+  - Meta accounts should never have scheduleTokenRefresh called (Meta throws on refreshTokens — no refresh flow)
+  - BullMQ delayed jobs use jobId for dedup — remove existing job before adding new one with same ID
+---
+
+## 2026-04-02 - US-018
+- Created process-lead-webhook BullMQ worker at src/jobs/process-lead-webhook.ts
+- Worker: receives { platform, leadEvent }, looks up location_id from campaign_location_mappings by campaign_id, publishes ad_lead.received event with full payload
+- Job deduplication: enqueuing route (US-022) sets jobId to `{platform}:{external_lead_id}` — BullMQ rejects duplicate IDs
+- Files created: apps/platform/integration-hub/src/jobs/process-lead-webhook.ts
+- **Learnings for future iterations:**
+  - process-lead-webhook worker doesn't know the account_id — it queries campaign_location_mappings by campaign_id directly (campaign_id is globally unique enough across platforms)
+  - Worker signature includes redisConnection param (like other workers) — follows pattern from poll-ad-spend and refresh-token workers
+  - AdLeadReceivedPayload.location_id is `string | null` — set to null when no mapping found (Lead Service handles unmapped leads)
+  - This worker is simpler than poll-ad-spend (no error state on accounts) — just look up, publish, done
+---
+
+## 2026-04-02 - US-019
+- Created backfill-ad-spend BullMQ worker at src/jobs/backfill-ad-spend.ts
+- Worker: loads backfill_job row + account, divides date range into 7-day chunks, calls fetchSpendRange per chunk, groups by location via campaign_location_mappings, publishes ad_spend.synced events, tracks progress via chunks_done
+- On complete: setCompleted(backfill_job_id); on error: setFailed with error message via separate DB connection
+- Files created: apps/platform/integration-hub/src/jobs/backfill-ad-spend.ts
+- **Learnings for future iterations:**
+  - chunkDateRange helper splits inclusive date ranges into 7-day windows — reusable utility pattern
+  - Backfill worker follows same error handling pattern as poll-ad-spend: catch, set error via separate client2, re-throw
+  - Mappings are loaded once before the chunk loop (not per-chunk) since they don't change during a backfill
+  - For range queries, synced_date in the event payload uses "from..to" format to indicate a range
+---
+
+## 2026-04-02 - US-020
+- Created OAuth route handlers: GET /integrations/connect/:platform, GET /integrations/oauth/:platform/callback, DELETE /integrations/accounts/:id
+- Connect: validates platform via getConnector (400 if unknown), generates PKCE state, redirects to authorization URL
+- Callback: verifies state (400 if invalid/expired), exchanges code for tokens, encrypts tokens, inserts account, sets up poll job + token refresh (Google only), redirects or returns JSON
+- Disconnect: loads account (404 if not found), removes refresh + poll jobs, deletes account (cascade), returns 204
+- Files created: apps/platform/integration-hub/src/routes/oauth.ts
+- **Learnings for future iterations:**
+  - Route files export an async function taking (fastify, opts) — opts carries pool, queues, encryption key, etc. (Fastify plugin pattern)
+  - Routes directory created at src/routes/ — future stories (US-021 accounts, US-022 webhooks, US-023 backfill) go here
+  - oauthRoutes uses opts.redirectUri to decide between redirect and JSON response on callback
+  - scheduleTokenRefresh is only called for non-Meta accounts (Meta has no refresh flow)
+  - removePollJob uses pollQueue.removeJobScheduler (not removeRepeatable) — matches upsertJobScheduler API
+---
+
+## 2026-04-02 - US-021
+- Created account management route handlers: GET /integrations/accounts, GET /integrations/accounts/:id/campaigns, PUT /integrations/accounts/:id/mappings
+- Added listCampaigns() methods to GoogleAdsClient (GAQL query for ENABLED campaigns) and MetaApiClient (GET /campaigns endpoint with ACTIVE/PAUSED filter)
+- GET /accounts: returns safe fields only (no access_token, refresh_token, token_expires_at)
+- GET /accounts/:id/campaigns: decrypts access_token, creates platform-specific client, fetches live campaigns, merges with existing location mappings
+- PUT /accounts/:id/mappings: validates body with typebox, delegates to mappingsRepo.replaceAll (transactional)
+- Files created: apps/platform/integration-hub/src/routes/accounts.ts
+- Files modified: apps/platform/integration-hub/src/connectors/clients/google-ads-client.ts, apps/platform/integration-hub/src/connectors/clients/meta-api-client.ts
+- **Learnings for future iterations:**
+  - Route handlers create platform-specific clients directly (GoogleAdsClient/MetaApiClient) rather than going through Connector interface — Connector doesn't have a listCampaigns method
+  - GoogleAdsClient.listCampaigns uses GAQL: SELECT campaign.id, campaign.name FROM campaign WHERE campaign.status = 'ENABLED'
+  - MetaApiClient.listCampaigns uses GET /act_{accountId}/campaigns with effective_status filter
+  - Route opts pattern: each route file exports an interface for its dependencies (pool, encryptionKey, etc.) and an async function(fastify, opts)
+  - Typebox Value.Check is used for body validation instead of Fastify schema — keeps validation inline
+---
+
+## 2026-04-02 - US-022
+- Created webhook route handlers: POST /integrations/webhooks/:platform and GET /integrations/webhooks/:platform/verify
+- POST handler: gets connector, verifies webhook signature (403 if invalid), parses lead webhook, stores to failed_webhooks on parse error (still returns 200), enqueues process-lead-webhook jobs with dedup jobId
+- GET verify handler: gets connector, calls verifyChallenge, returns challenge string or 403
+- Raw body access: uses Fastify addContentTypeParser with parseAs: 'buffer' scoped to the webhook plugin — replaces default JSON parser so request.body is a Buffer
+- Files created: apps/platform/integration-hub/src/routes/webhooks.ts
+- **Learnings for future iterations:**
+  - Fastify raw body: use addContentTypeParser('application/json', { parseAs: 'buffer' }) scoped to the plugin to get Buffer as request.body — no need for @fastify/raw-body plugin
+  - Webhook routes are registered WITHOUT JWT auth (separate from the JWT-protected scope in app.ts)
+  - Parse errors on webhooks should still return 200 (to avoid retries from the platform) — store the raw body in failed_webhooks for debugging
+  - Job deduplication: BullMQ silently rejects jobs with duplicate jobId — use `{platform}:{external_lead_id}` for webhook dedup
+---
+
+## 2026-04-02 - US-023
+- Created backfill route handlers: POST /integrations/accounts/:id/backfill and GET /integrations/accounts/:id/backfill/:job_id
+- POST: validates body with typebox (YYYY-MM-DD pattern), enforces max 24-month range, computes chunks_total as ceil((days+1)/7), inserts backfill_jobs row, enqueues backfill-ad-spend BullMQ job, returns 201 { job_id }
+- GET: loads backfill job, verifies account_id match (404 if mismatch), returns status + progress + optional error
+- Files created: apps/platform/integration-hub/src/routes/backfill.ts
+- **Learnings for future iterations:**
+  - BackfillRoutesOpts needs pool + backfillQueue (Queue type from bullmq) — simpler than other routes since no encryption key needed
+  - Date range validation: max 24 months ≈ 744 days (24 * 31); use pattern regex in typebox for YYYY-MM-DD format
+  - GET backfill status: verify account_id matches job.account_id to prevent cross-account access
+  - Route follows same pattern as accounts.ts: export interface for opts + async function(fastify, opts)
+---
+
+## 2026-04-02 - US-024
+- Created app.ts with buildApp() function: registers @fastify/sensible, @fastify/rate-limit, jwtAuthPlugin on scoped routes, webhook routes outside JWT scope, health endpoint
+- Rewrote index.ts with full service wiring: pg Pool, ioredis, 4 BullMQ queues, 4 workers, event bus (publish-only), connector registry (Google Ads + Meta), startup reconciliation, graceful shutdown
+- Startup reconciliation: loads active accounts, upserts poll jobs, schedules token refresh for non-Meta accounts with token_expires_at
+- Files created: apps/platform/integration-hub/src/app.ts
+- Files modified: apps/platform/integration-hub/src/index.ts
+- **Learnings for future iterations:**
+  - ioredis import: use `{ Redis }` named import (not default), consistent with all other services in the monorepo
+  - BullMQ connection config: extract host/port from ioredis options for passing to Worker constructors
+  - buildApp() takes a flat options object with sub-objects for each route group — keeps app.ts decoupled from env.ts
+  - Webhook routes must be registered in a separate Fastify scope from JWT-protected routes (registered first, no auth plugin)
+  - Startup reconciliation also schedules token refresh for Google Ads accounts (not just poll jobs) to handle service restarts
+  - Graceful shutdown order: close Fastify first (stop accepting requests), then workers, then queues, then Redis, then pg pool
+---
+
+## 2026-04-02 - US-025
+- Created unit tests for credential-store (6 tests) and oauth-state (8 tests) — 14 tests total, all passing
+- credential-store tests: round-trip, IV randomness, wrong key, tampered ciphertext, malformed base64, missing fields
+- oauth-state tests: createState shape, verifyState round-trip, tampered signature, tampered payload, wrong secret, expired state, missing signature, boundary (9m59s still valid)
+- Files created: apps/platform/integration-hub/test/unit/credential-store.test.ts, apps/platform/integration-hub/test/unit/oauth-state.test.ts
+- **Learnings for future iterations:**
+  - credential-store: encrypting empty string produces empty hex ciphertext which is falsy — decrypt's `!parsed.ciphertext` check rejects it. Avoid testing empty-string encryption.
+  - oauth-state tests: use vi.spyOn(Date, 'now') to mock time for expiry tests; vi.restoreAllMocks() in afterEach to clean up
+  - Tests import from `../../src/services/<module>.js` (ESM .js extension required)
+  - vitest run with specific file paths: `npm run test -- test/unit/file.test.ts`
+---
+
+## 2026-04-02 - US-026
+- Created unit tests for GoogleAdsConnector (9 tests) and MetaConnector (12 tests) — 21 tests total, all passing
+- google-ads-connector tests: verifyWebhook valid/invalid/missing signature, parseLeadWebhook well-formed/not-object/missing-leads, verifyChallenge match/no-match/no-challenge
+- meta-connector tests: verifyWebhook valid/tampered/missing/malformed, parseLeadWebhook batched-entries/empty-changes/non-leadgen-filter/not-object/missing-entry, verifyChallenge match/no-match/no-challenge
+- Files created: apps/platform/integration-hub/test/unit/google-ads-connector.test.ts, apps/platform/integration-hub/test/unit/meta-connector.test.ts
+- **Learnings for future iterations:**
+  - Connector tests don't need mocks — verifyWebhook, parseLeadWebhook, verifyChallenge are pure/synchronous functions that can be tested directly
+  - GoogleAdsConnector config uses webhookVerifyToken for HMAC; MetaConnector uses appSecret for HMAC (different keys for signature verification)
+  - Meta X-Hub-Signature-256 format is `sha256=<hex>` — must include the prefix in test fixtures
+  - Google X-Goog-Signature is raw hex (no prefix)
+  - Connector constructor takes a config object — easy to inject test values without env vars
 ---
