@@ -1,5 +1,10 @@
 # Ortho Prompts
 
+#### Claude Code Docker container
+
+https://code.claude.com/docs/en/devcontainer
+
+#### Prompts
 
 `claude -p 'Load the prd-questions skill and generate questions for tasks explained in @docs/00-intro.md & @docs/01-architecture.md ' --dangerously-skip-permissions`
 
@@ -213,6 +218,34 @@ Store document in
 Update docs NAVIGATOR
 ```
 
+packages/@platform/filter-engine
+
+Code review:
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md
+
+Do code-review of the package "filter-engine" ( packages/@platform/filter-engine ) either it completely satisfies requirements of the Audience Engine.
+```
+
+Docs:
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md
+
+Scan packages implementation in:
+- packages/@platform/filter-engine
+
+Write package API description so that other consumers of these packages know how to use it. Provide several examples. Format should be similar to ADR.
+Store document in
+- docs/arch/adr-filter-engine.md
+
+Update docs NAVIGATOR
+```
 
 
 #### Notification Service
@@ -286,9 +319,6 @@ Write implementation plan for Phase 1, store to prd.json
 
 
 ---
-
-
-
 #### Nurturing Engine
 
 ```
@@ -329,7 +359,6 @@ Write implementation plan for Phase 1, store to prd.json
 - For loop:
 - `claude -p 'Load the ralph skill. Read docs: - overall platform & product architecture at @docs/01-platform-arch-design.md ; - component architecture design @docs/superpowers/specs/2026-03-30-nurturing-engine-updated-design.md ; - implementation phases @docs/superpowers/specs/2026-03-30-nurturing-engine-phases.md . Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest. Write implementation plan for Phase 1, store to ./scripts/ralph/prd.json ' --dangerously-skip-permissions`
 
-
 Alternative:
 ```bash
 time claude -p 'Load the ralph skill. \
@@ -353,3 +382,162 @@ Load the ralph skill. We have number of PRD files scripts/ralph/prd-phase-*.json
 ```
 
 
+---
+#### Messaging Service
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-messaging-service-design.md
+```
+- `claude -p 'Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-messaging-service-design.md' --dangerously-skip-permissions`
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-messaging-service-design.md
+- clarifying questions and answers @tasks/prd-questions-messaging-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-messaging-service-design.md with clarifications you got from @tasks/prd-questions-messaging-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-03-30-messaging-service-updated-design.md
+```
+
+V1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-30-messaging-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest.
+Write implementation plan, store to prd.json 
+```
+
+V2 -- if V1 failed
+```
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-30-messaging-service-updated-design.md
+We need to plan implementation of this component in phases. Just suggest me list of phases with deliverables. No need to write detailed implementation plan yet.
+Keep UI / React component aside, work only on backend.
+Write resulting list of phases into docs/superpowers/specs/2026-03-30-messaging-service-phases.md
+```
+For loop:
+```bash
+time claude -p 'Load the ralph skill. \
+Read docs: \
+- overall platform & product architecture at @docs/01-platform-arch-design.md ; \
+- component architecture design @docs/superpowers/specs/2026-03-30-messaging-service-updated-design.md ; \
+- implementation phases @docs/superpowers/specs/2026-03-30-messaging-service-phases.md . \
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest. \
+Write implementation plan for Phase 2, store to ./scripts/ralph/prd-phase-2.json \
+' --dangerously-skip-permissions
+```
+
+---
+#### Audience Engine
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-audience-engine-design.md
+```
+- `claude -p 'Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-audience-engine-design.md' --dangerously-skip-permissions`
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-audience-engine-design.md
+- clarifying questions and answers @tasks/prd-questions-audience-engine.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-audience-engine-design.md with clarifications you got from @tasks/prd-questions-audience-engine.md
+Store updated component arch design at file @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md
+```
+
+V1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest.
+Write implementation plan, store to prd.json 
+```
+
+V2 -- if V1 failed
+```
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md
+We need to plan implementation of this component in phases. Just suggest me list of phases with deliverables. No need to write detailed implementation plan yet.
+Keep UI / React component aside, work only on backend.
+Write resulting list of phases into docs/superpowers/specs/2026-03-30-audience-engine-phases.md
+```
+
+For loop:
+```bash
+time claude -p 'Load the ralph skill. \
+Read docs: \
+- overall platform & product architecture at @docs/01-platform-arch-design.md ; \
+- component architecture design @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md ; \
+- implementation phases @docs/superpowers/specs/2026-03-30-audience-engine-phases.md . \
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest. \
+Write implementation plan for Phase 2, store to ./scripts/ralph/prd-phase-2.json \
+' --dangerously-skip-permissions
+```
+
+---
+#### AI Service
+
+1. Find what is origin design spec doc
+2. Use skill 'prd-questions' to generate questions
+3. Answer questions
+4. Use skill 'superpowers:brainstorming' to generated updated design spec doc
+5. Use skill 'ralph' to generate prd.json
+6. Run script ralph-cc.sh to implement by the plan
+7. 
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-ai-service-design.md
+```
+- `claude -p 'Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-ai-service-design.md' --dangerously-skip-permissions`
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-ai-service-design.md
+- clarifying questions and answers @tasks/prd-questions-ai-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-ai-service-design.md with clarifications you got from @tasks/prd-questions-ai-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-02-ai-service-updated-design.md
+```
+
+V1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-02-ai-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest.
+Write implementation plan, store to prd.json 
+```
+
+V2 -- if V1 failed
+```
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md
+We need to plan implementation of this component in phases. Just suggest me list of phases with deliverables. No need to write detailed implementation plan yet.
+Keep UI / React component aside, work only on backend.
+Write resulting list of phases into docs/superpowers/specs/2026-03-30-audience-engine-phases.md
+```
+
+For loop:
+```bash
+time claude -p 'Load the ralph skill. \
+Read docs: \
+- overall platform & product architecture at @docs/01-platform-arch-design.md ; \
+- component architecture design @docs/superpowers/specs/2026-03-30-audience-engine-updated-design.md ; \
+- implementation phases @docs/superpowers/specs/2026-03-30-audience-engine-phases.md . \
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest. \
+Write implementation plan for Phase 2, store to ./scripts/ralph/prd-phase-2.json \
+' --dangerously-skip-permissions
+```
