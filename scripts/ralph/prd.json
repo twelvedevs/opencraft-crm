@@ -284,7 +284,7 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "The recompute job must support all 8 rollup table names as valid values for job.data.table. For partition-maintenance: the partition names follow the pattern analytics_events_YYYY_MM. Use CREATE TABLE IF NOT EXISTS analytics_events_YYYY_MM PARTITION OF analytics_events FOR VALUES FROM ('YYYY-MM-01') TO ('YYYY-MM+1-01')."
     },
     {

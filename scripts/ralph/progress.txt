@@ -209,3 +209,17 @@ Started: Thu Apr  2 14:38:21 +03 2026
   - granularity=total drops date from SELECT and GROUP BY entirely
   - Type.Intersect([SharedQuerySchema, Type.Object({...})]) used to extend shared schema per route
 ---
+
+## 2026-04-02 - US-017
+- Created src/jobs/partition-maintenance.ts: exports registerPartitionMaintenanceJob(queue: Queue, pool: Pool): void; schedules repeatable job with pattern '1 0 1 * *' (BullMQ v5 uses 'pattern' not 'cron'); Worker runs runPartitionMaintenance: CREATE TABLE IF NOT EXISTS next-month partition; CTE-based row migration from analytics_events_default (DELETE+RETURNING then INSERT via parent → routes to new partition); DROP TABLE IF EXISTS 25-months-ago partition
+- Created src/jobs/recompute-rollups.ts: exports createRecomputeRollupsWorker(queue: Queue, pool: Pool): Worker; VALID_TABLES set of all 8 rollup tables; worker reads table+date_range from job.data; DELETE existing rows then re-aggregate from analytics_events; returns { rows_written: number }; progress reported at 10% (start) and 100% (done)
+- Updated src/index.ts: creates analytics:maintenance and analytics:recompute Queue instances; calls both register functions; queues use shared queueConnection (ioredis), Workers use their own dedicated connections internally
+- Files changed: src/jobs/partition-maintenance.ts, src/jobs/recompute-rollups.ts, src/index.ts
+- **Learnings for future iterations:**
+  - BullMQ v5 uses `pattern` (not `cron`) in RepeatOptions — `repeat: { pattern: '0 1 1 * *' }`
+  - Moving rows from default partition: CTE approach — DELETE FROM analytics_events_default RETURNING * → INSERT INTO analytics_events (parent table routes to correct partition)
+  - Workers need dedicated Redis connection with maxRetriesPerRequest: null and enableReadyCheck: false
+  - Queue instances can share a connection (non-blocking), but Workers must have their own
+  - coordinator_id (triggered_by) is in properties not dimensions — recompute queries use properties->>'triggered_by'
+  - ad_spend synced_date is in properties->>'synced_date', not occurred_at — DELETE uses `date` column which stores synced_date
+---
