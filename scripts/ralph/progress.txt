@@ -1,3 +1,20 @@
+## 2026-04-02 - US-012
+- Created src/plugins/api-key-auth.ts: Fastify plugin registered with fastify-plugin; adds onRequest hook; handles ak_-prefixed API keys
+- SHA256 hash of key used as in-memory Map cache key; TTL from API_KEY_CACHE_TTL_SECONDS (default 60s)
+- On cache miss: POST to IDENTITY_SERVICE_URL/identity/api-keys/validate; caches valid result; returns 401 on 401/403 or network error
+- On cache hit: skips Identity Service call entirely
+- Injects X-User-Role and X-Api-Key-Permissions headers from validation response for downstream auth middleware
+- Non-ak_ Authorization headers pass through untouched
+- Added fastify-plugin ^5.0.0 to package.json dependencies; npm install updated package-lock.json
+- Files changed: apps/platform/analytics/src/plugins/api-key-auth.ts, apps/platform/analytics/package.json, apps/platform/analytics/package-lock.json
+- **Learnings for future iterations:**
+  - fastify-plugin must be added as a direct dep (^5.0.0 for fastify v5 compatibility)
+  - In-memory Map TTL cache: store { role, permissions, expiresAt: Date.now() + ttl*1000 }; check expiresAt > now on read
+  - Use `import fp from 'fastify-plugin'` (default import) — CJS package with esModuleInterop
+  - request.headers can be mutated directly to inject headers for downstream hooks
+  - Node 24 has built-in fetch — no need for node-fetch or axios
+---
+
 ## 2026-04-02 - US-010
 - Created src/handlers/referral-converted.ts: extracts location_id, writes to both metrics_referrals_daily (count+1) AND metrics_conversions_daily (channel='referral', count+1) in one transaction; both rollup writes skipped if event_id is duplicate
 - Created src/handlers/ad-spend-synced.ts: extracts platform, location_id, synced_date; iterates records[] array; upserts metrics_ad_spend_daily for each record with ON CONFLICT DO UPDATE (overwrite); relaxed idempotency — rollup always runs regardless of insertEvent result
@@ -94,6 +111,16 @@
   - Use knex.raw() for all partitioning DDL; Knex schema builder has no native support
   - Default partition is created as a separate CREATE TABLE ... PARTITION OF ... DEFAULT statement
   - down() must drop default partition BEFORE the parent table (dependency order)
+---
+
+## 2026-04-02 - US-011
+- Created src/services/event-router.ts: switch on event.event_type routing to all 13 handlers; unknown types logged at debug level, not thrown
+- Created src/services/sqs-consumer.ts: reads SQS_CONCURRENCY env (default 5), creates p-limit limiter, calls createEventBus(), subscribes all 13 event types, returns { start, stop } delegating to bus
+- Files changed: apps/platform/analytics/src/services/event-router.ts, sqs-consumer.ts
+- **Learnings for future iterations:**
+  - p-limit ^6 is ESM-only; import as `import pLimit from 'p-limit'` (default import)
+  - createEventBus() reads EVENT_BUS_DRIVER env at runtime; tests that import sqs-consumer must set that env or use MockDriver
+  - bus.subscribe() must be called before bus.start() — EventBusImpl throws if subscribe() is called after start()
 ---
 
 ## Codebase Patterns

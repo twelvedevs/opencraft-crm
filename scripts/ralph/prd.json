@@ -180,7 +180,7 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "The 13 event types to subscribe: lead.created, lead.stage_changed, lead.archived, lead.converted, message.delivered, message.failed, opt_out.received, campaign.sent, campaign.delivered, email.opened, email.clicked, referral.converted, ad_spend.synced. Unknown types are handled in the default case of the switch in event-router.ts."
     },
     {
@@ -199,7 +199,7 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Do NOT modify @ortho/auth-middleware — this plugin is Analytics Service-specific. Use Node's built-in crypto.createHash('sha256') for the cache key. A simple Map with TTL (or lru-cache) is sufficient — no Redis needed for the auth cache."
     },
     {
