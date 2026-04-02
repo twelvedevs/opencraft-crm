@@ -30,7 +30,8 @@
       "Bash(find /workspace -maxdepth 3 -name knexfile.* -type f)",
       "Bash(mkdir -p /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-04-01-messaging-service)",
       "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/prd.json /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-04-01-messaging-service/)",
-      "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/progress.txt /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-04-01-messaging-service/)"
+      "Bash(cp /Users/andrey/dev/pre-sale/ortho/scripts/ralph/progress.txt /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-04-01-messaging-service/)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(k,':',v\\) for k,v in d.get\\('dependencies',{}\\).items\\(\\)]\")"
     ]
   }
 }
