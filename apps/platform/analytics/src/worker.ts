@@ -1,18 +1,14 @@
 import { env } from './env.js';
 import { Pool } from 'pg';
-import { buildApp } from './app.js';
 import { createSqsConsumer } from './services/sqs-consumer.js';
 
 const pool = new Pool({ connectionString: env.DATABASE_URL });
-const app = await buildApp(pool);
 const consumer = createSqsConsumer(pool);
 
-await app.listen({ port: env.PORT, host: '0.0.0.0' });
 await consumer.start();
 
 process.on('SIGTERM', async () => {
   await consumer.stop();
-  await app.close();
   await pool.end();
   process.exit(0);
 });
