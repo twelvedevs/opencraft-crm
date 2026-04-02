@@ -43,6 +43,45 @@ export class MetaApiClient {
     return this.fetchInsights(from, to);
   }
 
+  async listCampaigns(): Promise<{ campaign_id: string; campaign_name: string }[]> {
+    const params = new URLSearchParams({
+      fields: 'id,name',
+      effective_status: '["ACTIVE","PAUSED"]',
+      access_token: this.accessToken,
+    });
+
+    const results: { campaign_id: string; campaign_name: string }[] = [];
+    let nextUrl: string | undefined =
+      `${BASE_URL}/act_${this.accountId}/campaigns?${params.toString()}`;
+
+    while (nextUrl) {
+      const res = await fetch(nextUrl);
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as MetaInsightsResponse;
+        const metaMsg = data.error?.message ?? '';
+        throw new Error(`Meta API error ${res.status}${metaMsg ? `: ${metaMsg}` : ''}`);
+      }
+
+      const data = (await res.json()) as {
+        data?: { id?: string; name?: string }[];
+        paging?: { next?: string };
+      };
+
+      if (data.data) {
+        for (const row of data.data) {
+          results.push({
+            campaign_id: row.id ?? '',
+            campaign_name: row.name ?? '',
+          });
+        }
+      }
+
+      nextUrl = data.paging?.next;
+    }
+
+    return results;
+  }
+
   private async fetchInsights(since: string, until: string): Promise<MetaInsightRow[]> {
     const timeRange = JSON.stringify({ since, until });
     const params = new URLSearchParams({

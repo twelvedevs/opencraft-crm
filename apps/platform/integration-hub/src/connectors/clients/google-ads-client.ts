@@ -56,6 +56,44 @@ export class GoogleAdsClient {
     return this.executeSearch(query);
   }
 
+  async listCampaigns(): Promise<{ campaign_id: string; campaign_name: string }[]> {
+    const query = `
+      SELECT campaign.id, campaign.name
+      FROM campaign
+      WHERE campaign.status = 'ENABLED'
+      ORDER BY campaign.name
+    `.trim();
+
+    const results: { campaign_id: string; campaign_name: string }[] = [];
+    const url = `${BASE_URL}/customers/${this.customerId}/googleAds:searchStream`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Google Ads API error ${res.status}: ${text}`);
+    }
+
+    const data = (await res.json()) as GoogleAdsSearchResponse[];
+    for (const batch of data) {
+      if (!batch.results) continue;
+      for (const row of batch.results) {
+        results.push({
+          campaign_id: row.campaign?.id ?? '',
+          campaign_name: row.campaign?.name ?? '',
+        });
+      }
+    }
+
+    return results;
+  }
+
   private async executeSearch(query: string): Promise<CampaignPerformanceRow[]> {
     const rows: CampaignPerformanceRow[] = [];
     let pageToken: string | undefined;
