@@ -300,7 +300,7 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "The admin endpoints are protected by X-Admin-Key header only (shared secret, no JWT required). ADMIN_RECOMPUTE_KEY is a required env var validated in env.ts."
     },
     {

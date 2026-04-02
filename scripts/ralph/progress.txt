@@ -1,3 +1,18 @@
+## 2026-04-02 - US-018
+- Created src/routes/admin.ts: POST /analytics/admin/recompute validates X-Admin-Key against ADMIN_RECOMPUTE_KEY env var (401 on mismatch); body validated with typebox (table must be one of 8 valid rollup table names, date_range required); enqueues BullMQ job named 'recompute' on the provided queue; returns 202 { job_id }
+- GET /analytics/admin/recompute/:job_id validates X-Admin-Key; calls queue.getJob(); returns 404 if not found; maps BullMQ state (waiting/delayed/prioritized → 'pending', active → 'active', completed/failed pass through); returns { job_id, status, rows_written, error }
+- Updated src/app.ts: added Queue import and parameter to buildApp(pool, queue); registered adminRoutes with queue
+- Updated src/index.ts: moved buildApp call after queue creation so recomputeQueue can be passed as second argument
+- Created test/unit/admin.test.ts: 13 tests covering all auth (401 missing/wrong key), validation (400 bad table, missing date_range), happy path POST (202 + job_id enqueue), and GET status for all four states (pending/active/completed/failed)
+- Files changed: src/routes/admin.ts, src/app.ts, src/index.ts, test/unit/admin.test.ts
+- **Learnings for future iterations:**
+  - buildApp now requires two arguments: (pool: Pool, queue: Queue) — pass recomputeQueue from index.ts
+  - BullMQ Queue.getJob(id) returns null for missing jobs; call job.getState() for status string
+  - BullMQ states map: 'waiting'|'delayed'|'prioritized' → 'pending'; 'active' → 'active'; 'completed'/'failed' pass through
+  - X-Admin-Key validated by comparing request.headers['x-admin-key'] directly to env.ADMIN_RECOMPUTE_KEY (no JWT)
+  - vi.mock for env.js must be declared before dynamic import of the module under test when using top-level await import
+---
+
 ## 2026-04-02 - US-016
 - Created src/services/query-builder.ts: pure function buildQuery(params: QueryParams): { sql, bindings }; supports count/sum/avg aggregates; dot-notation (dimensions.channel → (dimensions->>'channel')); period bounds via occurred_at >= $1::date AND occurred_at < ($2::date + INTERVAL '1 day'); equality and IN filters; group_by fields; daily/monthly/total granularity; validates field names against /^[a-z_][a-z0-9_.]*$/i to guard injection
 - Created src/routes/query.ts: POST /analytics/query; validates body with typebox (event_type required, aggregate required, aggregate_field required for sum/avg); prepends event_type as first filter; caps result at 10000 rows with truncated flag; per-route @fastify/rate-limit override: API key callers (ak_ prefix) 100 req/min, JWT/anon callers 10 req/min; key generator hashes API key or extracts JWT sub
