@@ -12,6 +12,7 @@ import { adSpendRoutes } from './routes/metrics/ad-spend.js';
 import { campaignsRoutes } from './routes/metrics/campaigns.js';
 import { referralsRoutes } from './routes/metrics/referrals.js';
 import { coordinatorsRoutes } from './routes/metrics/coordinators.js';
+import { queryRoutes } from './routes/query.js';
 
 export async function buildApp(pool: Pool): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
@@ -29,6 +30,7 @@ export async function buildApp(pool: Pool): Promise<FastifyInstance> {
   await app.register(campaignsRoutes, { pool });
   await app.register(referralsRoutes, { pool });
   await app.register(coordinatorsRoutes, { pool });
+  await app.register(queryRoutes, { pool });
 
   return app;
 }
