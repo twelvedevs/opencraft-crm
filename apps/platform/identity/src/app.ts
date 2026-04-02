@@ -9,6 +9,7 @@ import { sessionRoutes } from './routes/session.js';
 import { jwksRoutes } from './routes/jwks.js';
 import { meRoutes } from './routes/me.js';
 import { usersRoutes } from './routes/users.js';
+import { apiKeysRoutes } from './routes/api-keys.js';
 
 export async function buildApp(
   pool: Pool,
@@ -27,6 +28,7 @@ export async function buildApp(
   await app.register(jwksRoutes);
   await app.register(meRoutes, { pool, provider });
   await app.register(usersRoutes, { pool, provider });
+  await app.register(apiKeysRoutes, { pool });
 
   return app;
 }
