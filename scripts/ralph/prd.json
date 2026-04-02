@@ -216,7 +216,7 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "worker.ts is the standalone ECS task entry point for deployments that separate ingestion from the API. index.ts is the default embedded mode. Both share the same sqs-consumer module from US-011."
     },
     {

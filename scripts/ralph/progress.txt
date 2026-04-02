@@ -1,3 +1,18 @@
+## 2026-04-02 - US-013
+- Created src/env.ts: validates all env vars with typebox; required: DATABASE_URL, SQS_QUEUE_URL, IDENTITY_SERVICE_URL, REDIS_URL, ADMIN_RECOMPUTE_KEY; optional with defaults: PORT (3000), LOG_LEVEL (info), API_KEY_CACHE_TTL_SECONDS (60), SQS_BATCH_SIZE (10), SQS_CONCURRENCY (5), SQS_POLLING_INTERVAL_MS (no default)
+- Created src/routes/health.ts: GET /health always 200 { status: 'ok' }; GET /ready runs SELECT 1 → 200 { status: 'ready' } or 503 { status: 'unavailable', reason }; takes { pool } as plugin options
+- Created src/app.ts: buildApp(pool) registers sensible + apiKeyAuthPlugin + rate-limit + healthRoutes
+- Replaced src/index.ts placeholder: starts HTTP server + SQS consumer concurrently; SIGTERM stops consumer then closes server then ends pool
+- Created src/worker.ts: SQS-only entry point; SIGTERM stops consumer then ends pool
+- Created test/unit/health.test.ts: 3 tests verifying GET /health (200 ok), GET /ready DB up (200 ready), GET /ready DB down (503 unavailable)
+- Files changed: src/env.ts, src/app.ts, src/routes/health.ts, src/index.ts, src/worker.ts, test/unit/health.test.ts
+- **Learnings for future iterations:**
+  - healthRoutes takes `{ pool }` as options (second arg to register) — not a decorator pattern
+  - @fastify/rate-limit v9 registers globally with `await app.register(rateLimit, { max, timeWindow })`
+  - worker.ts uses top-level await (ESM) — same pattern as index.ts but no HTTP server
+  - env.ts follows AI service pattern; parseInt applied in raw object before Value.Check
+---
+
 ## 2026-04-02 - US-012
 - Created src/plugins/api-key-auth.ts: Fastify plugin registered with fastify-plugin; adds onRequest hook; handles ak_-prefixed API keys
 - SHA256 hash of key used as in-memory Map cache key; TTL from API_KEY_CACHE_TTL_SECONDS (default 60s)
