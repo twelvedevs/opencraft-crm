@@ -38,6 +38,7 @@ const EnvSchema = Type.Object({
   GOOGLE_ADS_WEBHOOK_VERIFY_TOKEN: Type.String(),
   META_APP_ID: Type.String(),
   META_APP_SECRET: Type.String(),
+  META_REDIRECT_URI: Type.String(),
   META_WEBHOOK_VERIFY_TOKEN: Type.String(),
   LOG_LEVEL: Type.Optional(Type.String()),
 });
@@ -72,6 +73,7 @@ function parseEnv(): Env {
     GOOGLE_ADS_WEBHOOK_VERIFY_TOKEN: process.env['GOOGLE_ADS_WEBHOOK_VERIFY_TOKEN'],
     META_APP_ID: process.env['META_APP_ID'],
     META_APP_SECRET: process.env['META_APP_SECRET'],
+    META_REDIRECT_URI: process.env['META_REDIRECT_URI'],
     META_WEBHOOK_VERIFY_TOKEN: process.env['META_WEBHOOK_VERIFY_TOKEN'],
     LOG_LEVEL: process.env['LOG_LEVEL'],
   };
