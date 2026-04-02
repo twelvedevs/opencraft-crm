@@ -1,5 +1,5 @@
 # Ralph Progress Log
-Started: Thu Apr  2 00:00:00 UTC 2026
+Started: Thu Apr  2 14:55:56 UTC 2026
 ---
 
 ## Codebase Patterns
@@ -7,50 +7,163 @@ Started: Thu Apr  2 00:00:00 UTC 2026
 - All services: `"type": "module"`, ESM with `.js` extensions in imports
 - tsconfig: ES2022 target, NodeNext module/moduleResolution, strict: true
 - Multi-stage Dockerfile: builder stage compiles TS, runner stage copies dist + node_modules
-- Knex for migrations only; raw pg Pool + PoolClient for runtime queries
+- Knex for migrations only; raw pg Pool + PoolClient for runtime queries (per updated spec)
 - Migrations use `knex.raw()` with schema-qualified table names; first migration creates schema with `IF NOT EXISTS`
 - Run `npm run typecheck` from within the service directory (no monorepo-level runner)
+- google-ads-api npm package requires refresh_token (gRPC); for access_token use Google Ads REST API directly
 - All platform services live under `apps/platform/<service-name>/`
 - Workspace refs use `file:../../../packages/@ortho/<pkg>` format
 - Repository pattern: standalone exported async functions with PoolClient as first arg, schema-qualified table names
-- Fastify plugins: use `fastify-plugin` (fp) wrapper, register preHandler hooks for auth
-- fast-jwt createVerifier: for static keys pass `key` as string; for JWKS pass `key` as async function (KeyFetcher)
----
-
-## 2026-04-02 - US-008
-- Implemented JWT auth Fastify plugin with static RS256 and JWKS modes
-- Uses fast-jwt createVerifier with RS256 algorithm
-- Static mode: verifies with PEM public key from IDENTITY_SERVICE_PUBLIC_KEY env
-- JWKS mode: fetches keys from IDENTITY_SERVICE_JWKS_URL, matches by kid, caches for 5 minutes
-- Both modes validate expiry, iss (if JWT_ISSUER set), aud (if JWT_AUDIENCE set)
-- Invalid/expired token returns 401 { error: 'Unauthorized' }
-- Plugin registered via fastify-plugin (fp) for proper encapsulation
-- Files created: apps/platform/integration-hub/src/plugins/jwt-auth.ts
-- **Learnings for future iterations:**
-  - fast-jwt createVerifier with a string key returns a sync verifier; with an async KeyFetcher returns async verifier
-  - JWKS keys need to be converted from JWK format to PEM using Node.js crypto createPublicKey
-  - Plugin exports JwtAuthOptions interface for configuration by app.ts (US-024)
-  - Webhook routes must NOT have this plugin applied — register them on a separate scope
----
-
-## 2026-04-02 - US-009
-- Implemented stateless PKCE state generation and verification in src/services/oauth-state.ts
-- createState: generates 43-byte random codeVerifier (base64url), SHA-256 codeChallenge, HMAC-SHA256 signed state payload with timestamp
-- verifyState: constant-time HMAC comparison via timingSafeEqual, 10-minute TTL check, returns codeVerifier
-- Files created: apps/platform/integration-hub/src/services/oauth-state.ts
-- **Learnings for future iterations:**
-  - State format: base64url(JSON { cv, ts }) + '.' + HMAC-SHA256 signature (base64url)
-  - codeChallenge is base64url(SHA-256(codeVerifier)) — needed by OAuth routes (US-020) for authorization URL
-  - CreateStateResult interface exported for use by route handlers
-  - Uses node:crypto for all cryptographic operations (consistent with credential-store.ts)
 ---
 
 ## 2026-04-02 - US-001
-- Verified service scaffold already complete from prior stories (US-006 through US-009)
-- All acceptance criteria met: package.json with deps, tsconfig.json (ES2022/NodeNext/strict), Dockerfile (node:24-alpine multi-stage), env.ts (24 env vars validated via typebox), index.ts placeholder
-- Typecheck passes
-- Files verified: package.json, tsconfig.json, Dockerfile, src/env.ts, src/index.ts
+- Scaffolded integration-hub service: package.json, tsconfig.json, Dockerfile, src/env.ts, src/index.ts
+- Files created: apps/platform/integration-hub/{package.json, tsconfig.json, Dockerfile, src/env.ts, src/index.ts}
 - **Learnings for future iterations:**
-  - Earlier stories (US-006+) created the scaffold as a prerequisite, so US-001 was already satisfied
-  - US-002 through US-005 files also exist and likely pass — verify in subsequent iterations
+  - Updated spec is at `docs/superpowers/specs/2026-04-02-integration-hub-updated-design.md` (supersedes the 2026-03-25 version)
+  - Spec §14 lists all required env vars — env.ts validates them at startup
+  - `fastify-plugin` (fp) is needed as a dependency for the JWT auth plugin (US-008)
+  - `google-ads-api` npm package is used for Google Ads connector (US-011)
+  - Node version is 20.x in this environment but package.json specifies >=24 (npm warns but works)
+---
+
+## 2026-04-02 - US-002
+- Added AdLeadReceivedPayload, AdLeadReceivedEvent, AdSpendRecord, AdSpendSyncedPayload, AdSpendSyncedEvent to @ortho/types/src/events.ts per spec §7
+- Files changed: packages/@ortho/types/src/events.ts
+- **Learnings for future iterations:**
+  - @ortho/types index.ts already re-exports everything from events.ts via `export * from './events.js'` — no need to update index when adding to events.ts
+  - The types package has no runtime dependencies, just tsc for typecheck
+  - AdLeadReceivedEvent and AdSpendSyncedEvent do NOT have entity_type/entity_id fields (unlike lead events) — they use a simpler event structure
+---
+
+## 2026-04-02 - US-003
+- Created Knex migrations for all four platform_integrations tables: integration_accounts, campaign_location_mappings, failed_webhooks, backfill_jobs
+- Created knexfile.ts with platform_integrations schema config
+- Files created: apps/platform/integration-hub/migrations/{knexfile.ts, 001_create_integration_accounts.ts, 002_create_campaign_location_mappings.ts, 003_create_failed_webhooks.ts, 004_create_backfill_jobs.ts}
+- **Learnings for future iterations:**
+  - Migration pattern: use `knex.raw()` with full schema-qualified table names (e.g. `platform_integrations.integration_accounts`)
+  - First migration in a schema should include `CREATE SCHEMA IF NOT EXISTS platform_integrations`
+  - FK references must also be schema-qualified: `REFERENCES platform_integrations.integration_accounts(id)`
+  - Schema §3 in the updated spec defines all column types and constraints exactly
+---
+
+## 2026-04-02 - US-004
+- Created IntegrationAccount type in src/connectors/interface.ts and accounts repository in src/repositories/accounts.ts
+- All 7 CRUD functions use raw pg PoolClient with parameterized queries against platform_integrations schema
+- Files created: apps/platform/integration-hub/src/connectors/interface.ts, apps/platform/integration-hub/src/repositories/accounts.ts
+- **Learnings for future iterations:**
+  - Repository pattern: export standalone async functions taking PoolClient as first arg (not class-based, not factory)
+  - IntegrationAccount type lives in src/connectors/interface.ts — future stories (US-010) will add Connector interface and other types to this same file
+  - Use schema-qualified table names in all queries: `platform_integrations.integration_accounts`
+  - setLastPolled also resets status to 'active' and last_error to NULL (success clears error state)
+---
+
+## 2026-04-02 - US-005
+- Created three repository modules: mappings.ts, failed-webhooks.ts, backfill-jobs.ts
+- Added CampaignLocationMapping and BackfillJob types to src/connectors/interface.ts
+- Files created: apps/platform/integration-hub/src/repositories/{mappings.ts, failed-webhooks.ts, backfill-jobs.ts}
+- Files modified: apps/platform/integration-hub/src/connectors/interface.ts
+- **Learnings for future iterations:**
+  - CampaignLocationMapping and BackfillJob types are now in interface.ts alongside IntegrationAccount — all domain types in one file
+  - replaceAll in mappings.ts uses manual BEGIN/COMMIT/ROLLBACK transaction (PoolClient doesn't have a built-in transaction helper)
+  - backfill_jobs.status values: 'active' (default), 'completed', 'failed'
+---
+
+## 2026-04-02 - US-006
+- Implemented AES-256-GCM encrypt/decrypt functions in src/services/credential-store.ts
+- encrypt: generates fresh 12-byte IV per call, stores base64(JSON { iv, ciphertext, tag }) in hex
+- decrypt: parses stored value, validates structure, throws descriptive errors on malformation or wrong key
+- Files created: apps/platform/integration-hub/src/services/credential-store.ts
+- **Learnings for future iterations:**
+  - Services directory created at src/services/ — future stories (US-007 secrets-provider, US-009 oauth-state, US-015 event-publisher) go here
+  - Node.js crypto module is ESM-compatible via `node:crypto` import
+  - Error messages in decrypt must not include token values (security requirement from spec)
+  - The encryption key is a 32-byte Buffer decoded from base64 env var INTEGRATION_HUB_ENCRYPTION_KEY
+---
+
+## 2026-04-02 - US-007
+- Implemented SecretsProvider interface, AwsSecretsProvider (AWS Secrets Manager), EnvSecretsProvider (env vars), and createSecretsProvider() factory
+- Files created: apps/platform/integration-hub/src/services/secrets-provider.ts
+- **Learnings for future iterations:**
+  - createSecretsProvider() takes the provider string as a param (from env.SECRETS_PROVIDER) rather than reading env directly — keeps it testable
+  - @aws-sdk/client-secrets-manager is already in package.json dependencies
+  - SecretsProvider.getSecret() is async — even EnvSecretsProvider returns a Promise for interface consistency
+---
+
+## 2026-04-02 - US-008 / US-009 (retroactive)
+- Already implemented in prior commits; marked as passes: true
+---
+
+## 2026-04-02 - US-010
+- Added OAuthTokens, SpendRecord, LeadEvent types and Connector interface to src/connectors/interface.ts
+- Created ConnectorRegistry (Map<string, Connector>) and getConnector() in src/connectors/registry.ts
+- Files modified: apps/platform/integration-hub/src/connectors/interface.ts
+- Files created: apps/platform/integration-hub/src/connectors/registry.ts
+- **Learnings for future iterations:**
+  - Connector interface methods match spec §2.2 exactly — getAuthorizationUrl, exchangeCode, refreshTokens, fetchSpend, fetchSpendRange, verifyWebhook, parseLeadWebhook, verifyChallenge
+  - getConnector throws with statusCode: 400 for unknown platforms (Fastify picks this up)
+  - LeadEvent in interface.ts does NOT include platform or location_id — those are added at the event-publishing layer (ad_lead.received event wraps LeadEvent with platform + location_id)
+---
+
+## 2026-04-02 - US-011
+- Created GoogleAdsClient typed wrapper at src/connectors/clients/google-ads-client.ts
+- Exports GOOGLE_ADS_API_VERSION = 'v19', CampaignPerformanceRow type, GoogleAdsClient class
+- Uses Google Ads REST API (searchStream endpoint) with pre-decrypted access token
+- searchCampaignPerformance(date) and searchCampaignPerformanceRange(from, to) both return CampaignPerformanceRow[]
+- cost_micros converted to spend by dividing by 1_000_000
+- Files created: apps/platform/integration-hub/src/connectors/clients/google-ads-client.ts
+- **Learnings for future iterations:**
+  - google-ads-api npm package uses gRPC with refresh_token (UserRefreshClient) — cannot be used with pre-decrypted access tokens directly
+  - GoogleAdsClient uses the REST API (googleads.googleapis.com) with searchStream endpoint instead — works with access_token in Authorization header
+  - Customer IDs must have hyphens stripped for the REST API (constructor handles this)
+  - searchStream returns all results in a single response (array of batches), no pagination needed
+  - The clients/ directory under connectors/ holds platform-specific API wrappers
+---
+
+## 2026-04-02 - US-012
+- Created MetaApiClient typed wrapper at src/connectors/clients/meta-api-client.ts
+- Exports META_GRAPH_API_VERSION = 'v22.0', MetaInsightRow type, MetaApiClient class
+- Uses native fetch against Meta Graph API; handles pagination via paging.next
+- getInsights(date) and getInsightsRange(from, to) both return MetaInsightRow[]
+- Throws descriptive errors including Meta error message on non-2xx responses
+- Files created: apps/platform/integration-hub/src/connectors/clients/meta-api-client.ts
+- **Learnings for future iterations:**
+  - Meta Insights API requires `level=campaign` param to get campaign-level breakdowns
+  - Meta API returns spend/impressions/clicks as strings, not numbers (MetaInsightRow reflects this)
+  - Meta API supports cursor-based pagination via paging.next URL — client follows it automatically
+  - Pattern mirrors GoogleAdsClient: module constant for API version, exported row type, class with constructor(accessToken, accountId)
+---
+
+## 2026-04-02 - US-013
+- Implemented GoogleAdsConnector class implementing Connector interface with platform = 'google_ads'
+- Full OAuth flow: getAuthorizationUrl (Google OAuth2 with PKCE), exchangeCode (token exchange), refreshTokens (decrypt refresh_token from DB, call Google token endpoint)
+- Spend polling: fetchSpend and fetchSpendRange decrypt access_token, create GoogleAdsClient, map results to SpendRecord[]
+- Webhook handling: verifyWebhook (HMAC-SHA256 via X-Goog-Signature), parseLeadWebhook (parses lead form entries), verifyChallenge (hub.verify_token check)
+- Added GOOGLE_ADS_REDIRECT_URI to env.ts (required for OAuth flow, was missing)
+- Files created: apps/platform/integration-hub/src/connectors/google-ads.ts
+- Files modified: apps/platform/integration-hub/src/env.ts
+- **Learnings for future iterations:**
+  - Connector constructor takes a config object with all env-derived values + encryptionKey Buffer — keeps connector testable without importing env.ts
+  - GoogleAdsConnector uses credential-store decrypt() to access encrypted tokens from IntegrationAccount rows
+  - refreshTokens preserves the existing refresh_token if Google doesn't return a new one (Google only returns refresh_token on first auth)
+  - verifyWebhook uses timingSafeEqual for constant-time comparison (prevents timing attacks)
+  - GOOGLE_ADS_REDIRECT_URI was added to env.ts — Meta connector (US-014) will need META_REDIRECT_URI similarly
+---
+
+## 2026-04-02 - US-014
+- Implemented MetaConnector class implementing Connector interface with platform = 'facebook_ads'
+- Full OAuth flow: getAuthorizationUrl (Meta OAuth dialog with PKCE), exchangeCode (short-lived → long-lived token, expiresAt = now + 60 days), refreshTokens (throws — Meta has no refresh flow)
+- Spend polling: fetchSpend and fetchSpendRange decrypt access_token, create MetaApiClient, parse string values to numbers for SpendRecord[]
+- Webhook handling: verifyWebhook (X-Hub-Signature-256 = sha256=HMAC-SHA256), parseLeadWebhook (entry[].changes[].value with leadgen field filter), verifyChallenge (hub.verify_token check)
+- Added META_REDIRECT_URI to env.ts (required for OAuth flow)
+- Files created: apps/platform/integration-hub/src/connectors/meta.ts
+- Files modified: apps/platform/integration-hub/src/env.ts
+- **Learnings for future iterations:**
+  - MetaConnector config uses appId/appSecret (not clientId/clientSecret like Google) — matches Meta's naming conventions
+  - Meta leadgen webhooks: entry[].changes[] array, filter by field === 'leadgen', value contains leadgen_id, campaign_id, adgroup_id (=ad_set_id), ad_id, form_id
+  - Meta uses adgroup_id for what's called ad_set_id in our domain model
+  - Meta X-Hub-Signature-256 format is 'sha256=<hex>' (not just hex like Google's X-Goog-Signature)
+  - Meta has no token refresh flow — refreshTokens() throws, caller must handle reconnect
+  - MetaInsightRow returns string values for spend/impressions/clicks — must parseFloat/parseInt when mapping to SpendRecord
+  - Registration in ConnectorRegistry happens in index.ts at startup (not in the connector module itself) — US-024 will wire this up
 ---
