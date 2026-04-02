@@ -4,6 +4,10 @@ import rateLimit from '@fastify/rate-limit';
 import type { Pool } from 'pg';
 import { apiKeyAuthPlugin } from './plugins/api-key-auth.js';
 import { healthRoutes } from './routes/health.js';
+import { leadsRoutes } from './routes/metrics/leads.js';
+import { pipelineRoutes } from './routes/metrics/pipeline.js';
+import { conversionsRoutes } from './routes/metrics/conversions.js';
+import { messagesRoutes } from './routes/metrics/messages.js';
 
 export async function buildApp(pool: Pool): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
@@ -13,6 +17,10 @@ export async function buildApp(pool: Pool): Promise<FastifyInstance> {
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
   await app.register(healthRoutes, { pool });
+  await app.register(leadsRoutes, { pool });
+  await app.register(pipelineRoutes, { pool });
+  await app.register(conversionsRoutes, { pool });
+  await app.register(messagesRoutes, { pool });
 
   return app;
 }
