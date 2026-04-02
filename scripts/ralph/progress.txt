@@ -1,3 +1,16 @@
+## 2026-04-02 - US-020
+- Created test/unit/query-builder.test.ts: 12 tests covering count/sum/avg aggregates, single/multi-value filters, group_by one/two fields, daily/monthly/total granularity, period binding positions, injection guard (throws on invalid field), and binding ordering with multiple filters
+- Created test/unit/api-key-auth.test.ts: 8 tests covering first call hits Identity Service + caches, second call uses cache (fetch called only once), TTL expiry with vi.useFakeTimers() + vi.setSystemTime(), non-ak_ bypass, no-auth bypass, Identity Service 401 → 401 to client, network error → 401, header injection verification via route handler echoing request headers
+- Files changed: test/unit/query-builder.test.ts, test/unit/api-key-auth.test.ts
+- **Learnings for future iterations:**
+  - vi.stubGlobal('fetch', vi.fn()) returns `vi` for chaining, NOT the mock function — save the mock separately: `const mock = vi.fn(); vi.stubGlobal('fetch', mock);`
+  - vi.useFakeTimers() + vi.setSystemTime(Date.now() + ms) is the clean way to test TTL expiry in cache; call vi.useRealTimers() in afterEach
+  - api-key-auth.ts reads process.env directly (not via env.ts) — set process.env vars in beforeAll, no need to vi.mock env.js
+  - Use unique API key strings per test to avoid module-level keyCache pollution between tests
+  - To verify injected request headers in plugin tests, have the route handler return them in the response JSON
+  - call vi.unstubAllGlobals() in afterEach to restore fetch between tests
+---
+
 ## 2026-04-02 - US-019
 - Created test/unit/handlers/ directory with 13 test files (one per handler)
 - Each test mocks repositories/events.js (insertEvent) and repositories/rollups.js (relevant upsert functions) via vi.mock

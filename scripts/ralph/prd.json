@@ -335,7 +335,7 @@
         "Tests pass"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "query-builder.ts is a pure function \u2014 no mocking needed for its tests, just call buildQuery() with params and assert the returned { sql, bindings }. For api-key-auth, mock the HTTP call to IDENTITY_SERVICE_URL using vi.mock or vi.spyOn on the underlying fetch/http module."
     },
     {
