@@ -50,7 +50,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Use knex.raw() for the PARTITION BY RANGE DDL and for creating the default partition — Knex schema builder doesn't support native partitioning. Table goes in platform_analytics schema. The UNIQUE constraint on event_id is the deduplication anchor."
     },
     {
@@ -72,7 +72,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Add a comment in the migration for metrics_ad_spend_daily explaining that campaign_name is a display hint only — queries must always group by campaign_id, never campaign_name. All tables are in platform_analytics schema."
     },
     {

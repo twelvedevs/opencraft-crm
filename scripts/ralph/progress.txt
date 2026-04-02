@@ -1,9 +1,35 @@
+## 2026-04-02 - US-004
+- Created 002_create_rollup_tables.ts with all 8 rollup tables in platform_analytics schema
+- All tables use knex.raw() for DDL; UNIQUE constraints match spec exactly
+- Added campaign_name display hint comment to metrics_ad_spend_daily
+- Files changed: apps/platform/analytics/migrations/002_create_rollup_tables.ts
+- **Learnings for future iterations:**
+  - All 8 rollup tables use plain `int NOT NULL DEFAULT 0` for counters (no serial/sequence)
+  - metrics_ad_spend_daily.campaign_name defaults to '' (empty string) not NULL — upsert always overwrites it
+  - down() drops tables in reverse creation order (no FK deps here, but good practice)
+---
+
+## 2026-04-02 - US-003
+- Created analytics_events partitioned table migration using knex.raw() for PARTITION BY RANGE DDL
+- Created analytics_events_default partition (catch-all for rows before named partitions exist)
+- Created indexes: (event_type, occurred_at) composite and GIN on dimensions
+- Created knexfile.ts following automation service pattern
+- Files changed: apps/platform/analytics/migrations/001_create_analytics_events.ts, apps/platform/analytics/migrations/knexfile.ts
+- **Learnings for future iterations:**
+  - Partitioned tables require composite PK including the partition key: PRIMARY KEY (id, occurred_at) — plain uuid PK will error on partitioned tables
+  - Use knex.raw() for all partitioning DDL; Knex schema builder has no native support
+  - Default partition is created as a separate CREATE TABLE ... PARTITION OF ... DEFAULT statement
+  - down() must drop default partition BEFORE the parent table (dependency order)
+---
+
 ## Codebase Patterns
 - OrthoEvent is in packages/@ortho/event-bus/src/types.ts — add new fields there first, then use them in analytics handlers
 - All services use ESM ("type": "module") with NodeNext module resolution
 - Handlers signature: (event: OrthoEvent, pool: Pool) => Promise<void>
 - Use raw pg PoolClient (not Knex) for transactional handler operations
 - insertEvent returns { inserted: boolean } — gate all rollup writes on inserted=true (except ad-spend-synced which has relaxed idempotency)
+- Partitioned tables need composite PK including partition key: PRIMARY KEY (id, occurred_at); plain uuid PK errors on partitioned tables
+- Use knex.raw() for PARTITION BY RANGE DDL and default partition creation; drop default partition before parent table in down()
 
 # Ralph Progress Log
 Started: Thu Apr  2 14:38:21 +03 2026
