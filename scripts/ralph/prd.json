@@ -1,0 +1,377 @@
+{
+  "project": "Ortho CRM — Identity Service",
+  "branchName": "feature/identity-service",
+  "description": "Platform-layer Identity Service: enriched JWT issuance (fast-jwt RS256), Supabase + Auth0 providers, RBAC user management, API key management, refresh token rotation with replay detection, BullMQ cleanup job, and packages/@ortho/auth-middleware. Spec: docs/superpowers/specs/2026-04-02-identity-service-updated-design.md",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffolding — package.json, tsconfig.json, Dockerfile",
+      "description": "As a developer, I need the apps/platform/identity/ service directory wired up with correct tooling so that subsequent stories can add code that builds, typechecks, and runs tests.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/package.json exists with name @platform/identity, type module, Node >=24",
+        "scripts: build (tsc), dev (tsx watch src/index.ts), start (node dist/index.js), test (vitest run), typecheck (tsc --noEmit)",
+        "Dependencies include: fastify ^5, @fastify/sensible ^6, @fastify/cors ^5, @sinclair/typebox ^0.34, pg ^8, knex ^3, bullmq ^5, ioredis ^5, fast-jwt ^4, @supabase/supabase-js ^2, axios ^1, @ortho/logger (file:../../../packages/@ortho/logger), @ortho/auth-middleware (file:../../../packages/@ortho/auth-middleware)",
+        "devDependencies include: typescript ^5, tsx ^4, vitest ^2, @types/node ^22, @types/pg ^8",
+        "apps/platform/identity/tsconfig.json: target ES2022, module NodeNext, moduleResolution NodeNext, strict true, outDir dist, rootDir src",
+        "apps/platform/identity/Dockerfile: node:24-alpine, npm ci --omit=dev, CMD node dist/index.js — mirrors AI service pattern",
+        "apps/platform/identity/src/index.ts exists as empty placeholder (export {})",
+        "npm install completes without errors",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Mirror apps/platform/ai package.json and tsconfig.json structure. The @ortho/auth-middleware local package will be scaffolded in US-012 — npm install may warn about missing peer but must not fail. Add @ortho/auth-middleware to package.json now so the dependency is declared; it will be satisfied when US-012 creates the package."
+    },
+    {
+      "id": "US-002",
+      "title": "Database migrations — users, user_locations, refresh_tokens, api_keys",
+      "description": "As a developer, I need the four platform_identity schema tables created with correct constraints and indexes so that service layer code can persist and query user records, sessions, and API keys.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/migrations/001_create_users_and_locations.ts exists",
+        "001 up(): CREATE SCHEMA IF NOT EXISTS platform_identity; CREATE TABLE platform_identity.users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), provider_user_id varchar UNIQUE NOT NULL, email varchar UNIQUE NOT NULL, name varchar NOT NULL, role varchar NOT NULL CHECK (role IN ('call_center_agent','call_center_manager','marketing_staff','marketing_manager','super_admin')), status varchar NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')), force_password_reset boolean NOT NULL DEFAULT true, created_by uuid REFERENCES platform_identity.users(id), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())",
+        "001 up(): CREATE TABLE platform_identity.user_locations (user_id uuid REFERENCES platform_identity.users(id) ON DELETE CASCADE, location_id uuid NOT NULL, PRIMARY KEY (user_id, location_id))",
+        "001 up(): CREATE INDEX on platform_identity.users(role), CREATE INDEX on platform_identity.users(status), CREATE INDEX on platform_identity.users(created_at)",
+        "001 down(): drops user_locations then users tables",
+        "apps/platform/identity/migrations/002_create_refresh_tokens_and_api_keys.ts exists",
+        "002 up(): CREATE TABLE platform_identity.refresh_tokens (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES platform_identity.users(id) ON DELETE CASCADE, token_hash varchar UNIQUE NOT NULL, expires_at timestamptz NOT NULL, revoked_at timestamptz, created_at timestamptz NOT NULL DEFAULT now())",
+        "002 up(): CREATE TABLE platform_identity.api_keys (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar NOT NULL, key_hash varchar UNIQUE NOT NULL, permissions varchar[] NOT NULL, created_by uuid REFERENCES platform_identity.users(id), created_at timestamptz NOT NULL DEFAULT now(), last_used_at timestamptz, revoked_at timestamptz)",
+        "002 up(): CREATE INDEX on platform_identity.refresh_tokens(user_id), CREATE INDEX on platform_identity.refresh_tokens(expires_at), CREATE INDEX on platform_identity.api_keys(revoked_at)",
+        "002 down(): drops api_keys then refresh_tokens",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Use knex.raw() for CREATE SCHEMA and CHECK constraint DDL where needed — Knex schema builder may not support all syntax. All tables go in platform_identity schema. The CHECK constraint on role uses varchar not a Postgres ENUM to allow future ALTER TABLE extension."
+    },
+    {
+      "id": "US-003",
+      "title": "Password policy module — lib/password-policy.ts",
+      "description": "As a developer, I need a configurable password complexity validator so that user.service.ts can enforce policy before calling any auth provider, returning structured error messages.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/lib/password-policy.ts exports validatePassword(password: string): { valid: boolean; errors: string[] }",
+        "Reads config from env vars: PASSWORD_MIN_LENGTH (default 12), PASSWORD_REQUIRE_UPPERCASE (default true), PASSWORD_REQUIRE_LOWERCASE (default true), PASSWORD_REQUIRE_NUMBER (default true), PASSWORD_REQUIRE_SPECIAL (default true)",
+        "Returns errors array with human-readable messages for each failing rule (e.g. 'minimum 12 characters required', 'at least one uppercase letter required', 'at least one digit required', 'at least one special character required')",
+        "Returns { valid: true, errors: [] } when all rules pass",
+        "Special chars checked: !@#$%^&*()_+-=[]{}|;:,.<>? (any non-alphanumeric is acceptable)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "This is a pure function module — no DB, no network. Config is read once at module load from process.env. Used in user.service.ts before createUser and setPassword calls."
+    },
+    {
+      "id": "US-004",
+      "title": "AuthProvider interface + Supabase implementation",
+      "description": "As a developer, I need the AuthProvider interface and the concrete SupabaseProvider so that the service layer can delegate credential operations to Supabase Auth without caring about the underlying SDK.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/providers/auth-provider.interface.ts exports interface AuthProvider { verifyToken(token: string): Promise<{ providerUserId: string; email: string }>; createUser(email: string, password: string): Promise<{ providerUserId: string }>; setPassword(providerUserId: string, password: string): Promise<void>; deactivateUser(providerUserId: string): Promise<void> }",
+        "apps/platform/identity/src/providers/supabase.provider.ts exports class SupabaseProvider implements AuthProvider",
+        "SupabaseProvider constructor accepts supabaseUrl and supabaseServiceRoleKey strings; creates supabase admin client",
+        "verifyToken: calls supabase.auth.getUser(token); returns { providerUserId: user.id, email: user.email }; throws on invalid token",
+        "createUser: calls supabase.auth.admin.createUser({ email, password, email_confirm: true }); returns { providerUserId: user.id }",
+        "setPassword: calls supabase.auth.admin.updateUserById(providerUserId, { password })",
+        "deactivateUser: calls supabase.auth.admin.updateUserById(providerUserId, { ban_duration: '87600h' })",
+        "apps/platform/identity/src/providers/index.ts exports createAuthProvider(type: string): AuthProvider that instantiates SupabaseProvider when type === 'supabase' (Auth0 added in US-005); throws on unknown type",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "SupabaseProvider uses @supabase/supabase-js. The deactivateUser ban_duration '87600h' is 10 years — effectively permanent without requiring a delete. The createAuthProvider factory in index.ts will be extended in US-005 with the auth0 branch."
+    },
+    {
+      "id": "US-005",
+      "title": "Auth0 provider implementation",
+      "description": "As a developer, I need the Auth0Provider so that the service can switch between auth providers via the AUTH_PROVIDER env var without code changes.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/providers/auth0.provider.ts exports class Auth0Provider implements AuthProvider",
+        "Auth0Provider constructor accepts auth0Domain, clientId, clientSecret strings",
+        "M2M token caching: private field stores { token: string, expiresAt: number }; getManagementToken() fetches from https://{domain}/oauth/token (client_credentials grant) when token is absent or expires within 60s; uses axios",
+        "verifyToken: validates the Auth0 access token by fetching https://{domain}/.well-known/jwks.json and verifying the JWT signature using fast-jwt createVerifier; returns { providerUserId: sub, email }",
+        "createUser: POST https://{domain}/api/v2/users with { email, password, connection: 'Username-Password-Authentication' }; returns { providerUserId: user_id }",
+        "setPassword: PATCH https://{domain}/api/v2/users/{id} with { password }",
+        "deactivateUser: PATCH https://{domain}/api/v2/users/{id} with { blocked: true }",
+        "apps/platform/identity/src/providers/index.ts createAuthProvider updated to instantiate Auth0Provider when type === 'auth0'",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Auth0 Management API calls require a Bearer token obtained via client credentials. The M2M token TTL is typically 86400s; refresh when within 60s of expiry. Use axios for all Management API HTTP calls."
+    },
+    {
+      "id": "US-006",
+      "title": "Repositories — user.repo.ts, refresh-token.repo.ts, api-key.repo.ts",
+      "description": "As a developer, I need typed repository functions for all three tables so that service layer code uses consistent, testable SQL patterns.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/repositories/user.repo.ts exports: findById(pool, id): Promise<User|null>, findByEmail(pool, email): Promise<User|null>, findByProviderUserId(pool, id): Promise<User|null>, create(pool, data): Promise<User>, update(pool, id, data): Promise<User>, listUsers(pool, filters: { role?, status?, cursor?, limit }): Promise<{ rows: User[], nextCursor: string|null }>, getUserLocations(pool, userId): Promise<string[]>, setUserLocations(pool, userId, locationIds): Promise<void>",
+        "listUsers cursor pagination: opaque base64 JSON { created_at, id }; decodes cursor to WHERE (created_at, id) > (cursor.created_at, cursor.id); includes nextCursor in response (null if fewer rows than limit)",
+        "setUserLocations: deletes all existing user_locations for userId, inserts new ones in one transaction",
+        "apps/platform/identity/src/repositories/refresh-token.repo.ts exports: createToken(pool, data): Promise<RefreshToken>, findByHash(pool, hash): Promise<RefreshToken|null>, revokeToken(pool, id): Promise<void>, revokeAllForUser(pool, userId): Promise<void>, pruneExpiredAndOldRevoked(pool): Promise<number> (returns row count deleted)",
+        "pruneExpiredAndOldRevoked deletes: expires_at < now() OR (revoked_at IS NOT NULL AND revoked_at < now() - interval '7 days')",
+        "apps/platform/identity/src/repositories/api-key.repo.ts exports: createKey(pool, data): Promise<ApiKey>, findByHash(pool, hash): Promise<ApiKey|null>, listKeys(pool): Promise<ApiKey[]>, revokeKey(pool, id): Promise<void>, touchLastUsed(pool, id): Promise<void>",
+        "All repo functions accept a pg Pool or PoolClient; types User, RefreshToken, ApiKey are defined in src/types.ts",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Use raw pg Pool (not Knex query builder) for all repo functions for consistency with the analytics service pattern. Cursor base64 encoding/decoding: Buffer.from(JSON.stringify({created_at, id})).toString('base64') / Buffer.from(cursor, 'base64').toString(). Define shared TypeScript types in src/types.ts."
+    },
+    {
+      "id": "US-007",
+      "title": "Token service — JWT signing (fast-jwt RS256), JWKS endpoint data, refresh token rotation + replay detection",
+      "description": "As a developer, I need token.service.ts to sign enriched JWTs, serve JWKS public key data, and manage refresh token lifecycle including replay attack detection.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/services/token.service.ts exports signAccessToken(payload: JwtPayload): string using fast-jwt createSigner({ algorithm: 'RS256', key: IDENTITY_PRIVATE_KEY, kid: derived from JWKS_KEYS[0].kid, expiresIn: 900 })",
+        "JwtPayload type: { sub: string, role: string, locations: string[], must_change_password: boolean }",
+        "getJwks(): returns parsed IDENTITY_JWKS_KEYS env var as JWK array — served directly as the JWKS response",
+        "issueRefreshToken(pool, userId): generates 32 random bytes as hex, stores SHA256 hash in refresh_tokens with expires_at = now() + 30 days; returns raw token",
+        "rotateRefreshToken(pool, rawToken): 1) hashes raw token, 2) loads row by hash, 3) if not found → throw 401 'invalid_token', 4) if revoked_at IS NOT NULL → call revokeAllForUser(userId) → throw 401 'session_invalidated' (replay detection), 5) if expires_at < now() → throw 401 'token_expired', 6) revokeToken(id), 7) issueRefreshToken for same userId; returns new raw token",
+        "All token operations use the injected pool from repositories",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "fast-jwt createSigner is called once at module load (cached closure), not per request. IDENTITY_PRIVATE_KEY is a PEM string from env; fast-jwt accepts PEM directly. The kid must match one entry in IDENTITY_JWKS_KEYS — use the kid from JWKS_KEYS[0] as the active signing key. Replay detection: revoked_at IS NOT NULL on a presented token is a sign of token theft — bulk-revoke all user sessions."
+    },
+    {
+      "id": "US-008",
+      "title": "User service — CRUD, deactivation, location assignment, password policy enforcement",
+      "description": "As a developer, I need user.service.ts to orchestrate user lifecycle operations combining DB repositories, auth provider calls, and password policy validation so that routes have a clean, testable domain layer.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/services/user.service.ts exports createUser(pool, provider, data): Promise<User> that: 1) calls validatePassword → throws 400 on violation, 2) calls provider.createUser(email, password) → wraps provider errors, 3) inserts user row with force_password_reset=true, 4) sets location assignments if provided, 5) returns full user with locations",
+        "getUser(pool, id): Promise<User & { locations: string[] }> — loads user + locations; throws 404 if not found",
+        "listUsers(pool, filters): delegates to user.repo.listUsers",
+        "updateUser(pool, provider, id, data): handles name/role/status/location_assignments; if data.status === 'inactive': calls revokeAllForUser + provider.deactivateUser; if data.status === 'active' AND current status IS 'inactive': throws 422 { error: 'reactivation_not_supported' }; returns updated user with locations",
+        "adminResetPassword(pool, provider, userId): validates password policy → throws 400 on violation; calls provider.setPassword; sets force_password_reset=true on user row",
+        "changeOwnPassword(pool, provider, userId, { currentPassword, newPassword }, mustChangePassword): if mustChangePassword=false AND currentPassword missing → throws 400; if mustChangePassword=false: re-validates currentPassword by calling provider.verifyToken equivalent (load user email, attempt verifyToken); validates newPassword policy; calls provider.setPassword; sets force_password_reset=false",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "changeOwnPassword current_password re-verification: since AuthProvider.verifyToken accepts a provider token (not a password), the password check for voluntary change must be done differently. For Supabase: call supabase.auth.signInWithPassword({email, password}) using the service client. For Auth0: call password grant (POST /oauth/token with grant_type=password). Alternatively, accept current_password and call a new AuthProvider method signInWithPassword — add this as an optional method. Check the spec again: spec says 'verified via AuthProvider.verifyToken equivalent'. Simplest approach: add signInWithPassword(email, password) to AuthProvider interface as optional or as a separate method."
+    },
+    {
+      "id": "US-009",
+      "title": "API Key service — generation, SHA256 hash, validation, last_used_at",
+      "description": "As a developer, I need api-key.service.ts to generate, store, and validate long-lived API keys so that EHR and external integrations can authenticate via the /validate endpoint.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/services/api-key.service.ts exports generateApiKey(pool, { name, permissions, createdBy }): Promise<{ id, name, key, permissions }> where key = 'ak_' + randomBytes(32).toString('hex'); stores SHA256(key) in api_keys; returns raw key once (never stored)",
+        "listApiKeys(pool): Promise<ApiKey[]> — returns all non-revoked keys (revoked_at IS NULL); omits key_hash from response",
+        "validateApiKey(pool, rawKey): Promise<{ permissions: string[] }> — computes SHA256(rawKey), calls findByHash; throws 401 if not found or revoked_at IS NOT NULL; calls touchLastUsed(id) if cache miss (called from route only, not cached here); returns { permissions }",
+        "revokeApiKey(pool, id): sets revoked_at; throws 404 if not found",
+        "API key format: 'ak_' + 64 hex chars (32 bytes)",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Use Node's built-in crypto.randomBytes(32) and crypto.createHash('sha256'). The last_used_at update strategy per spec: 'Updates last_used_at on cache miss only' — the CRM API Gateway caches valid /validate responses for 60s, so touchLastUsed is called at most once per 60s per key. Service layer just calls it on every validate; the route layer or a future cache could suppress it."
+    },
+    {
+      "id": "US-010",
+      "title": "BullMQ cleanup job — daily prune expired and old revoked refresh tokens",
+      "description": "As a developer, I need the daily cleanup job so that the refresh_tokens table does not grow unbounded.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/jobs/cleanup.job.ts exports registerCleanupJob(queue: Queue, pool: Pool): void",
+        "Schedules a BullMQ repeatable job with cron '0 3 * * *' (03:00 UTC daily) under queue name 'identity-cleanup'",
+        "Job processor calls refresh-token.repo.pruneExpiredAndOldRevoked(pool) and logs the number of deleted rows at info level",
+        "Queue is created with new IORedis(process.env['REDIS_URL']) connection",
+        "Job registered in src/index.ts (tied to HTTP server process, not standalone worker)",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Follow the analytics service BullMQ pattern from US-017 of the analytics archive. Use bullmq Queue + Worker with the same Redis URL. Cron '0 3 * * *' = 03:00 UTC every day."
+    },
+    {
+      "id": "US-011",
+      "title": "Fastify server setup — env.ts, app.ts, index.ts, health route",
+      "description": "As a developer, I need the complete Fastify server wiring with environment validation, CORS, plugin registration, health endpoints, and graceful shutdown so that the service can run in ECS.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/env.ts validates and exports all required env vars: DATABASE_URL, REDIS_URL, AUTH_PROVIDER ('supabase'|'auth0'), IDENTITY_PRIVATE_KEY, IDENTITY_JWKS_KEYS (JSON array string), INTERNAL_API_SECRET, CORS_ORIGIN; optional with defaults: LOG_LEVEL (info), PORT (3000), PASSWORD_MIN_LENGTH (12), PASSWORD_REQUIRE_UPPERCASE/LOWERCASE/NUMBER/SPECIAL (true); Supabase vars when AUTH_PROVIDER=supabase; Auth0 vars when AUTH_PROVIDER=auth0; throws on missing required vars",
+        "apps/platform/identity/src/routes/health.ts: GET /health → 200 { status: 'ok' }; GET /ready → SELECT 1 against DB → 200 { status: 'ready' } or 503 { status: 'unavailable', reason: string }",
+        "apps/platform/identity/src/app.ts exports buildApp(pool: Pool, provider: AuthProvider): Promise<FastifyInstance> that registers: @fastify/sensible, @fastify/cors (with CORS_ORIGIN from env, supporting comma-separated origins), health routes; other route registrations added in subsequent stories",
+        "apps/platform/identity/src/index.ts: creates pg Pool, creates AuthProvider via createAuthProvider, calls buildApp, registers cleanup job, starts Fastify on PORT; SIGTERM: stop bullmq workers, close fastify, end pool",
+        "GET /health returns 200 { status: 'ok' } verifiable via app.inject",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "CORS_ORIGIN can be comma-separated: parse with .split(',').map(s => s.trim()) and pass as an array to @fastify/cors origin option. IDENTITY_JWKS_KEYS is a JSON string — parse with JSON.parse in env.ts and export as JWK[]. No @fastify/rate-limit — rate limiting is at ALB only per spec."
+    },
+    {
+      "id": "US-012",
+      "title": "@ortho/auth-middleware scaffolding — package.json, tsconfig.json, permissions.ts, require-role.ts, require-permission.ts, require-location.ts",
+      "description": "As a developer, I need the @ortho/auth-middleware package scaffolded with the static ROLE_PERMISSIONS map and preHandler factories so that all services can enforce RBAC with a consistent interface.",
+      "acceptanceCriteria": [
+        "packages/@ortho/auth-middleware/package.json exists with name @ortho/auth-middleware, type module, main ./dist/index.js, exports pointing to dist",
+        "devDependencies: typescript ^5, tsx ^4, vitest ^2; peerDependencies: fastify ^5; dependencies: fast-jwt ^4",
+        "packages/@ortho/auth-middleware/tsconfig.json: target ES2022, module NodeNext, moduleResolution NodeNext, strict true, outDir dist, rootDir src",
+        "packages/@ortho/auth-middleware/src/permissions.ts exports ROLE_PERMISSIONS: Record<string, string[]> mapping each of the 5 roles to their allowed permission strings; roles: call_center_agent, call_center_manager, marketing_staff, marketing_manager, super_admin; permissions include at minimum: leads:read, leads:write, pipeline:read, pipeline:write, conversations:read, conversations:write, campaigns:read, campaigns:write, users:read, users:write, api-keys:read, api-keys:write, reports:read",
+        "super_admin has all permissions; marketing_manager has users:write and api-keys:write; call_center_agent has leads:read, conversations:read/write, pipeline:read",
+        "packages/@ortho/auth-middleware/src/require-role.ts exports requireRole(allowedRoles: string[]): preHandlerHookHandler — checks req.user.role against allowedRoles; returns 403 { error: 'forbidden' } if not in list",
+        "packages/@ortho/auth-middleware/src/require-permission.ts exports requirePermission(permission: string): preHandlerHookHandler — checks ROLE_PERMISSIONS[req.user.role].includes(permission); returns 403 { error: 'forbidden' }",
+        "packages/@ortho/auth-middleware/src/require-location.ts exports requireLocation(): preHandlerHookHandler — passes if role is marketing_staff, marketing_manager, or super_admin (empty locations = all); otherwise checks that req.user.locations includes the request's location_id param or query param; returns 403 if not",
+        "packages/@ortho/auth-middleware/src/index.ts re-exports everything from plugin.ts (stub export for now), permissions.ts, require-role.ts, require-permission.ts, require-location.ts",
+        "Typecheck passes in packages/@ortho/auth-middleware"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "The req.user object is typed as JwtPayload (same shape as identity service JwtPayload: { sub, role, locations, must_change_password }). Declare FastifyRequest augmentation in plugin.ts stub so TypeScript knows about req.user in preHandlers. Define the permission strings carefully — they must match what the CRM API Gateway and other services check."
+    },
+    {
+      "id": "US-013",
+      "title": "@ortho/auth-middleware plugin.ts — JWT verification, JWKS caching with unknown-kid re-fetch, must_change_password 403 gate",
+      "description": "As a developer, I need the main Fastify plugin that verifies RS256 JWTs via the JWKS endpoint, caches keys by kid, handles key rotation, and enforces the must_change_password 403 gate so that every service gets stateless auth with zero per-request Identity Service calls.",
+      "acceptanceCriteria": [
+        "packages/@ortho/auth-middleware/src/plugin.ts exports a Fastify plugin (using fastify-plugin) registered with name 'ortho-auth'",
+        "Plugin options: { jwksUrl: string, allowedPaths?: string[] } — allowedPaths are excluded from auth (e.g. /health, /ready, /.well-known/jwks.json)",
+        "On plugin registration: fetches JWKS from jwksUrl, builds Map<kid, string> (kid → PEM public key); creates fast-jwt createVerifier per kid",
+        "Request hook: extracts Authorization: Bearer <token>; decodes header to get kid; looks up key in cache; if kid not in cache → re-fetches JWKS once (max 1 re-fetch per 60s using a timestamp guard to prevent thundering herd during key rotation); if still not found → 401; on fetch failure: retry with exponential back-off (1s → 2s → 4s, max 3 attempts) → 503 on exhaustion",
+        "Verifies JWT signature + expiry using fast-jwt createVerifier; on failure → 401 { error: 'invalid_token' }",
+        "Attaches verified payload to req.user (sub, role, locations, must_change_password)",
+        "must_change_password gate: if req.user.must_change_password === true AND req.url is NOT one of: PUT /identity/me/password, GET /identity/me, DELETE /identity/session → reply 403 { error: 'password_change_required' }",
+        "Paths in allowedPaths option bypass the entire auth check (used for /health, /ready, /identity/session, /identity/refresh, /identity/.well-known/jwks.json)",
+        "packages/@ortho/auth-middleware/src/index.ts exports authPlugin as the main export alongside the helper preHandlers",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "JWKS response shape: { keys: [{ kid, kty, n, e, ... }] }. Convert JWK to PEM using fast-jwt's built-in key support or the 'jwk-to-pem' utility. The re-fetch guard: store lastRefetchAt timestamp; only re-fetch if now() - lastRefetchAt > 60000ms. The exponential back-off applies to JWKS fetch failures (network errors), not to unknown-kid misses."
+    },
+    {
+      "id": "US-014",
+      "title": "Session routes — POST /identity/session, POST /identity/refresh, DELETE /identity/session",
+      "description": "As a developer, I need the three session lifecycle endpoints so that the frontend can exchange provider tokens for enriched JWTs and manage logout.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/routes/session.ts registers POST /identity/session: body { provider_token: string }; calls provider.verifyToken(provider_token) → loads user by email → loads locations → builds JwtPayload → signAccessToken → issueRefreshToken → returns 200 { access_token, refresh_token, expires_in: 900 }; returns 401 { error: 'invalid_credentials' } on provider rejection; returns 403 { error: 'account_inactive' } if user.status === 'inactive'",
+        "POST /identity/refresh: body { refresh_token: string }; calls rotateRefreshToken(rawToken) → loads user + locations → signAccessToken → returns 200 { access_token, refresh_token, expires_in: 900 }; propagates 401 errors from rotateRefreshToken with appropriate error codes",
+        "DELETE /identity/session: requires JWT (via authPlugin with this path NOT in allowedPaths); body { refresh_token: string }; hashes token, revokeToken(hash) → returns 204; if token not found → 204 (idempotent)",
+        "All routes use TypeBox schemas for body validation; return 400 on invalid body",
+        "Routes registered in app.ts",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "POST /identity/session and POST /identity/refresh are unauthenticated (in allowedPaths for authPlugin). DELETE /identity/session requires a valid JWT but only revokes the specific refresh token in the body — not all tokens. The refresh token rotation (rotateRefreshToken) handles replay detection internally and returns the new raw token."
+    },
+    {
+      "id": "US-015",
+      "title": "JWKS route — GET /identity/.well-known/jwks.json",
+      "description": "As a developer, I need the public JWKS endpoint so that @ortho/auth-middleware instances across all services can fetch and cache the RS256 public keys.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/routes/jwks.ts registers GET /identity/.well-known/jwks.json",
+        "Returns 200 { keys: [...] } where keys is the parsed IDENTITY_JWKS_KEYS array from env.ts",
+        "Route is unauthenticated (in allowedPaths for authPlugin)",
+        "Response includes Content-Type: application/json",
+        "Route registered in app.ts",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "This is a simple pass-through of the IDENTITY_JWKS_KEYS env var (already parsed as JWK[] in env.ts). Wrap in { keys: [...] } envelope. No caching headers needed — consumers (auth-middleware) handle their own caching."
+    },
+    {
+      "id": "US-016",
+      "title": "Me routes — GET /identity/me, PUT /identity/me/password",
+      "description": "As a developer, I need the self-service profile and password-change endpoints so that logged-in staff can view their profile and update their password.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/routes/me.ts registers GET /identity/me: requires JWT; calls getUser(pool, req.user.sub); returns 200 { id, email, name, role, locations, force_password_reset, status }",
+        "PUT /identity/me/password: requires JWT; body TypeBox schema { current_password?: string, new_password: string } (current_password always optional in schema); calls user.service.changeOwnPassword(pool, provider, req.user.sub, body, req.user.must_change_password); returns 200 {}; on password policy violation → 400 { error: 'password_policy_violation', details: [...] }; on wrong current_password → 401 { error: 'invalid_credentials' }",
+        "Both routes bypass must_change_password 403 gate (GET /identity/me and PUT /identity/me/password are in the excluded list)",
+        "Routes registered in app.ts",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "The must_change_password gate exclusion is handled in the authPlugin (US-013) — these paths are hardcoded in the gate check. GET /identity/me exposes force_password_reset from the DB row (same value as must_change_password in the JWT claim — keep in sync at issue time)."
+    },
+    {
+      "id": "US-017",
+      "title": "User management routes — POST/GET/GET:id/PUT /identity/users + PUT /identity/users/:id/password",
+      "description": "As a developer, I need the full user CRUD surface with cursor pagination so that marketing managers and super admins can manage staff accounts.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/routes/users.ts registers all 5 user management routes; all require JWT + requireRole(['marketing_manager', 'super_admin']) preHandler",
+        "POST /identity/users: body { email, name, role, password, locations?: string[] }; calls user.service.createUser; returns 201 with user shape { id, email, name, role, locations, status, force_password_reset }; 400 on password_policy_violation with { error, details }",
+        "GET /identity/users: query params { role?, status?, limit? (default 50), cursor? }; calls listUsers; returns 200 { users: [...], next_cursor: string|null }",
+        "GET /identity/users/:id: calls getUser; returns 200 user shape; 404 { error: 'not_found' } if missing",
+        "PUT /identity/users/:id: body { name?, role?, status?, locations?: string[] }; calls updateUser; 422 { error: 'reactivation_not_supported' } when trying to re-activate inactive user; returns 200 updated user shape",
+        "PUT /identity/users/:id/password: body { new_password: string }; calls adminResetPassword; 400 on policy violation; returns 200 {}",
+        "All routes use TypeBox schemas; return 400 on invalid body",
+        "Routes registered in app.ts",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Cursor pagination: the cursor query param is an opaque base64 string; decode it in user.repo.listUsers (US-006). The PUT /users/:id route accepts status field in the TypeBox schema (optional string) but the service layer enforces the reactivation restriction."
+    },
+    {
+      "id": "US-018",
+      "title": "API Key routes — POST/GET/DELETE /identity/api-keys + POST /identity/api-keys/validate",
+      "description": "As a developer, I need the API key management endpoints including the VPC-only validate endpoint so that EHR integrations can be issued and validated.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/src/routes/api-keys.ts registers all 4 routes",
+        "POST /identity/api-keys: requires JWT + requireRole(['marketing_manager', 'super_admin']); body { name: string, permissions: string[] }; calls generateApiKey; returns 201 { id, name, key, permissions } (raw key returned once)",
+        "GET /identity/api-keys: requires JWT + requireRole(['marketing_manager', 'super_admin']); returns 200 { keys: [{ id, name, permissions, last_used_at, status: 'active'|'revoked' }] }; omits key_hash from response",
+        "DELETE /identity/api-keys/:id: requires JWT + requireRole(['marketing_manager', 'super_admin']); calls revokeApiKey; returns 204; 404 if not found",
+        "POST /identity/api-keys/validate: Fastify preHandler checks req.headers['x-internal-secret'] === INTERNAL_API_SECRET env var; returns 401 { error: 'unauthorized' } if missing or wrong (no JWT required for this endpoint); body { key: string }; calls validateApiKey; returns 200 { permissions: string[] } or 401 { error: 'invalid_key' }",
+        "The X-Internal-Secret check is enforced in a Fastify preHandler registered directly on this route (not via authPlugin)",
+        "All routes registered in app.ts",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "The /validate endpoint is VPC-only (enforced at network level) but also has an application-level guard via X-Internal-Secret header checked in a preHandler. This endpoint is NOT in the authPlugin's allowedPaths — but since it has its own preHandler that runs before the authPlugin would touch it, and it checks X-Internal-Secret, it effectively bypasses JWT auth for this one path. Register /validate BEFORE authPlugin in the route registration order, or use a preHandler approach that short-circuits."
+    },
+    {
+      "id": "US-019",
+      "title": "Dev key generation script + seed script",
+      "description": "As a developer, I need the RSA key generation script and the super-admin seed script so that local development and initial deployments can be bootstrapped quickly.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/scripts/generate-dev-keys.ts: generates RSA-2048 key pair using Node.js crypto.generateKeyPairSync; formats private key as PEM PKCS#1; builds JWK from public key with kid='dev-1'; writes/merges IDENTITY_PRIVATE_KEY and IDENTITY_JWKS_KEYS into .env file at service root; does not overwrite other existing .env vars",
+        "Running npx tsx scripts/generate-dev-keys.ts writes valid PEM and JWK values to .env",
+        "apps/platform/identity/scripts/seed-super-admin.ts: reads SEED_EMAIL and SEED_PASSWORD from env vars; validates SEED_PASSWORD against password policy → exits non-zero with error message if invalid; calls provider.createUser(email, password); on provider duplicate-email error: logs clear message and exits non-zero; on success: INSERTs user row with force_password_reset=true, created_by=NULL using ON CONFLICT (email) DO NOTHING; logs created user_id to stdout",
+        "Both scripts are runnable with: npx tsx scripts/<name>.ts",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Use Node.js crypto.generateKeyPairSync('rsa', { modulusLength: 2048, publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs1', format: 'pem' } }). For JWK conversion from the public key: use the 'jwk-to-pem' or 'node-jose' library, or manually extract n and e from the key components. The .env merge: read existing .env, replace lines matching the key names or append if absent."
+    },
+    {
+      "id": "US-020",
+      "title": "Unit tests — token.service, user.service, api-key.service, password-policy, providers",
+      "description": "As a developer, I need unit tests for all service and utility modules so that business logic is verified without a real database or auth provider network calls.",
+      "acceptanceCriteria": [
+        "apps/platform/identity/test/unit/password-policy.test.ts: tests all 5 rules with valid and invalid passwords; tests that each rule independently fails; tests combined failure; tests edge cases (empty string, exactly at min length)",
+        "apps/platform/identity/test/unit/token.service.test.ts: sign → verify round-trip produces correct claims; rotateRefreshToken with unknown hash → throws 401 invalid_token; rotateRefreshToken with revoked token → calls revokeAllForUser → throws 401 session_invalidated (replay detection); expired token → throws 401 token_expired; successful rotation returns new raw token",
+        "apps/platform/identity/test/unit/user.service.test.ts: createUser calls validatePassword before provider.createUser; createUser with weak password throws 400 before any provider call; updateUser with status=inactive calls revokeAllForUser and provider.deactivateUser; updateUser status=active on inactive user throws 422 reactivation_not_supported; AuthProvider mocked via vi.fn()",
+        "apps/platform/identity/test/unit/api-key.service.test.ts: generateApiKey returns key with ak_ prefix; validateApiKey with unknown hash throws 401; validateApiKey with revoked key throws 401; validateApiKey calls touchLastUsed on success",
+        "apps/platform/identity/test/unit/providers/supabase.provider.test.ts: mocks @supabase/supabase-js; verifies correct SDK method called for each AuthProvider method",
+        "apps/platform/identity/test/unit/providers/auth0.provider.test.ts: mocks axios; verifies correct Management API endpoint called for each method; verifies M2M token is cached and reused across calls; verifies token refresh when near expiry",
+        "Tests pass"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Mock repositories using vi.mock or factory injection (prefer injecting mock pool/repo functions over vi.mock of modules). For token.service tests, generate a real RSA key pair in the test setup using crypto.generateKeyPairSync to enable actual sign+verify round-trip without mocking fast-jwt."
+    },
+    {
+      "id": "US-021",
+      "title": "Integration tests — session, me, users, api-keys HTTP layer",
+      "description": "As a developer, I need integration tests that run the full Fastify HTTP layer against a real PostgreSQL database so that the complete request/response cycle for all endpoints is verified.",
+      "acceptanceCriteria": [
+        "All integration test files use describe.skipIf(!process.env['DATABASE_URL']) to skip when DB is unavailable",
+        "beforeAll: create schema and all tables with raw SQL (not migration runner); generate dev RSA keys for test env; create a real pool",
+        "beforeEach: truncate all platform_identity tables in reverse FK order",
+        "afterAll: end pool",
+        "apps/platform/identity/test/integration/session.test.ts: POST /identity/session with valid provider token → 200 with access_token + refresh_token; POST /identity/session with inactive user → 403 account_inactive; POST /identity/refresh with valid token → 200 new tokens; POST /identity/refresh with revoked token → 401 session_invalidated (replay); DELETE /identity/session → 204; provider mocked via vi.fn() to return fixed providerUserId + email",
+        "apps/platform/identity/test/integration/me.test.ts: GET /identity/me with valid JWT → 200 profile; PUT /identity/me/password with must_change_password=true → current_password ignored, returns 200; PUT /identity/me/password with must_change_password=false + missing current_password → 400; GET /identity/me with must_change_password=true JWT → 200 (not blocked); GET /identity/users with must_change_password=true JWT → 403 password_change_required",
+        "apps/platform/identity/test/integration/users.test.ts: POST /identity/users creates user, returns 201 with force_password_reset=true; GET /identity/users cursor pagination round-trip (3 users, limit=2, verify next_cursor, verify second page); PUT /identity/users/:id status=inactive triggers deactivation; PUT /identity/users/:id status=active on inactive user → 422",
+        "apps/platform/identity/test/integration/api-keys.test.ts: POST /identity/api-keys → 201 with ak_ prefixed key; GET /identity/api-keys lists key without key_hash; POST /identity/api-keys/validate with correct X-Internal-Secret → 200 { permissions }; POST /identity/api-keys/validate without X-Internal-Secret → 401; DELETE /identity/api-keys/:id → 204; validate revoked key → 401",
+        "Tests use buildApp() with real pool and mocked AuthProvider (vi.fn()); JWTs are generated using signAccessToken in test setup",
+        "Tests pass"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "Follow the analytics service integration test pattern: use app.inject for all HTTP assertions (no real TCP server needed). The AuthProvider is mocked using vi.fn() — no real Supabase or Auth0 calls in integration tests. For JWT generation in tests, call signAccessToken() directly using the test RSA key. The must_change_password gate is verified by signing a JWT with must_change_password=true and hitting a protected route."
+    }
+  ]
+}
