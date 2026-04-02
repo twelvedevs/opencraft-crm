@@ -104,4 +104,15 @@ export class Auth0Provider implements AuthProvider {
       },
     );
   }
+
+  async signInWithPassword(email: string, password: string): Promise<void> {
+    await axios.post(`https://${this.auth0Domain}/oauth/token`, {
+      grant_type: 'password',
+      client_id: this.clientId,
+      client_secret: this.clientSecret,
+      username: email,
+      password,
+      audience: `https://${this.auth0Domain}/api/v2/`,
+    });
+  }
 }

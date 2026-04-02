@@ -43,4 +43,11 @@ export class SupabaseProvider implements AuthProvider {
       throw new Error(error.message);
     }
   }
+
+  async signInWithPassword(email: string, password: string): Promise<void> {
+    const { error } = await this.supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
 }
