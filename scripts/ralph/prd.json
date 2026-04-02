@@ -119,7 +119,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "This is the most complex handler. The dual-skip idempotency (both pipeline and coordinator rollups skip on duplicate) is spec-confirmed (Q8 Answer C). Keep the transaction single: one BEGIN wrapping insertEvent + both upserts."
     },
     {
@@ -134,7 +134,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
@@ -150,7 +150,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "campaign-delivered increments by recipient_count (bulk delivery confirmation from SendGrid webhook). Standard idempotency applies — if event_id is a duplicate, the rollup increment is also skipped."
     },
     {
@@ -164,7 +164,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "ad-spend relaxed idempotency: the upsertAdSpendDaily call always runs regardless of whether insertEvent returned inserted=true or false. This allows Integration Hub to re-publish a corrected spend figure with the same event_id. See spec Section 4 and 6.1."
     },
     {

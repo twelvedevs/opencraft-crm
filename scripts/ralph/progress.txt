@@ -1,3 +1,52 @@
+## 2026-04-02 - US-010
+- Created src/handlers/referral-converted.ts: extracts location_id, writes to both metrics_referrals_daily (count+1) AND metrics_conversions_daily (channel='referral', count+1) in one transaction; both rollup writes skipped if event_id is duplicate
+- Created src/handlers/ad-spend-synced.ts: extracts platform, location_id, synced_date; iterates records[] array; upserts metrics_ad_spend_daily for each record with ON CONFLICT DO UPDATE (overwrite); relaxed idempotency — rollup always runs regardless of insertEvent result
+- ad-spend-synced.ts includes comment explaining relaxed idempotency rule and why it differs from other handlers
+- Files changed: apps/platform/analytics/src/handlers/referral-converted.ts, ad-spend-synced.ts
+- **Learnings for future iterations:**
+  - Relaxed idempotency means insertEvent return value is discarded for ad-spend-synced; upsertAdSpendDaily always executes
+  - ad-spend-synced iterates payload.records[] — cast each record as Record<string, unknown> before accessing fields
+  - synced_date comes from payload top-level field (not occurred_at) for ad spend records
+  - referral-converted dual rollup: both upserts share the same inserted gate (both skip or both run)
+---
+
+## 2026-04-02 - US-009
+- Created src/handlers/campaign-sent.ts: extracts campaign_id + location_id, increments metrics_campaigns_daily.sent by 1; skips on duplicate event_id
+- Created src/handlers/campaign-delivered.ts: extracts campaign_id + location_id + recipient_count, increments metrics_campaigns_daily.delivered by recipient_count (not 1); skips on duplicate
+- Created src/handlers/email-opened.ts: extracts campaign_id + location_id, increments metrics_campaigns_daily.opened by 1; skips on duplicate
+- Created src/handlers/email-clicked.ts: extracts campaign_id + location_id, increments metrics_campaigns_daily.clicked by 1; skips on duplicate
+- All four follow standard insertEvent + inserted-gate transaction pattern
+- Files changed: apps/platform/analytics/src/handlers/campaign-sent.ts, campaign-delivered.ts, email-opened.ts, email-clicked.ts
+- **Learnings for future iterations:**
+  - campaign-delivered uses recipient_count from payload (Number coercion with default 1) — increments by bulk count not 1
+  - entity_type is 'campaign' for campaign-sent/delivered, 'email' for email-opened/clicked
+  - source is 'campaign-service' for all four handlers
+---
+
+## 2026-04-02 - US-008
+- Created src/handlers/message-delivered.ts: extracts location_id, increments metrics_messages_daily.delivered by 1; skips on duplicate event_id
+- Created src/handlers/message-failed.ts: extracts location_id, increments metrics_messages_daily.failed by 1; skips on duplicate event_id
+- Created src/handlers/opt-out-received.ts: extracts location_id, increments metrics_messages_daily.opt_outs by 1; skips on duplicate event_id
+- All three follow identical transaction pattern: pool.connect() → BEGIN → insertEvent → gate rollup on inserted → COMMIT
+- Files changed: apps/platform/analytics/src/handlers/message-delivered.ts, message-failed.ts, opt-out-received.ts
+- **Learnings for future iterations:**
+  - All three handlers use upsertMessageDaily with a single delta field (delivered_delta, failed_delta, or opt_outs_delta); other deltas default to 0 in the upsert function
+  - source field set to 'messaging-service' for all three; entity_type is 'message' for delivered/failed, 'opt-out' for opt-out-received
+---
+
+## 2026-04-02 - US-007
+- Created src/handlers/stage-changed.ts: dual rollup handler for pipeline + coordinator metrics
+- Extracts location_id, pipeline, stage_to, triggered_by?, response_time_seconds?, time_in_stage_seconds from payload
+- Single transaction: insertEvent → if inserted=true: upsertPipelineDaily (entries+1) + if triggered_by non-null: upsertCoordinatorDaily
+- response_time_sum/count only incremented when response_time_seconds is present (not null)
+- Both rollup writes skipped if insertEvent returns inserted=false (duplicate event_id)
+- Files changed: apps/platform/analytics/src/handlers/stage-changed.ts
+- **Learnings for future iterations:**
+  - Conditional rollup writes within the same transaction: check inserted first, then gate nested upserts on field presence
+  - triggered_by guard uses !== null (not falsy check) to allow coordinator IDs that could theoretically be '0'
+  - time_in_stage_seconds defaults to 0 if missing from payload; response_time treated as optional (null → skip count increment)
+---
+
 ## 2026-04-02 - US-006
 - Created src/handlers/lead-created.ts: extracts location_id + channel from payload, inserts analytics_events row (entity_type='lead'), increments metrics_leads_daily.count in one transaction
 - Created src/handlers/lead-archived.ts: extracts location_id, hardcodes channel='unknown', increments metrics_leads_daily.archived
