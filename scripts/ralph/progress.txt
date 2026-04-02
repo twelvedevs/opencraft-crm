@@ -1,3 +1,17 @@
+## 2026-04-02 - US-019
+- Created test/unit/handlers/ directory with 13 test files (one per handler)
+- Each test mocks repositories/events.js (insertEvent) and repositories/rollups.js (relevant upsert functions) via vi.mock
+- Mock pool pattern: makePool() returns a Pool with connect() → PoolClient with query/release vi.fn()
+- Tests verify: correct insertEvent params (source, entity_type, dimensions); rollup upsert called with correct delta params when inserted=true; rollup upsert skipped when inserted=false (idempotency)
+- Special cases covered: stage-changed — coordinator rollup skipped when triggered_by absent, response_time fields zeroed when response_time_seconds absent, both rollups skipped on duplicate; ad-spend-synced — upsertAdSpendDaily called even when inserted=false (relaxed idempotency); campaign-delivered — delivered_delta=recipient_count (842), not 1; referral-converted — both upsertReferralDaily and upsertConversionDaily skipped on duplicate
+- Files changed: 13 new files in test/unit/handlers/
+- **Learnings for future iterations:**
+  - Handler test pattern: declare mock fns at top → vi.mock both repos → top-level await import handler → makePool() factory → beforeEach(vi.clearAllMocks)
+  - vi.mock must be declared before dynamic import of the module under test (hoisting ensures correct order)
+  - Mock call inspection: `mockFn.mock.calls[0]!` gives `[client, params]` — index [1] is params
+  - For relaxed idempotency tests, assert the upsert IS called even when mockInsertEvent returns { inserted: false }
+---
+
 ## 2026-04-02 - US-018
 - Created src/routes/admin.ts: POST /analytics/admin/recompute validates X-Admin-Key against ADMIN_RECOMPUTE_KEY env var (401 on mismatch); body validated with typebox (table must be one of 8 valid rollup table names, date_range required); enqueues BullMQ job named 'recompute' on the provided queue; returns 202 { job_id }
 - GET /analytics/admin/recompute/:job_id validates X-Admin-Key; calls queue.getJob(); returns 404 if not found; maps BullMQ state (waiting/delayed/prioritized → 'pending', active → 'active', completed/failed pass through); returns { job_id, status, rows_written, error }
