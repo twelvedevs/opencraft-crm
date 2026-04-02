@@ -1,0 +1,34 @@
+# Ralph Progress Log
+Started: Thu Apr  2 00:00:00 UTC 2026
+---
+
+## Codebase Patterns
+- Use `@sinclair/typebox` Type.Object + Value.Check for env validation in env.ts
+- All services: `"type": "module"`, ESM with `.js` extensions in imports
+- tsconfig: ES2022 target, NodeNext module/moduleResolution, strict: true
+- Multi-stage Dockerfile: builder stage compiles TS, runner stage copies dist + node_modules
+- Knex for migrations only; raw pg Pool + PoolClient for runtime queries
+- Migrations use `knex.raw()` with schema-qualified table names; first migration creates schema with `IF NOT EXISTS`
+- Run `npm run typecheck` from within the service directory (no monorepo-level runner)
+- All platform services live under `apps/platform/<service-name>/`
+- Workspace refs use `file:../../../packages/@ortho/<pkg>` format
+- Repository pattern: standalone exported async functions with PoolClient as first arg, schema-qualified table names
+- Fastify plugins: use `fastify-plugin` (fp) wrapper, register preHandler hooks for auth
+- fast-jwt createVerifier: for static keys pass `key` as string; for JWKS pass `key` as async function (KeyFetcher)
+---
+
+## 2026-04-02 - US-008
+- Implemented JWT auth Fastify plugin with static RS256 and JWKS modes
+- Uses fast-jwt createVerifier with RS256 algorithm
+- Static mode: verifies with PEM public key from IDENTITY_SERVICE_PUBLIC_KEY env
+- JWKS mode: fetches keys from IDENTITY_SERVICE_JWKS_URL, matches by kid, caches for 5 minutes
+- Both modes validate expiry, iss (if JWT_ISSUER set), aud (if JWT_AUDIENCE set)
+- Invalid/expired token returns 401 { error: 'Unauthorized' }
+- Plugin registered via fastify-plugin (fp) for proper encapsulation
+- Files created: apps/platform/integration-hub/src/plugins/jwt-auth.ts
+- **Learnings for future iterations:**
+  - fast-jwt createVerifier with a string key returns a sync verifier; with an async KeyFetcher returns async verifier
+  - JWKS keys need to be converted from JWK format to PEM using Node.js crypto createPublicKey
+  - Plugin exports JwtAuthOptions interface for configuration by app.ts (US-024)
+  - Webhook routes must NOT have this plugin applied — register them on a separate scope
+---
