@@ -30,3 +30,41 @@ export interface LeadActivityLoggedEvent {
   entity_id: string;
   payload: LeadActivityLoggedPayload;
 }
+
+// ad_lead.received
+export interface AdLeadReceivedPayload {
+  platform: string;
+  external_lead_id: string;
+  campaign_id: string;
+  ad_set_id?: string;
+  ad_id?: string;
+  form_id?: string;
+  location_id: string | null;
+  fields: Record<string, string>;
+}
+
+export interface AdLeadReceivedEvent {
+  event_type: 'ad_lead.received';
+  payload: AdLeadReceivedPayload;
+}
+
+// ad_spend.synced
+export interface AdSpendRecord {
+  campaign_id: string;
+  campaign_name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+}
+
+export interface AdSpendSyncedPayload {
+  platform: string;
+  location_id: string;
+  synced_date: string;
+  records: AdSpendRecord[];
+}
+
+export interface AdSpendSyncedEvent {
+  event_type: 'ad_spend.synced';
+  payload: AdSpendSyncedPayload;
+}
