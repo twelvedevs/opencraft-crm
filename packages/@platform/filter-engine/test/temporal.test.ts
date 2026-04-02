@@ -155,6 +155,45 @@ describe('temporal operators', () => {
     });
   });
 
+  describe('DST edge cases', () => {
+    it('within_last boundary is correct across a spring-forward transition', () => {
+      // US spring-forward: 2026-03-08T07:00:00Z (2 AM EST → 3 AM EDT)
+      // now = 2 days after; the 2-day window spans the transition.
+      // Pure millisecond arithmetic must not shift the boundary by 1 hour.
+      const dstNow = new Date('2026-03-10T12:00:00.000Z');
+      const atBoundary = new Date(dstNow.getTime() - 2 * DAY_MS).toISOString();
+      const justBefore = new Date(dstNow.getTime() - 2 * DAY_MS - 1).toISOString();
+
+      const node: ConditionNode = {
+        field: 'created_at',
+        op: 'within_last',
+        value: { amount: 2, unit: 'days' },
+      };
+
+      expect(evaluate(node, { created_at: atBoundary }, { now: dstNow })).toBe(true);
+      expect(evaluate(node, { created_at: justBefore }, { now: dstNow })).toBe(false);
+    });
+
+    it('not_within_last boundary is correct across a fall-back transition', () => {
+      // US fall-back: 2026-11-01T06:00:00Z (2 AM EDT → 1 AM EST)
+      // now = 2 days after; the 2-day window spans the transition.
+      const fallNow = new Date('2026-11-03T12:00:00.000Z');
+      const atBoundary = new Date(fallNow.getTime() - 2 * DAY_MS).toISOString();
+      const justBefore = new Date(fallNow.getTime() - 2 * DAY_MS - 1).toISOString();
+
+      const node: ConditionNode = {
+        field: 'last_contact_at',
+        op: 'not_within_last',
+        value: { amount: 2, unit: 'days' },
+      };
+
+      // At boundary = still within last 2 days → not_within_last is false
+      expect(evaluate(node, { last_contact_at: atBoundary }, { now: fallNow })).toBe(false);
+      // 1ms before boundary = older than 2 days → not_within_last is true
+      expect(evaluate(node, { last_contact_at: justBefore }, { now: fallNow })).toBe(true);
+    });
+  });
+
   describe('error handling', () => {
     it('unknown temporal op throws', () => {
       const node = { field: 'created_at', op: 'unknown_temporal' } as unknown as FilterNode;

@@ -1,14 +1,5 @@
 import type { ConditionNode, EvalContext } from '../types.js';
-
-function resolveField(entity: Record<string, unknown>, path: string): unknown {
-  const parts = path.split('.');
-  let current: unknown = entity;
-  for (const part of parts) {
-    if (current === null || current === undefined) return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
+import { resolveField } from '../utils.js';
 
 function toDate(val: unknown): Date | null {
   if (val instanceof Date) return val;

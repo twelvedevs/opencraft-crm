@@ -181,6 +181,17 @@ describe('filter-engine edge cases', () => {
     expect(evaluate(filter, { address: null })).toBe(false);
   });
 
+  it('dot-notation with array index resolves element correctly', () => {
+    const filter: FilterNode = { field: 'items.0.name', op: 'eq', value: 'first' };
+    expect(evaluate(filter, { items: [{ name: 'first' }, { name: 'second' }] })).toBe(true);
+    expect(evaluate(filter, { items: [{ name: 'other' }] })).toBe(false);
+  });
+
+  it('dot-notation with out-of-bounds array index returns false', () => {
+    const filter: FilterNode = { field: 'items.5.name', op: 'eq', value: 'foo' };
+    expect(evaluate(filter, { items: [{ name: 'only' }] })).toBe(false);
+  });
+
   it('unknown op throws descriptive error', () => {
     const filter = { field: 'x', op: 'banana', value: 1 } as unknown as FilterNode;
     expect(() => evaluate(filter, { x: 1 })).toThrow('Unknown base operator: banana');
