@@ -6,6 +6,7 @@ import type { AuthProvider } from './providers/auth-provider.interface.js';
 import { env } from './env.js';
 import { healthRoutes } from './routes/health.js';
 import { sessionRoutes } from './routes/session.js';
+import { jwksRoutes } from './routes/jwks.js';
 
 export async function buildApp(
   pool: Pool,
@@ -21,6 +22,7 @@ export async function buildApp(
 
   await app.register(healthRoutes, { pool });
   await app.register(sessionRoutes, { pool, provider });
+  await app.register(jwksRoutes);
 
   return app;
 }
