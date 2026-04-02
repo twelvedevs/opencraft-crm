@@ -1,0 +1,281 @@
+## 2026-04-02 - US-021
+- Created test/integration/event-ingestion.test.ts: describe.skipIf(!DATABASE_URL); creates schema + 9 tables inline (IF NOT EXISTS) using raw pool.query; no migration runner; routes events through routeEvent() with a real Pool; cleans all tables in beforeEach via DELETE FROM
+- Tests: lead.created writes analytics_events row + metrics_leads_daily increment; duplicate event_id → exactly one row + rollup count=1; stage-changed with triggered_by → both pipeline and coordinator rows; stage-changed duplicate → both rollups stay at 1; ad_spend.synced same event_id twice → analytics_events has one row, metrics_ad_spend_daily.spend overwritten with corrected value
+- Created test/integration/http.test.ts: describe.skipIf(!DATABASE_URL); builds app once in beforeAll using minimal mock Queue; tests GET /health (200 ok), GET /ready (200 ready with live DB), POST /analytics/query (200 with rows/total/truncated shape), POST /analytics/query missing event_type (400), missing aggregate (400), no matching events (total=0)
+- 11 integration tests correctly skipped when DATABASE_URL absent; all 82 unit tests continue to pass
+- Files changed: test/integration/event-ingestion.test.ts, test/integration/http.test.ts
+- **Learnings for future iterations:**
+  - Integration tests create tables inline with IF NOT EXISTS — safe to rerun against same DB without errors
+  - analytics_events is partitioned; DELETE FROM parent table cascades to all partitions including default; seed rows via analytics_events_default (direct partition) for HTTP tests
+  - buildApp requires (pool, queue) — pass a minimal mock queue `{ add: vi.fn(), getJob: vi.fn() } as unknown as Queue` for integration tests that don't exercise admin routes
+  - describe.skipIf(!process.env['DATABASE_URL']) is the correct pattern for integration tests that require a real DB
+  - `@ortho/logger` mocking not needed for analytics integration tests — app.ts doesn't import it directly
+---
+
+## 2026-04-02 - US-020
+- Created test/unit/query-builder.test.ts: 12 tests covering count/sum/avg aggregates, single/multi-value filters, group_by one/two fields, daily/monthly/total granularity, period binding positions, injection guard (throws on invalid field), and binding ordering with multiple filters
+- Created test/unit/api-key-auth.test.ts: 8 tests covering first call hits Identity Service + caches, second call uses cache (fetch called only once), TTL expiry with vi.useFakeTimers() + vi.setSystemTime(), non-ak_ bypass, no-auth bypass, Identity Service 401 → 401 to client, network error → 401, header injection verification via route handler echoing request headers
+- Files changed: test/unit/query-builder.test.ts, test/unit/api-key-auth.test.ts
+- **Learnings for future iterations:**
+  - vi.stubGlobal('fetch', vi.fn()) returns `vi` for chaining, NOT the mock function — save the mock separately: `const mock = vi.fn(); vi.stubGlobal('fetch', mock);`
+  - vi.useFakeTimers() + vi.setSystemTime(Date.now() + ms) is the clean way to test TTL expiry in cache; call vi.useRealTimers() in afterEach
+  - api-key-auth.ts reads process.env directly (not via env.ts) — set process.env vars in beforeAll, no need to vi.mock env.js
+  - Use unique API key strings per test to avoid module-level keyCache pollution between tests
+  - To verify injected request headers in plugin tests, have the route handler return them in the response JSON
+  - call vi.unstubAllGlobals() in afterEach to restore fetch between tests
+---
+
+## 2026-04-02 - US-019
+- Created test/unit/handlers/ directory with 13 test files (one per handler)
+- Each test mocks repositories/events.js (insertEvent) and repositories/rollups.js (relevant upsert functions) via vi.mock
+- Mock pool pattern: makePool() returns a Pool with connect() → PoolClient with query/release vi.fn()
+- Tests verify: correct insertEvent params (source, entity_type, dimensions); rollup upsert called with correct delta params when inserted=true; rollup upsert skipped when inserted=false (idempotency)
+- Special cases covered: stage-changed — coordinator rollup skipped when triggered_by absent, response_time fields zeroed when response_time_seconds absent, both rollups skipped on duplicate; ad-spend-synced — upsertAdSpendDaily called even when inserted=false (relaxed idempotency); campaign-delivered — delivered_delta=recipient_count (842), not 1; referral-converted — both upsertReferralDaily and upsertConversionDaily skipped on duplicate
+- Files changed: 13 new files in test/unit/handlers/
+- **Learnings for future iterations:**
+  - Handler test pattern: declare mock fns at top → vi.mock both repos → top-level await import handler → makePool() factory → beforeEach(vi.clearAllMocks)
+  - vi.mock must be declared before dynamic import of the module under test (hoisting ensures correct order)
+  - Mock call inspection: `mockFn.mock.calls[0]!` gives `[client, params]` — index [1] is params
+  - For relaxed idempotency tests, assert the upsert IS called even when mockInsertEvent returns { inserted: false }
+---
+
+## 2026-04-02 - US-018
+- Created src/routes/admin.ts: POST /analytics/admin/recompute validates X-Admin-Key against ADMIN_RECOMPUTE_KEY env var (401 on mismatch); body validated with typebox (table must be one of 8 valid rollup table names, date_range required); enqueues BullMQ job named 'recompute' on the provided queue; returns 202 { job_id }
+- GET /analytics/admin/recompute/:job_id validates X-Admin-Key; calls queue.getJob(); returns 404 if not found; maps BullMQ state (waiting/delayed/prioritized → 'pending', active → 'active', completed/failed pass through); returns { job_id, status, rows_written, error }
+- Updated src/app.ts: added Queue import and parameter to buildApp(pool, queue); registered adminRoutes with queue
+- Updated src/index.ts: moved buildApp call after queue creation so recomputeQueue can be passed as second argument
+- Created test/unit/admin.test.ts: 13 tests covering all auth (401 missing/wrong key), validation (400 bad table, missing date_range), happy path POST (202 + job_id enqueue), and GET status for all four states (pending/active/completed/failed)
+- Files changed: src/routes/admin.ts, src/app.ts, src/index.ts, test/unit/admin.test.ts
+- **Learnings for future iterations:**
+  - buildApp now requires two arguments: (pool: Pool, queue: Queue) — pass recomputeQueue from index.ts
+  - BullMQ Queue.getJob(id) returns null for missing jobs; call job.getState() for status string
+  - BullMQ states map: 'waiting'|'delayed'|'prioritized' → 'pending'; 'active' → 'active'; 'completed'/'failed' pass through
+  - X-Admin-Key validated by comparing request.headers['x-admin-key'] directly to env.ADMIN_RECOMPUTE_KEY (no JWT)
+  - vi.mock for env.js must be declared before dynamic import of the module under test when using top-level await import
+---
+
+## 2026-04-02 - US-016
+- Created src/services/query-builder.ts: pure function buildQuery(params: QueryParams): { sql, bindings }; supports count/sum/avg aggregates; dot-notation (dimensions.channel → (dimensions->>'channel')); period bounds via occurred_at >= $1::date AND occurred_at < ($2::date + INTERVAL '1 day'); equality and IN filters; group_by fields; daily/monthly/total granularity; validates field names against /^[a-z_][a-z0-9_.]*$/i to guard injection
+- Created src/routes/query.ts: POST /analytics/query; validates body with typebox (event_type required, aggregate required, aggregate_field required for sum/avg); prepends event_type as first filter; caps result at 10000 rows with truncated flag; per-route @fastify/rate-limit override: API key callers (ak_ prefix) 100 req/min, JWT/anon callers 10 req/min; key generator hashes API key or extracts JWT sub
+- Registered queryRoutes in app.ts
+- Files changed: src/services/query-builder.ts, src/routes/query.ts, src/app.ts
+- **Learnings for future iterations:**
+  - @fastify/rate-limit per-route override uses `config: { rateLimit: { keyGenerator, max, timeWindow } }` on the route options; `max` can be a function (req, key) => number
+  - query-builder throws on invalid field names (caught by route, returned as 400)
+  - event_type is prepended as a filter (not a separate param) before calling buildQuery; this keeps the pure function generic
+  - occurred_at comparison uses `occurred_at >= $1::date AND occurred_at < ($2::date + INTERVAL '1 day')` for inclusive end-date day range
+---
+
+## 2026-04-02 - US-015
+- Created src/routes/metrics/ad-spend.ts: GET /analytics/metrics/ad-spend with platform and campaign_id filters; GET /analytics/metrics/ad-spend/campaigns always groups by campaign_id (enforces campaign_name is display hint only); both routes aggregate impressions, clicks, spend; support shared period/granularity/location_id/page/page_size params
+- Created src/routes/metrics/campaigns.ts: GET /analytics/metrics/campaigns with campaign_id filter; returns sent, delivered, opened, clicked per row
+- Created src/routes/metrics/referrals.ts: GET /analytics/metrics/referrals using shared params; queries metrics_referrals_daily
+- Created src/routes/metrics/coordinators.ts: GET /analytics/metrics/coordinators with coordinator_id filter; returns raw sums (response_time_sum/count, time_in_stage_sum/count) — Reporting Service computes means
+- Registered all four routes in app.ts
+- Files changed: src/routes/metrics/ad-spend.ts, campaigns.ts, referrals.ts, coordinators.ts, src/app.ts
+- **Learnings for future iterations:**
+  - /ad-spend/campaigns sub-route uses identical SQL to /ad-spend but with a comment documenting the campaign_name constraint — both always GROUP BY campaign_id
+  - coordinators route returns raw sums not averages; division happens in Reporting Service
+  - referrals route has no extra filters beyond shared params (location_id, period, granularity, pagination)
+---
+
+## 2026-04-02 - US-013
+- Created src/env.ts: validates all env vars with typebox; required: DATABASE_URL, SQS_QUEUE_URL, IDENTITY_SERVICE_URL, REDIS_URL, ADMIN_RECOMPUTE_KEY; optional with defaults: PORT (3000), LOG_LEVEL (info), API_KEY_CACHE_TTL_SECONDS (60), SQS_BATCH_SIZE (10), SQS_CONCURRENCY (5), SQS_POLLING_INTERVAL_MS (no default)
+- Created src/routes/health.ts: GET /health always 200 { status: 'ok' }; GET /ready runs SELECT 1 → 200 { status: 'ready' } or 503 { status: 'unavailable', reason }; takes { pool } as plugin options
+- Created src/app.ts: buildApp(pool) registers sensible + apiKeyAuthPlugin + rate-limit + healthRoutes
+- Replaced src/index.ts placeholder: starts HTTP server + SQS consumer concurrently; SIGTERM stops consumer then closes server then ends pool
+- Created src/worker.ts: SQS-only entry point; SIGTERM stops consumer then ends pool
+- Created test/unit/health.test.ts: 3 tests verifying GET /health (200 ok), GET /ready DB up (200 ready), GET /ready DB down (503 unavailable)
+- Files changed: src/env.ts, src/app.ts, src/routes/health.ts, src/index.ts, src/worker.ts, test/unit/health.test.ts
+- **Learnings for future iterations:**
+  - healthRoutes takes `{ pool }` as options (second arg to register) — not a decorator pattern
+  - @fastify/rate-limit v9 registers globally with `await app.register(rateLimit, { max, timeWindow })`
+  - worker.ts uses top-level await (ESM) — same pattern as index.ts but no HTTP server
+  - env.ts follows AI service pattern; parseInt applied in raw object before Value.Check
+---
+
+## 2026-04-02 - US-012
+- Created src/plugins/api-key-auth.ts: Fastify plugin registered with fastify-plugin; adds onRequest hook; handles ak_-prefixed API keys
+- SHA256 hash of key used as in-memory Map cache key; TTL from API_KEY_CACHE_TTL_SECONDS (default 60s)
+- On cache miss: POST to IDENTITY_SERVICE_URL/identity/api-keys/validate; caches valid result; returns 401 on 401/403 or network error
+- On cache hit: skips Identity Service call entirely
+- Injects X-User-Role and X-Api-Key-Permissions headers from validation response for downstream auth middleware
+- Non-ak_ Authorization headers pass through untouched
+- Added fastify-plugin ^5.0.0 to package.json dependencies; npm install updated package-lock.json
+- Files changed: apps/platform/analytics/src/plugins/api-key-auth.ts, apps/platform/analytics/package.json, apps/platform/analytics/package-lock.json
+- **Learnings for future iterations:**
+  - fastify-plugin must be added as a direct dep (^5.0.0 for fastify v5 compatibility)
+  - In-memory Map TTL cache: store { role, permissions, expiresAt: Date.now() + ttl*1000 }; check expiresAt > now on read
+  - Use `import fp from 'fastify-plugin'` (default import) — CJS package with esModuleInterop
+  - request.headers can be mutated directly to inject headers for downstream hooks
+  - Node 24 has built-in fetch — no need for node-fetch or axios
+---
+
+## 2026-04-02 - US-010
+- Created src/handlers/referral-converted.ts: extracts location_id, writes to both metrics_referrals_daily (count+1) AND metrics_conversions_daily (channel='referral', count+1) in one transaction; both rollup writes skipped if event_id is duplicate
+- Created src/handlers/ad-spend-synced.ts: extracts platform, location_id, synced_date; iterates records[] array; upserts metrics_ad_spend_daily for each record with ON CONFLICT DO UPDATE (overwrite); relaxed idempotency — rollup always runs regardless of insertEvent result
+- ad-spend-synced.ts includes comment explaining relaxed idempotency rule and why it differs from other handlers
+- Files changed: apps/platform/analytics/src/handlers/referral-converted.ts, ad-spend-synced.ts
+- **Learnings for future iterations:**
+  - Relaxed idempotency means insertEvent return value is discarded for ad-spend-synced; upsertAdSpendDaily always executes
+  - ad-spend-synced iterates payload.records[] — cast each record as Record<string, unknown> before accessing fields
+  - synced_date comes from payload top-level field (not occurred_at) for ad spend records
+  - referral-converted dual rollup: both upserts share the same inserted gate (both skip or both run)
+---
+
+## 2026-04-02 - US-009
+- Created src/handlers/campaign-sent.ts: extracts campaign_id + location_id, increments metrics_campaigns_daily.sent by 1; skips on duplicate event_id
+- Created src/handlers/campaign-delivered.ts: extracts campaign_id + location_id + recipient_count, increments metrics_campaigns_daily.delivered by recipient_count (not 1); skips on duplicate
+- Created src/handlers/email-opened.ts: extracts campaign_id + location_id, increments metrics_campaigns_daily.opened by 1; skips on duplicate
+- Created src/handlers/email-clicked.ts: extracts campaign_id + location_id, increments metrics_campaigns_daily.clicked by 1; skips on duplicate
+- All four follow standard insertEvent + inserted-gate transaction pattern
+- Files changed: apps/platform/analytics/src/handlers/campaign-sent.ts, campaign-delivered.ts, email-opened.ts, email-clicked.ts
+- **Learnings for future iterations:**
+  - campaign-delivered uses recipient_count from payload (Number coercion with default 1) — increments by bulk count not 1
+  - entity_type is 'campaign' for campaign-sent/delivered, 'email' for email-opened/clicked
+  - source is 'campaign-service' for all four handlers
+---
+
+## 2026-04-02 - US-008
+- Created src/handlers/message-delivered.ts: extracts location_id, increments metrics_messages_daily.delivered by 1; skips on duplicate event_id
+- Created src/handlers/message-failed.ts: extracts location_id, increments metrics_messages_daily.failed by 1; skips on duplicate event_id
+- Created src/handlers/opt-out-received.ts: extracts location_id, increments metrics_messages_daily.opt_outs by 1; skips on duplicate event_id
+- All three follow identical transaction pattern: pool.connect() → BEGIN → insertEvent → gate rollup on inserted → COMMIT
+- Files changed: apps/platform/analytics/src/handlers/message-delivered.ts, message-failed.ts, opt-out-received.ts
+- **Learnings for future iterations:**
+  - All three handlers use upsertMessageDaily with a single delta field (delivered_delta, failed_delta, or opt_outs_delta); other deltas default to 0 in the upsert function
+  - source field set to 'messaging-service' for all three; entity_type is 'message' for delivered/failed, 'opt-out' for opt-out-received
+---
+
+## 2026-04-02 - US-007
+- Created src/handlers/stage-changed.ts: dual rollup handler for pipeline + coordinator metrics
+- Extracts location_id, pipeline, stage_to, triggered_by?, response_time_seconds?, time_in_stage_seconds from payload
+- Single transaction: insertEvent → if inserted=true: upsertPipelineDaily (entries+1) + if triggered_by non-null: upsertCoordinatorDaily
+- response_time_sum/count only incremented when response_time_seconds is present (not null)
+- Both rollup writes skipped if insertEvent returns inserted=false (duplicate event_id)
+- Files changed: apps/platform/analytics/src/handlers/stage-changed.ts
+- **Learnings for future iterations:**
+  - Conditional rollup writes within the same transaction: check inserted first, then gate nested upserts on field presence
+  - triggered_by guard uses !== null (not falsy check) to allow coordinator IDs that could theoretically be '0'
+  - time_in_stage_seconds defaults to 0 if missing from payload; response_time treated as optional (null → skip count increment)
+---
+
+## 2026-04-02 - US-006
+- Created src/handlers/lead-created.ts: extracts location_id + channel from payload, inserts analytics_events row (entity_type='lead'), increments metrics_leads_daily.count in one transaction
+- Created src/handlers/lead-archived.ts: extracts location_id, hardcodes channel='unknown', increments metrics_leads_daily.archived
+- Created src/handlers/lead-converted.ts: extracts location_id + channel, increments metrics_conversions_daily.count
+- All three handlers use pool.connect() + BEGIN/COMMIT, call insertEvent, gate rollup on inserted=true
+- Also rebuilt packages/@ortho/event-bus (dist was stale — event_id field wasn't in compiled types)
+- Files changed: apps/platform/analytics/src/handlers/lead-created.ts, lead-archived.ts, lead-converted.ts; packages/@ortho/event-bus/dist/types.d.ts
+- **Learnings for future iterations:**
+  - After adding fields to @ortho/event-bus types.ts, must run `npm run build` in that package to update dist/ before dependent services can typecheck
+  - occurred_at is read from payload['occurred_at'] (string → Date) with fallback to new Date(); date string for rollup keys derived via .toISOString().slice(0, 10)
+  - All handlers import OrthoEvent from @ortho/event-bus and Pool from pg (not PoolClient)
+---
+
+## 2026-04-02 - US-005
+- Created src/repositories/events.ts: insertEvent using INSERT ... ON CONFLICT (event_id) DO NOTHING; returns { inserted: boolean }
+- Created src/repositories/rollups.ts: 8 typed upsert functions (upsertLeadDaily, upsertPipelineDaily, upsertConversionDaily, upsertMessageDaily, upsertAdSpendDaily, upsertCampaignDaily, upsertReferralDaily, upsertCoordinatorDaily)
+- All increment upserts use ON CONFLICT DO UPDATE SET col = table.col + EXCLUDED.col pattern
+- upsertAdSpendDaily overwrites full row (not increment) per spec
+- Files changed: apps/platform/analytics/src/repositories/events.ts, apps/platform/analytics/src/repositories/rollups.ts
+- **Learnings for future iterations:**
+  - insertEvent returns { inserted: boolean } by checking rowCount > 0 after ON CONFLICT DO NOTHING
+  - All params typed as interfaces and exported — handlers will import these types directly
+  - upsertAdSpendDaily comment documents relaxed idempotency rationale inline
+---
+
+## 2026-04-02 - US-004
+- Created 002_create_rollup_tables.ts with all 8 rollup tables in platform_analytics schema
+- All tables use knex.raw() for DDL; UNIQUE constraints match spec exactly
+- Added campaign_name display hint comment to metrics_ad_spend_daily
+- Files changed: apps/platform/analytics/migrations/002_create_rollup_tables.ts
+- **Learnings for future iterations:**
+  - All 8 rollup tables use plain `int NOT NULL DEFAULT 0` for counters (no serial/sequence)
+  - metrics_ad_spend_daily.campaign_name defaults to '' (empty string) not NULL — upsert always overwrites it
+  - down() drops tables in reverse creation order (no FK deps here, but good practice)
+---
+
+## 2026-04-02 - US-003
+- Created analytics_events partitioned table migration using knex.raw() for PARTITION BY RANGE DDL
+- Created analytics_events_default partition (catch-all for rows before named partitions exist)
+- Created indexes: (event_type, occurred_at) composite and GIN on dimensions
+- Created knexfile.ts following automation service pattern
+- Files changed: apps/platform/analytics/migrations/001_create_analytics_events.ts, apps/platform/analytics/migrations/knexfile.ts
+- **Learnings for future iterations:**
+  - Partitioned tables require composite PK including the partition key: PRIMARY KEY (id, occurred_at) — plain uuid PK will error on partitioned tables
+  - Use knex.raw() for all partitioning DDL; Knex schema builder has no native support
+  - Default partition is created as a separate CREATE TABLE ... PARTITION OF ... DEFAULT statement
+  - down() must drop default partition BEFORE the parent table (dependency order)
+---
+
+## 2026-04-02 - US-011
+- Created src/services/event-router.ts: switch on event.event_type routing to all 13 handlers; unknown types logged at debug level, not thrown
+- Created src/services/sqs-consumer.ts: reads SQS_CONCURRENCY env (default 5), creates p-limit limiter, calls createEventBus(), subscribes all 13 event types, returns { start, stop } delegating to bus
+- Files changed: apps/platform/analytics/src/services/event-router.ts, sqs-consumer.ts
+- **Learnings for future iterations:**
+  - p-limit ^6 is ESM-only; import as `import pLimit from 'p-limit'` (default import)
+  - createEventBus() reads EVENT_BUS_DRIVER env at runtime; tests that import sqs-consumer must set that env or use MockDriver
+  - bus.subscribe() must be called before bus.start() — EventBusImpl throws if subscribe() is called after start()
+---
+
+## Codebase Patterns
+- OrthoEvent is in packages/@ortho/event-bus/src/types.ts — add new fields there first, then use them in analytics handlers
+- All services use ESM ("type": "module") with NodeNext module resolution
+- Handlers signature: (event: OrthoEvent, pool: Pool) => Promise<void>
+- Use raw pg PoolClient (not Knex) for transactional handler operations
+- insertEvent returns { inserted: boolean } — gate all rollup writes on inserted=true (except ad-spend-synced which has relaxed idempotency)
+- Partitioned tables need composite PK including partition key: PRIMARY KEY (id, occurred_at); plain uuid PK errors on partitioned tables
+- Use knex.raw() for PARTITION BY RANGE DDL and default partition creation; drop default partition before parent table in down()
+
+# Ralph Progress Log
+Started: Thu Apr  2 14:38:21 +03 2026
+---
+
+## 2026-04-02 - US-001
+- Added optional `event_id?: string` field to OrthoEvent interface in packages/@ortho/event-bus/src/types.ts
+- Files changed: packages/@ortho/event-bus/src/types.ts
+- **Learnings for future iterations:**
+  - event_id is optional for backward compat; analytics handlers should fall back to randomUUID() when absent
+  - All 30 existing event-bus tests pass unchanged (field is additive/optional)
+---
+
+## 2026-04-02 - US-002
+- Created project scaffolding for @platform/analytics service
+- Files changed: apps/platform/analytics/package.json, apps/platform/analytics/tsconfig.json, apps/platform/analytics/Dockerfile, apps/platform/analytics/src/index.ts
+- **Learnings for future iterations:**
+  - Mirrored AI service structure exactly; tsconfig has declaration/declarationMap/sourceMap/esModuleInterop/skipLibCheck
+  - Added @aws-sdk/client-sqs, ioredis, bullmq, p-limit, knex in addition to fastify/typebox/pg deps
+  - @fastify/rate-limit is a separate dep from @fastify/sensible — both required
+  - npm install completes cleanly; typecheck passes with empty src/index.ts placeholder
+---
+
+## 2026-04-02 - US-014
+- Created src/routes/metrics/shared.ts: parsePeriod (YYYY-MM + YYYY-MM-DD/YYYY-MM-DD), dateExpr for granularity, toArray for multi-value params, paginateMeta helper; typebox SharedQuerySchema + GranularitySchema
+- Created src/routes/metrics/leads.ts: GET /analytics/metrics/leads; queries metrics_leads_daily; supports granularity daily/monthly/total, location_id[], channel[], page, page_size
+- Created src/routes/metrics/pipeline.ts: GET /analytics/metrics/pipeline; queries metrics_pipeline_daily; adds pipeline[], stage[] filters
+- Created src/routes/metrics/conversions.ts: GET /analytics/metrics/conversions; queries metrics_conversions_daily; channel[] filter
+- Created src/routes/metrics/messages.ts: GET /analytics/metrics/messages; queries metrics_messages_daily; response rows include delivered, failed, opt_outs
+- Registered all four routes in app.ts
+- Files changed: src/app.ts, src/routes/metrics/shared.ts, leads.ts, pipeline.ts, conversions.ts, messages.ts
+- **Learnings for future iterations:**
+  - dateExpr returns SQL expr for SELECT+GROUP BY: daily→'date::text', monthly→"DATE_TRUNC('month', date)::date::text", total→null (no date column in result)
+  - Pagination uses a count subquery: SELECT COUNT(*) FROM (SELECT 1 FROM ... WHERE ... GROUP BY ...) sub
+  - location_id[] and channel[] params: use ANY($N) with array parameter — pg driver accepts JS string[] for ANY
+  - granularity=total drops date from SELECT and GROUP BY entirely
+  - Type.Intersect([SharedQuerySchema, Type.Object({...})]) used to extend shared schema per route
+---
+
+## 2026-04-02 - US-017
+- Created src/jobs/partition-maintenance.ts: exports registerPartitionMaintenanceJob(queue: Queue, pool: Pool): void; schedules repeatable job with pattern '1 0 1 * *' (BullMQ v5 uses 'pattern' not 'cron'); Worker runs runPartitionMaintenance: CREATE TABLE IF NOT EXISTS next-month partition; CTE-based row migration from analytics_events_default (DELETE+RETURNING then INSERT via parent → routes to new partition); DROP TABLE IF EXISTS 25-months-ago partition
+- Created src/jobs/recompute-rollups.ts: exports createRecomputeRollupsWorker(queue: Queue, pool: Pool): Worker; VALID_TABLES set of all 8 rollup tables; worker reads table+date_range from job.data; DELETE existing rows then re-aggregate from analytics_events; returns { rows_written: number }; progress reported at 10% (start) and 100% (done)
+- Updated src/index.ts: creates analytics:maintenance and analytics:recompute Queue instances; calls both register functions; queues use shared queueConnection (ioredis), Workers use their own dedicated connections internally
+- Files changed: src/jobs/partition-maintenance.ts, src/jobs/recompute-rollups.ts, src/index.ts
+- **Learnings for future iterations:**
+  - BullMQ v5 uses `pattern` (not `cron`) in RepeatOptions — `repeat: { pattern: '0 1 1 * *' }`
+  - Moving rows from default partition: CTE approach — DELETE FROM analytics_events_default RETURNING * → INSERT INTO analytics_events (parent table routes to correct partition)
+  - Workers need dedicated Redis connection with maxRetriesPerRequest: null and enableReadyCheck: false
+  - Queue instances can share a connection (non-blocking), but Workers must have their own
+  - coordinator_id (triggered_by) is in properties not dimensions — recompute queries use properties->>'triggered_by'
+  - ad_spend synced_date is in properties->>'synced_date', not occurred_at — DELETE uses `date` column which stores synced_date
+---

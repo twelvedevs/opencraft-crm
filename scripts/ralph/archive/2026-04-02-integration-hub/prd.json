@@ -1,105 +1,93 @@
 {
-  "project": "Ortho CRM \u2014 Analytics Service",
-  "branchName": "feature/analytics-service",
-  "description": "Platform-layer Analytics Service: SQS event ingestion, 13 typed handlers, 8 rollup tables, 9 named metric REST endpoints, generic query DSL, BullMQ partition maintenance, admin recompute. Spec: docs/superpowers/specs/2026-04-02-analytics-service-updated-design.md",
+  "project": "Ortho CRM — Integration Hub",
+  "branchName": "feature/integration-hub",
+  "description": "Platform-layer Integration Hub: OAuth credential management for Google Ads + Meta, webhook ingestion + signature verification, BullMQ ad-spend polling (4h repeatable), historical backfill, AES-256-GCM token encryption, stateless PKCE state, JWT auth plugin. Spec: docs/superpowers/specs/2026-04-02-integration-hub-updated-design.md",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add event_id field to OrthoEvent type in @ortho/event-bus",
-      "description": "As a developer, I need a stable per-event UUID on OrthoEvent so that Analytics Service handlers can use it as a deduplication key for analytics_events.",
+      "title": "Service scaffold — package.json, tsconfig.json, Dockerfile, env.ts",
+      "description": "As a developer, I need the integration-hub service directory wired up with correct dependencies, TypeScript config, and a typed env module so that subsequent stories can import from shared packages and compile cleanly.",
       "acceptanceCriteria": [
-        "packages/@ortho/event-bus/src/types.ts: add optional field event_id?: string to the OrthoEvent interface",
-        "packages/@ortho/event-bus/src/index.ts still exports OrthoEvent cleanly",
-        "Existing event-bus tests still pass (event_id is optional \u2014 no breaking change)",
-        "Typecheck passes in packages/@ortho/event-bus"
+        "apps/platform/integration-hub/package.json exists with all dependencies from spec §13 (fastify, bullmq, pg, knex, ioredis, google-ads-api, fast-jwt, typebox, @ortho/* workspace refs, etc.)",
+        "tsconfig.json extends repo root, targets ESNext, module NodeNext, strict: true",
+        "Dockerfile: node:24-alpine, copies src + package files, runs tsc, CMD node dist/index.js",
+        "src/env.ts exports a validated env object for all variables in spec §14 (DATABASE_URL, REDIS_URL, PORT, NODE_ENV, EVENT_BUS_DRIVER, SECRETS_PROVIDER, JWT_MODE, OAUTH_STATE_SECRET, GOOGLE_ADS_*, META_*, LOG_LEVEL, etc.); throws on missing required vars",
+        "src/index.ts exists as a minimal placeholder (no-op, no server start)",
+        "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Make the field optional (event_id?: string) to keep backward compat with publishers that don't yet set it. Analytics handlers will fall back to randomUUID() if event_id is absent."
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Project scaffolding \u2014 package.json, tsconfig.json, Dockerfile",
-      "description": "As a developer, I need the apps/platform/analytics/ service directory wired up with correct tooling so that subsequent stories can add code that builds, typechecks, and runs tests.",
+      "title": "Add AdLeadReceivedEvent + AdSpendSyncedEvent to @ortho/types",
+      "description": "As a developer, I need shared TypeScript event types in @ortho/types so that Lead Service and Analytics Service can import them alongside Integration Hub's publishers.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/package.json exists with name @platform/analytics, type module, Node >=24",
-        "scripts: build (tsc), dev (tsx watch src/index.ts), start (node dist/index.js), test (vitest run), typecheck (tsc --noEmit)",
-        "Dependencies include: fastify ^5, @fastify/sensible ^6, @fastify/rate-limit, @sinclair/typebox ^0.34, pg ^8, knex ^3, bullmq ^5, ioredis ^5, p-limit ^6, @ortho/event-bus (file:../../../packages/@ortho/event-bus), @ortho/logger (file:../../../packages/@ortho/logger)",
-        "devDependencies include: typescript ^5, tsx ^4, vitest ^2, @types/node ^22, @types/pg ^8",
-        "apps/platform/analytics/tsconfig.json matches AI service: target ES2022, module NodeNext, moduleResolution NodeNext, strict true, outDir dist, rootDir src",
-        "apps/platform/analytics/Dockerfile matches AI service pattern (node:24-alpine, npm ci --omit=dev, CMD node dist/index.js)",
-        "npm install completes without errors",
-        "Typecheck passes (no src files yet, just empty src/index.ts placeholder)"
+        "packages/@ortho/types/src/events.ts gains AdLeadReceivedPayload, AdLeadReceivedEvent, AdSpendRecord, AdSpendSyncedPayload, AdSpendSyncedEvent exactly as defined in spec §7",
+        "All new interfaces are exported from the package index",
+        "Typecheck passes across packages/@ortho/types"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Mirror the AI service (apps/platform/ai) package.json and tsconfig.json structure. Add @aws-sdk/client-sqs as a dependency (used by EventBridgeDriver transitively) plus ioredis for BullMQ. The @fastify/rate-limit package provides per-route rate limiting."
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Database migration \u2014 analytics_events table with monthly partitioning",
-      "description": "As a developer, I need the analytics_events immutable raw event log table created with partitioning and indexes so that handlers can write and deduplicate events.",
+      "title": "Database migrations — all four platform_integrations tables",
+      "description": "As a developer, I need Knex migrations for integration_accounts, campaign_location_mappings, failed_webhooks, and backfill_jobs so that the service has its full schema from the start.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/migrations/001_create_analytics_events.ts exists",
-        "up() creates schema platform_analytics if not exists",
-        "up() creates analytics_events partitioned by RANGE on occurred_at with columns: id uuid PK gen_random_uuid(), event_id text UNIQUE NOT NULL, event_type text NOT NULL, source text NOT NULL, entity_type text, entity_id text, dimensions jsonb NOT NULL DEFAULT '{}', properties jsonb NOT NULL DEFAULT '{}', occurred_at timestamptz NOT NULL, ingested_at timestamptz NOT NULL DEFAULT now()",
-        "up() creates analytics_events_default default partition to catch rows before named partitions exist",
-        "up() creates index on (event_type, occurred_at)",
-        "up() creates GIN index on dimensions",
-        "down() drops the table and default partition",
+        "migrations/001_create_integration_accounts.ts creates the integration_accounts table with all columns and constraints from spec §3.1 (uuid PK, platform, account_id, account_name, access_token, refresh_token, token_expires_at, status default 'active', last_error, last_polled_at, created_at, UNIQUE(platform, account_id))",
+        "migrations/002_create_campaign_location_mappings.ts creates campaign_location_mappings with FK to integration_accounts ON DELETE CASCADE, UNIQUE(account_id, campaign_id)",
+        "migrations/003_create_failed_webhooks.ts creates failed_webhooks (id, platform, raw_body, error, received_at)",
+        "migrations/004_create_backfill_jobs.ts creates backfill_jobs with FK to integration_accounts ON DELETE CASCADE (id, account_id, status default 'active', from_date, to_date, chunks_done default 0, chunks_total, error, created_at, updated_at)",
+        "Each migration file has an up() and down() function",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Use knex.raw() for the PARTITION BY RANGE DDL and for creating the default partition \u2014 Knex schema builder doesn't support native partitioning. Table goes in platform_analytics schema. The UNIQUE constraint on event_id is the deduplication anchor."
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Database migrations \u2014 8 rollup tables",
-      "description": "As a developer, I need all eight daily rollup tables created so that event handlers can atomically increment metrics alongside the raw event insert.",
+      "title": "Repository — accounts.ts (integration_accounts CRUD)",
+      "description": "As a developer, I need a repository module for integration_accounts so that job workers and route handlers can load, create, update, and delete account records using raw pg Pool.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/migrations/002_create_rollup_tables.ts exists",
-        "Creates metrics_leads_daily: date, location_id, channel, count int DEFAULT 0, archived int DEFAULT 0, UNIQUE(date, location_id, channel)",
-        "Creates metrics_pipeline_daily: date, location_id, pipeline, stage, entries int DEFAULT 0, UNIQUE(date, location_id, pipeline, stage)",
-        "Creates metrics_conversions_daily: date, location_id, channel, count int DEFAULT 0, UNIQUE(date, location_id, channel)",
-        "Creates metrics_messages_daily: date, location_id, delivered int DEFAULT 0, failed int DEFAULT 0, opt_outs int DEFAULT 0, UNIQUE(date, location_id)",
-        "Creates metrics_ad_spend_daily: date, platform, location_id, campaign_id, campaign_name text, impressions int DEFAULT 0, clicks int DEFAULT 0, spend numeric(12,2) DEFAULT 0, UNIQUE(date, platform, location_id, campaign_id)",
-        "Creates metrics_campaigns_daily: date, campaign_id, location_id, sent int DEFAULT 0, delivered int DEFAULT 0, opened int DEFAULT 0, clicked int DEFAULT 0, UNIQUE(date, campaign_id, location_id)",
-        "Creates metrics_referrals_daily: date, location_id, count int DEFAULT 0, UNIQUE(date, location_id)",
-        "Creates metrics_coordinators_daily: date, location_id, coordinator_id, response_time_sum int DEFAULT 0, response_time_count int DEFAULT 0, time_in_stage_sum int DEFAULT 0, time_in_stage_count int DEFAULT 0, UNIQUE(date, location_id, coordinator_id)",
-        "All tables created in platform_analytics schema",
-        "down() drops all 8 tables",
+        "src/repositories/accounts.ts uses raw pg PoolClient (not Knex) for all queries",
+        "Exports: findAll(client): Promise<IntegrationAccount[]>, findById(client, id): Promise<IntegrationAccount | null>, findActiveAccounts(client): Promise<IntegrationAccount[]> (status != 'error'), insert(client, data): Promise<IntegrationAccount>, updateTokens(client, id, tokens): Promise<void>, setError(client, id, error): Promise<void>, setLastPolled(client, id): Promise<void>, remove(client, id): Promise<void>",
+        "IntegrationAccount type is defined in src/connectors/interface.ts (or a shared types file); accounts.ts imports it",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Add a comment in the migration for metrics_ad_spend_daily explaining that campaign_name is a display hint only \u2014 queries must always group by campaign_id, never campaign_name. All tables are in platform_analytics schema."
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Repositories \u2014 events.ts (raw insert + dedup) and rollups.ts (upsert helpers)",
-      "description": "As a developer, I need typed repository functions for inserting events and upserting rollup rows so that handlers can share consistent SQL patterns.",
+      "title": "Repositories — mappings.ts, failed-webhooks.ts, backfill-jobs.ts",
+      "description": "As a developer, I need repository modules for the three remaining tables so that job workers and route handlers have typed DB access.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/repositories/events.ts exports insertEvent(client: PoolClient, params: InsertEventParams): Promise<{ inserted: boolean }> using INSERT INTO platform_analytics.analytics_events ... ON CONFLICT (event_id) DO NOTHING, returning true if a row was inserted",
-        "apps/platform/analytics/src/repositories/rollups.ts exports one typed upsert function per rollup table (8 total): upsertLeadDaily, upsertPipelineDaily, upsertConversionDaily, upsertMessageDaily, upsertAdSpendDaily, upsertCampaignDaily, upsertReferralDaily, upsertCoordinatorDaily",
-        "Each upsert function accepts a pg PoolClient (for transaction use) and typed params; uses INSERT ... ON CONFLICT DO UPDATE SET col = col + EXCLUDED.col for increment tables",
-        "upsertAdSpendDaily uses ON CONFLICT DO UPDATE to overwrite the full row (spend, clicks, impressions, campaign_name) rather than incrementing",
+        "src/repositories/mappings.ts: findByAccountId(client, accountId): Promise<CampaignLocationMapping[]>, findByCampaignId(client, accountId, campaignId): Promise<CampaignLocationMapping | null>, replaceAll(client, accountId, mappings: {campaign_id, location_id}[]): Promise<void> (delete-then-insert in a transaction)",
+        "src/repositories/failed-webhooks.ts: insert(client, data: {platform, raw_body, error}): Promise<void>",
+        "src/repositories/backfill-jobs.ts: insert(client, data): Promise<BackfillJob>, findById(client, id): Promise<BackfillJob | null>, updateProgress(client, id, chunksDone): Promise<void>, setCompleted(client, id): Promise<void>, setFailed(client, id, error): Promise<void>",
+        "All use raw pg PoolClient",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Use raw pg PoolClient (not Knex) for the transaction-level operations so handlers can join inserts and upserts in a single BEGIN/COMMIT block. The insertEvent return value (inserted: boolean) is the idempotency gate: handlers skip the rollup write when inserted=false."
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Event handlers \u2014 lead-created, lead-archived, lead-converted",
-      "description": "As a developer, I need the three lead lifecycle handlers that write to analytics_events and the lead/conversion rollup tables so that lead acquisition metrics are captured.",
+      "title": "Credential store — AES-256-GCM encrypt/decrypt",
+      "description": "As a developer, I need pure encrypt/decrypt functions using AES-256-GCM so that OAuth tokens are stored encrypted in the database and can be decrypted at runtime.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/handlers/lead-created.ts: extracts location_id and channel from payload, writes analytics_events row (entity_type='lead') and increments metrics_leads_daily.count in one transaction; skips rollup if event was a duplicate",
-        "apps/platform/analytics/src/handlers/lead-archived.ts: extracts location_id from payload, uses channel='unknown', increments metrics_leads_daily.archived; skips rollup on duplicate",
-        "apps/platform/analytics/src/handlers/lead-converted.ts: extracts location_id and channel from payload, increments metrics_conversions_daily.count; skips rollup on duplicate",
-        "Each handler signature is (event: OrthoEvent, pool: Pool) => Promise<void>",
-        "Each handler opens a pg transaction (pool.connect() + BEGIN/COMMIT), calls insertEvent, checks inserted flag before rollup write",
+        "src/services/credential-store.ts exports encrypt(plaintext: string, key: Buffer): string and decrypt(stored: string, key: Buffer): string",
+        "encrypt generates a fresh random 12-byte IV per call",
+        "Stored format is base64-encoded JSON { iv: '<hex>', ciphertext: '<hex>', tag: '<hex>' } as specified in spec §8",
+        "Auth tag is 16 bytes",
+        "decrypt throws a descriptive error if the stored string is malformed or decryption fails (wrong key / tampered ciphertext)",
+        "No token values are logged or exposed in error messages",
         "Typecheck passes"
       ],
       "priority": 6,
@@ -108,29 +96,30 @@
     },
     {
       "id": "US-007",
-      "title": "Event handler \u2014 stage-changed (dual rollup: pipeline + coordinators)",
-      "description": "As a developer, I need the StageChangedHandler that atomically writes to both metrics_pipeline_daily and metrics_coordinators_daily so that funnel and coordinator performance metrics are captured in one transaction.",
+      "title": "Secrets provider — SecretsProvider interface + AwsSecretsProvider + EnvSecretsProvider",
+      "description": "As a developer, I need a SecretsProvider abstraction so that production uses AWS Secrets Manager and local dev uses environment variables without code changes.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/handlers/stage-changed.ts exists",
-        "Extracts location_id, pipeline, stage_to, triggered_by?, response_time_seconds?, time_in_stage_seconds from payload",
-        "Opens one DB transaction: insertEvent \u2192 if inserted=true, upsertPipelineDaily (entries+1) AND if triggered_by non-null: upsertCoordinatorDaily (always increments time_in_stage_sum/count; increments response_time_sum/count only when response_time_seconds is present)",
-        "If insertEvent returns inserted=false (duplicate), both rollup writes are skipped in the same transaction",
-        "Events without triggered_by do NOT write to metrics_coordinators_daily",
+        "src/services/secrets-provider.ts defines the SecretsProvider interface { getSecret(name: string): Promise<string> }",
+        "AwsSecretsProvider calls @aws-sdk/client-secrets-manager GetSecretValueCommand and returns the SecretString",
+        "EnvSecretsProvider returns process.env[name] and throws if the variable is undefined",
+        "createSecretsProvider() factory reads SECRETS_PROVIDER env var; returns AwsSecretsProvider if 'aws', EnvSecretsProvider if 'env', throws on unknown value",
         "Typecheck passes"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "This is the most complex handler. The dual-skip idempotency (both pipeline and coordinator rollups skip on duplicate) is spec-confirmed (Q8 Answer C). Keep the transaction single: one BEGIN wrapping insertEvent + both upserts."
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Event handlers \u2014 message-delivered, message-failed, opt-out-received",
-      "description": "As a developer, I need the three messaging handlers that update metrics_messages_daily so that delivery reliability and opt-out metrics are tracked.",
+      "title": "JWT auth Fastify plugin — static RS256 + JWKS modes",
+      "description": "As a developer, I need a Fastify preHandler plugin that validates Identity Service JWTs so that all non-webhook routes are protected.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/handlers/message-delivered.ts: extracts location_id, increments metrics_messages_daily.delivered by 1; skips on duplicate event_id",
-        "apps/platform/analytics/src/handlers/message-failed.ts: extracts location_id, increments metrics_messages_daily.failed by 1; skips on duplicate event_id",
-        "apps/platform/analytics/src/handlers/opt-out-received.ts: extracts location_id, increments metrics_messages_daily.opt_outs by 1; skips on duplicate event_id",
-        "All three use same transaction pattern: insertEvent \u2192 check inserted \u2192 upsert",
+        "src/plugins/jwt-auth.ts exports jwtAuthPlugin as a fastify-plugin (fp) registering a preHandler hook",
+        "JWT_MODE=static: verifies RS256 signature using IDENTITY_SERVICE_PUBLIC_KEY (PEM); uses fast-jwt createVerifier",
+        "JWT_MODE=jwks: fetches JWKS from IDENTITY_SERVICE_JWKS_URL and verifies using matching kid; use fast-jwt with jwks-rsa or fast-jwt's createRemoteJWKSet equivalent",
+        "Both modes validate expiry; validate iss if JWT_ISSUER env is set; validate aud if JWT_AUDIENCE env is set",
+        "Invalid or expired token → reply.code(401).send({ error: 'Unauthorized' }); request does not proceed",
+        "Webhook routes (/integrations/webhooks/*) must NOT have this plugin applied (registered separately on non-webhook route scope)",
         "Typecheck passes"
       ],
       "priority": 8,
@@ -139,221 +128,290 @@
     },
     {
       "id": "US-009",
-      "title": "Event handlers \u2014 campaign-sent, campaign-delivered, email-opened, email-clicked",
-      "description": "As a developer, I need four handlers that update metrics_campaigns_daily so that email broadcast performance metrics (sent, delivered, opened, clicked) are tracked.",
+      "title": "OAuth PKCE state — stateless sign + verify utilities",
+      "description": "As a developer, I need stateless PKCE state generation and verification functions so that the OAuth callback can verify the state parameter without server-side session storage.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/handlers/campaign-sent.ts: extracts campaign_id, location_id, increments metrics_campaigns_daily.sent by 1; skips on duplicate",
-        "apps/platform/analytics/src/handlers/campaign-delivered.ts: extracts campaign_id, location_id, recipient_count from payload, increments metrics_campaigns_daily.delivered by recipient_count (not 1); skips on duplicate",
-        "apps/platform/analytics/src/handlers/email-opened.ts: extracts campaign_id, location_id, increments metrics_campaigns_daily.opened by 1; skips on duplicate",
-        "apps/platform/analytics/src/handlers/email-clicked.ts: extracts campaign_id, location_id, increments metrics_campaigns_daily.clicked by 1; skips on duplicate",
-        "All four use the standard insertEvent + inserted-gate pattern",
+        "src/services/oauth-state.ts exports createState(secret: string): { state: string, codeVerifier: string } and verifyState(state: string, secret: string): { codeVerifier: string }",
+        "createState: generates 43-byte random codeVerifier (base64url), computes SHA-256 codeChallenge, encodes statePayload = base64url(JSON.stringify({ cv: codeVerifier, ts: Date.now() })), signs with HMAC-SHA256 using secret, returns state = statePayload + '.' + sig",
+        "verifyState: splits on '.', recomputes HMAC using timingSafeEqual for constant-time compare, throws if signature invalid, throws if ts older than 10 minutes, returns { codeVerifier } on success",
+        "codeChallenge is also returned from createState for use in the authorization URL",
         "Typecheck passes"
       ],
       "priority": 9,
       "passes": true,
-      "notes": "campaign-delivered increments by recipient_count (bulk delivery confirmation from SendGrid webhook). Standard idempotency applies \u2014 if event_id is a duplicate, the rollup increment is also skipped."
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Event handlers \u2014 referral-converted (dual rollup) and ad-spend-synced (relaxed idempotency)",
-      "description": "As a developer, I need the referral and ad-spend handlers, which have non-standard rollup behaviour, so that referral attribution and ad performance data are correctly stored.",
+      "title": "Connector interface, shared types, and ConnectorRegistry",
+      "description": "As a developer, I need the Connector interface, shared domain types, and a registry so that route handlers and job workers can dispatch to the correct platform adapter.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/handlers/referral-converted.ts: extracts location_id, writes to both metrics_referrals_daily (count+1) and metrics_conversions_daily (channel='referral', count+1) in one transaction; both rollup writes are skipped if event_id is a duplicate",
-        "apps/platform/analytics/src/handlers/ad-spend-synced.ts: extracts platform, location_id, synced_date from top-level payload; iterates records[] array; for each record upserts metrics_ad_spend_daily with ON CONFLICT DO UPDATE overwriting spend/clicks/impressions/campaign_name; the rollup upsert executes even if the analytics_events insert was skipped (relaxed idempotency \u2014 allows re-sync corrections)",
-        "ad-spend-synced.ts has a comment explaining the relaxed idempotency rule and why it differs from other handlers",
+        "src/connectors/interface.ts defines and exports: Connector interface (platform, getAuthorizationUrl, exchangeCode, refreshTokens, fetchSpend, fetchSpendRange, verifyWebhook, parseLeadWebhook, verifyChallenge) exactly as in spec §2.2",
+        "interface.ts also exports: OAuthTokens { accessToken, refreshToken?, expiresAt? }, SpendRecord { campaign_id, campaign_name, spend, impressions, clicks }, LeadEvent { external_lead_id, campaign_id, ad_set_id?, ad_id?, form_id?, fields: Record<string, string> }, IntegrationAccount (matches DB row shape), CampaignLocationMapping",
+        "src/connectors/registry.ts exports ConnectorRegistry as Map<string, Connector> and getConnector(platform: string): Connector (throws 400-style error if not found)",
         "Typecheck passes"
       ],
       "priority": 10,
       "passes": true,
-      "notes": "ad-spend relaxed idempotency: the upsertAdSpendDaily call always runs regardless of whether insertEvent returned inserted=true or false. This allows Integration Hub to re-publish a corrected spend figure with the same event_id. See spec Section 4 and 6.1."
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Event router + SQS consumer",
-      "description": "As a developer, I need event-router.ts and sqs-consumer.ts so that incoming SQS messages are routed to the correct typed handler with p-limit concurrency control.",
+      "title": "GoogleAdsClient typed wrapper",
+      "description": "As a developer, I need a typed GoogleAdsClient class wrapping the google-ads-api npm package so that the Google Ads connector never calls the SDK directly.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/services/event-router.ts exports routeEvent(event: OrthoEvent, pool: Pool): Promise<void> using a switch on event.event_type that calls the appropriate handler; unknown event types are logged at debug level and resolved (no throw, no retry)",
-        "apps/platform/analytics/src/services/sqs-consumer.ts exports createSqsConsumer(pool: Pool): { start(): Promise<void>; stop(): Promise<void> }",
-        "sqs-consumer wraps createEventBus() from @ortho/event-bus; subscribes all 13 known event types by calling bus.subscribe(eventType, handler) where each handler calls routeEvent wrapped in p-limit(SQS_CONCURRENCY)",
-        "SQS_CONCURRENCY defaults to 5 when env var is not set",
-        "sqs-consumer calls bus.start() on start() and bus.stop() on stop()",
+        "src/connectors/clients/google-ads-client.ts declares module-level constant GOOGLE_ADS_API_VERSION = 'v19'",
+        "Exports class GoogleAdsClient with constructor(accessToken: string, customerId: string)",
+        "searchCampaignPerformance(date: string): Promise<CampaignPerformanceRow[]> — queries GAQL for metrics.cost_micros, metrics.impressions, metrics.clicks, campaign.id, campaign.name for the given date; converts cost_micros to spend (divide by 1_000_000)",
+        "searchCampaignPerformanceRange(from: string, to: string): Promise<CampaignPerformanceRow[]> — same query with date range",
+        "CampaignPerformanceRow type exported: { campaign_id: string, campaign_name: string, spend: number, impressions: number, clicks: number, date: string }",
         "Typecheck passes"
       ],
       "priority": 11,
       "passes": true,
-      "notes": "The 13 event types to subscribe: lead.created, lead.stage_changed, lead.archived, lead.converted, message.delivered, message.failed, opt_out.received, campaign.sent, campaign.delivered, email.opened, email.clicked, referral.converted, ad_spend.synced. Unknown types are handled in the default case of the switch in event-router.ts."
+      "notes": ""
     },
     {
       "id": "US-012",
-      "title": "API key auth plugin (src/plugins/api-key-auth.ts)",
-      "description": "As a developer, I need a pre-middleware Fastify plugin that handles ak_-prefixed API keys so that the Reporting Service can authenticate to Analytics Service endpoints without a JWT.",
+      "title": "MetaApiClient typed wrapper",
+      "description": "As a developer, I need a typed MetaApiClient class wrapping native fetch so that the Meta connector never calls fetch directly.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/plugins/api-key-auth.ts exports a Fastify plugin registered with fastify-plugin",
-        "Plugin adds an onRequest hook that fires before @ortho/auth-middleware",
-        "If Authorization header starts with 'ak_': extracts the key, computes SHA256(key), checks an in-memory LRU/Map cache keyed by the hash",
-        "On cache miss: calls POST IDENTITY_SERVICE_URL/identity/api-keys/validate with the key in the body; caches the valid result for API_KEY_CACHE_TTL_SECONDS (default 60); on 401/403 response rejects the request with 401",
-        "On cache hit: skips Identity Service call, uses cached result",
-        "Injects X-User-Role and X-Api-Key-Permissions headers from the validation response so downstream auth middleware sees a consistent context",
-        "If Authorization header does NOT start with 'ak_': plugin does nothing and passes to the next hook",
-        "API_KEY_CACHE_TTL_SECONDS env var controls cache TTL",
+        "src/connectors/clients/meta-api-client.ts declares module-level constant META_GRAPH_API_VERSION = 'v22.0'",
+        "Exports class MetaApiClient with constructor(accessToken: string, accountId: string)",
+        "getInsights(date: string): Promise<MetaInsightRow[]> — calls GET https://graph.facebook.com/{version}/act_{accountId}/insights with fields=spend,impressions,clicks,campaign_id,campaign_name&time_range={since,until} where since=until=date",
+        "getInsightsRange(from: string, to: string): Promise<MetaInsightRow[]> — same with time_range since=from, until=to",
+        "Throws a descriptive error on non-2xx responses, including the Meta error message if present",
+        "MetaInsightRow type exported: { campaign_id: string, campaign_name: string, spend: string, impressions: string, clicks: string, date_start: string }",
         "Typecheck passes"
       ],
       "priority": 12,
       "passes": true,
-      "notes": "Do NOT modify @ortho/auth-middleware \u2014 this plugin is Analytics Service-specific. Use Node's built-in crypto.createHash('sha256') for the cache key. A simple Map with TTL (or lru-cache) is sufficient \u2014 no Redis needed for the auth cache."
+      "notes": ""
     },
     {
       "id": "US-013",
-      "title": "Fastify server setup \u2014 env, app, health/ready routes, index.ts, worker.ts",
-      "description": "As a developer, I need the complete Fastify server wiring with environment validation, health endpoints, and dual-mode entry points so that the service can be started as an embedded HTTP+consumer process or as a standalone SQS worker.",
+      "title": "Google Ads connector — full implementation",
+      "description": "As a developer, I need GoogleAdsConnector implementing the Connector interface so that OAuth, spend polling, and webhook handling work end-to-end for Google Ads.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/env.ts validates and exports all env vars from spec Section 7: DATABASE_URL (required), SQS_QUEUE_URL (required), IDENTITY_SERVICE_URL (required), REDIS_URL (required), ADMIN_RECOMPUTE_KEY (required), PORT (optional, default 3000), LOG_LEVEL (optional, default info), API_KEY_CACHE_TTL_SECONDS (optional, default 60), SQS_POLLING_INTERVAL_MS (optional), SQS_BATCH_SIZE (optional, default 10), SQS_CONCURRENCY (optional, default 5)",
-        "apps/platform/analytics/src/routes/health.ts: GET /health always returns 200 { status: 'ok' }; GET /ready checks DB connectivity with a lightweight query (SELECT 1) and returns 200 { status: 'ready' } or 503 { status: 'unavailable', reason: string }",
-        "apps/platform/analytics/src/app.ts exports buildApp(pool: Pool): Promise<FastifyInstance> that registers @fastify/sensible, api-key-auth plugin, @fastify/rate-limit, and health routes; other route registrations will be added in subsequent stories",
-        "apps/platform/analytics/src/index.ts starts the HTTP server and the SQS consumer concurrently (not via Fastify hooks); handles SIGTERM gracefully by stopping the consumer and closing the server and pool",
-        "apps/platform/analytics/src/worker.ts starts only the SQS consumer (no HTTP server); handles SIGTERM by stopping the consumer and ending the pool",
-        "GET /health returns 200 { status: 'ok' } (verifiable via app.inject in test)",
+        "src/connectors/google-ads.ts exports GoogleAdsConnector implementing Connector with platform = 'google_ads'",
+        "getAuthorizationUrl(codeChallenge, state): builds Google OAuth2 URL with client_id, redirect_uri, scope=https://www.googleapis.com/auth/adwords, access_type=offline, code_challenge, code_challenge_method=S256, state",
+        "exchangeCode(code, codeVerifier): POSTs to https://oauth2.googleapis.com/token, returns OAuthTokens with expiresAt computed from expires_in",
+        "refreshTokens(account): POSTs to https://oauth2.googleapis.com/token with grant_type=refresh_token; decrypts refresh_token from account; returns new OAuthTokens",
+        "fetchSpend(account, date): decrypts access_token; creates GoogleAdsClient(accessToken, customerId); calls searchCampaignPerformance(date); maps to SpendRecord[]",
+        "fetchSpendRange(account, from, to): same using searchCampaignPerformanceRange",
+        "verifyWebhook(headers, rawBody): compares X-Goog-Signature header (HMAC-SHA256 of rawBody) against GOOGLE_ADS_WEBHOOK_VERIFY_TOKEN from env; returns boolean",
+        "parseLeadWebhook(payload): parses Google Ads lead form webhook JSON to LeadEvent[]; returns [] for empty; throws on unrecognisable structure",
+        "verifyChallenge(query): checks query['hub.verify_token'] === GOOGLE_ADS_WEBHOOK_VERIFY_TOKEN; returns query['hub.challenge'] or null",
+        "Registered in ConnectorRegistry under 'google_ads'",
         "Typecheck passes"
       ],
       "priority": 13,
       "passes": true,
-      "notes": "worker.ts is the standalone ECS task entry point for deployments that separate ingestion from the API. index.ts is the default embedded mode. Both share the same sqs-consumer module from US-011."
+      "notes": ""
     },
     {
       "id": "US-014",
-      "title": "Named metric routes \u2014 leads, pipeline, conversions, messages",
-      "description": "As a developer, I need the first four named metric endpoints so that the Reporting Service can query lead counts, pipeline funnel data, conversion rates, and messaging delivery stats.",
+      "title": "Meta connector — full implementation",
+      "description": "As a developer, I need MetaConnector implementing the Connector interface so that OAuth, spend polling, and webhook handling work end-to-end for Meta (Facebook Ads).",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/routes/metrics/leads.ts: GET /analytics/metrics/leads accepts period, granularity (daily|monthly|total, default daily), location_id[], channel[], page (default 1), page_size (default 1000, max 1000); queries metrics_leads_daily; returns { period, granularity, data: [...], meta: { total, page, page_size, total_pages } }",
-        "apps/platform/analytics/src/routes/metrics/pipeline.ts: GET /analytics/metrics/pipeline, same shared params plus pipeline and stage filters; queries metrics_pipeline_daily",
-        "apps/platform/analytics/src/routes/metrics/conversions.ts: GET /analytics/metrics/conversions, same shared params plus channel filter; queries metrics_conversions_daily",
-        "apps/platform/analytics/src/routes/metrics/messages.ts: GET /analytics/metrics/messages, same shared params; queries metrics_messages_daily; response rows include delivered, failed, opt_outs",
-        "All four routes validate input with @sinclair/typebox schemas and return 400 on validation errors",
-        "period parameter accepts YYYY-MM (calendar month) or YYYY-MM-DD/YYYY-MM-DD (custom range); returns 400 for invalid formats",
-        "Routes registered in app.ts",
+        "src/connectors/meta.ts exports MetaConnector implementing Connector with platform = 'facebook_ads'",
+        "getAuthorizationUrl(codeChallenge, state): builds Meta OAuth dialog URL (https://www.facebook.com/dialog/oauth) with client_id, redirect_uri, scope=ads_read,leads_retrieval, code_challenge, code_challenge_method=S256, state",
+        "exchangeCode(code, codeVerifier): POSTs to https://graph.facebook.com/{version}/oauth/access_token; exchanges for long-lived token via /oauth/access_token?grant_type=fb_exchange_token; sets expiresAt = now + 60 days",
+        "refreshTokens(): throws Error('Meta tokens require manual reconnect') — no refresh flow",
+        "fetchSpend(account, date): decrypts access_token; creates MetaApiClient; calls getInsights(date); maps MetaInsightRow to SpendRecord[] (parse string spend/impressions/clicks to numbers)",
+        "fetchSpendRange(account, from, to): same using getInsightsRange",
+        "verifyWebhook(headers, rawBody): verifies X-Hub-Signature-256 header = 'sha256=' + HMAC-SHA256(rawBody, META_APP_SECRET); returns boolean",
+        "parseLeadWebhook(payload): parses Meta leadgen webhook (entry[].changes[].value with leadgen_id, page_id, form_id, ad_id, adset_id, campaign_id); returns LeadEvent[]",
+        "verifyChallenge(query): checks query['hub.verify_token'] === META_WEBHOOK_VERIFY_TOKEN; returns query['hub.challenge'] or null",
+        "Registered in ConnectorRegistry under 'facebook_ads'",
         "Typecheck passes"
       ],
       "priority": 14,
       "passes": true,
-      "notes": "granularity=daily returns one row per date per dimension group; granularity=monthly aggregates to YYYY-MM; granularity=total returns a single aggregate row. Use SQL GROUP BY DATE_TRUNC for monthly and no date grouping for total. All routes are in the platform_analytics schema."
+      "notes": ""
     },
     {
       "id": "US-015",
-      "title": "Named metric routes \u2014 ad-spend (+ /campaigns sub-route), campaigns, referrals, coordinators",
-      "description": "As a developer, I need the remaining four named metric endpoints so that ad performance, email campaign stats, referral counts, and coordinator activity data are all queryable.",
+      "title": "Event publisher — bus.publish() wrappers for ad_lead.received + ad_spend.synced",
+      "description": "As a developer, I need typed event publisher functions wrapping the @ortho/event-bus so that job workers can publish events without constructing payloads inline.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/routes/metrics/ad-spend.ts: GET /analytics/metrics/ad-spend with platform and campaign_id filters; GET /analytics/metrics/ad-spend/campaigns always groups by campaign_id (prevents misuse of campaign_name display hint); both accept shared period/granularity/location_id/page/page_size params",
-        "apps/platform/analytics/src/routes/metrics/campaigns.ts: GET /analytics/metrics/campaigns with campaign_id filter; returns sent, delivered, opened, clicked per row",
-        "apps/platform/analytics/src/routes/metrics/referrals.ts: GET /analytics/metrics/referrals; queries metrics_referrals_daily",
-        "apps/platform/analytics/src/routes/metrics/coordinators.ts: GET /analytics/metrics/coordinators with coordinator_id filter; response rows include coordinator_id, response_time_sum, response_time_count, time_in_stage_sum, time_in_stage_count (raw sums \u2014 Reporting Service computes means)",
-        "All four routes use shared query param validation; return { period, granularity, data, meta } envelope",
-        "All four routes registered in app.ts",
+        "src/services/event-publisher.ts exports publishAdLeadReceived(bus, payload: AdLeadReceivedPayload): Promise<void> and publishAdSpendSynced(bus, payload: AdSpendSyncedPayload): Promise<void>",
+        "Each function calls bus.publish() with the correct event_type string ('ad_lead.received' and 'ad_spend.synced')",
+        "Types imported from @ortho/types (AdLeadReceivedPayload, AdSpendSyncedPayload)",
+        "src/services/event-bus.ts (or inline in index.ts) exports createBus(): calls createEventBus() from @ortho/event-bus; does NOT call bus.start() (publish-only per spec §2.1); reads EVENT_BUS_CONSUMER_GROUP from env for RedisStreamsDriver compatibility",
         "Typecheck passes"
       ],
       "priority": 15,
       "passes": true,
-      "notes": "The /ad-spend/campaigns sub-route must always GROUP BY campaign_id regardless of other params \u2014 this enforces the constraint documented in the migration and handler."
+      "notes": ""
     },
     {
       "id": "US-016",
-      "title": "Generic query DSL \u2014 query-builder.ts + POST /analytics/query route",
-      "description": "As a developer, I need a pure-function query builder and the POST /analytics/query endpoint so that the Reporting Service and other callers can run ad-hoc queries against the raw analytics_events table.",
+      "title": "BullMQ job — poll-ad-spend worker",
+      "description": "As a developer, I need the poll-ad-spend repeatable job worker so that ad spend data is fetched from Google Ads and Meta every 4 hours and published as ad_spend.synced events.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/services/query-builder.ts exports buildQuery(params: QueryParams): { sql: string; bindings: unknown[] } as a pure function \u2014 no DB calls, no side effects",
-        "buildQuery supports: aggregate (count | sum | avg), aggregate_field (dot-notation into dimensions/properties jsonb), filters (equality or IN matching with dot-notation keys, all ANDed), group_by (array of dot-notation fields), granularity (daily | monthly | total), period ({ from: string, to: string })",
-        "apps/platform/analytics/src/routes/query.ts: POST /analytics/query validates body with typebox, calls buildQuery, executes against analytics_events, caps result at 10000 rows, returns { rows, total, truncated: boolean }",
-        "Route registered in app.ts",
-        "Rate limit: JWT callers 10 req/min (keyed by JWT sub); API key callers 100 req/min (keyed by SHA256(key)); applied via @fastify/rate-limit per-route config",
-        "Returns 400 for invalid body (missing event_type, invalid aggregate, etc.)",
+        "src/jobs/poll-ad-spend.ts exports createPollAdSpendWorker(pool, connectorRegistry, bus, log) returning a BullMQ Worker on queue 'integration-hub:poll-ad-spend'",
+        "Worker execution: load account by account_id from DB; decrypt tokens via credential-store; get connector from registry; call fetchSpend for today and yesterday; load campaign_location_mappings for the account; drop campaigns with no mapping; group remaining by location_id; call publishAdSpendSynced once per (platform, location_id, date) combination",
+        "On success: update last_polled_at, status='active', last_error=null",
+        "On failure: set status='error', last_error=err.message; log log.error({ account_id, platform, err }, 'poll-ad-spend failed')",
+        "src/services/poll-scheduler.ts exports upsertPollJob(pollQueue, accountId): Promise<void> calling pollQueue.upsertJobScheduler(`poll-ad-spend:${accountId}`, { every: 4 * 60 * 60 * 1000 }, { data: { account_id: accountId } })",
         "Typecheck passes"
       ],
       "priority": 16,
       "passes": true,
-      "notes": "query-builder.ts is a pure function so it can be unit-tested exhaustively without a DB. Dot-notation mapping: 'dimensions.channel' \u2192 jsonb operator dimensions->>'channel'. group_by fields map to the same JSONB extraction syntax in the SQL GROUP BY clause."
+      "notes": ""
     },
     {
       "id": "US-017",
-      "title": "BullMQ jobs \u2014 partition maintenance and recompute rollups processor",
-      "description": "As a developer, I need the two BullMQ job processors registered so that monthly partition creation and admin-triggered rollup recomputes execute as background jobs.",
+      "title": "BullMQ job — refresh-token worker",
+      "description": "As a developer, I need the refresh-token delayed job worker so that Google Ads OAuth tokens are refreshed 30 minutes before expiry without human intervention.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/jobs/partition-maintenance.ts exports registerPartitionMaintenanceJob(queue: Queue, pool: Pool): void that schedules a BullMQ repeatable job (cron '1 0 1 * *') under queue prefix analytics:; job logic: creates next month partition (e.g. analytics_events_2026_05), moves rows from analytics_events_default into it if they fall in range, drops the partition 25 months ago",
-        "apps/platform/analytics/src/jobs/recompute-rollups.ts exports a BullMQ Worker processor that reads table and date_range from job.data; deletes rows in that table for the date range; re-inserts by aggregating from analytics_events raw log; updates job progress",
-        "Recompute processor returns { rows_written: number } on completion",
-        "Both jobs use REDIS_URL env var for the BullMQ connection; queue name prefixed with analytics:",
-        "Jobs registered in index.ts (not in worker.ts \u2014 job scheduling is tied to the HTTP server process)",
+        "src/jobs/refresh-token.ts exports createRefreshTokenWorker(pool, connectorRegistry, credentialEncryptionKey, bus, log) returning a BullMQ Worker on queue 'integration-hub:refresh-token'",
+        "Worker execution: load account by account_id; get connector; call connector.refreshTokens(account); encrypt new tokens; call updateTokens on accounts repository; enqueue next refresh-token delayed job (delay = token_expires_at - now - 30 minutes)",
+        "On failure: set status='error', last_error; log log.error({ account_id, platform, err }, 'refresh-token failed')",
+        "src/services/poll-scheduler.ts (or refresh-token.ts) exports scheduleTokenRefresh(refreshQueue, account): Promise<void> that adds a delayed job with ID refresh-token:{account.id} and appropriate delay",
+        "removeTokenRefreshJob(refreshQueue, accountId): Promise<void> calls queue.getJob then job?.remove()",
+        "Not called for Meta accounts (no refresh flow)",
         "Typecheck passes"
       ],
       "priority": 17,
       "passes": true,
-      "notes": "The recompute job must support all 8 rollup table names as valid values for job.data.table. For partition-maintenance: the partition names follow the pattern analytics_events_YYYY_MM. Use CREATE TABLE IF NOT EXISTS analytics_events_YYYY_MM PARTITION OF analytics_events FOR VALUES FROM ('YYYY-MM-01') TO ('YYYY-MM+1-01')."
+      "notes": ""
     },
     {
       "id": "US-018",
-      "title": "Admin recompute REST endpoints",
-      "description": "As an operator, I need POST /analytics/admin/recompute and GET /analytics/admin/recompute/:job_id so that I can trigger and monitor rollup recomputation without direct DB access.",
+      "title": "BullMQ job — process-lead-webhook worker",
+      "description": "As a developer, I need the process-lead-webhook one-off job worker so that parsed lead events are enriched with location_id and published as ad_lead.received events.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/routes/admin.ts: POST /analytics/admin/recompute validates X-Admin-Key header against ADMIN_RECOMPUTE_KEY env var; returns 401 if missing or wrong",
-        "POST body validated: { table: one of 8 rollup table names, date_range: { from: string (YYYY-MM-DD), to: string (YYYY-MM-DD) } }; returns 400 on invalid body",
-        "POST enqueues a BullMQ job to the analytics: queue and returns 202 { job_id: string }",
-        "GET /analytics/admin/recompute/:job_id validates X-Admin-Key; reads job from BullMQ; returns { job_id, status: pending|active|completed|failed, rows_written: number|null, error: string|null }",
-        "Both routes registered in app.ts",
+        "src/jobs/process-lead-webhook.ts exports createProcessLeadWebhookWorker(pool, bus, log) returning a BullMQ Worker on queue 'integration-hub:process-lead-webhook'",
+        "Job data type: { platform: string, leadEvent: LeadEvent }",
+        "Worker execution: look up location_id from campaign_location_mappings using (platform, campaign_id) — set to null if not found; call publishAdLeadReceived with full payload including location_id",
+        "Job ID is set to '{platform}:{external_lead_id}' by the enqueuing route (deduplication for retried webhook deliveries — BullMQ silently rejects duplicate IDs)",
         "Typecheck passes"
       ],
       "priority": 18,
       "passes": true,
-      "notes": "The admin endpoints are protected by X-Admin-Key header only (shared secret, no JWT required). ADMIN_RECOMPUTE_KEY is a required env var validated in env.ts."
+      "notes": ""
     },
     {
       "id": "US-019",
-      "title": "Unit tests \u2014 all 13 event handlers",
-      "description": "As a developer, I need unit tests for each of the 13 event handlers so that rollup logic, idempotency gates, and edge cases are verified without a real database.",
+      "title": "BullMQ job — backfill-ad-spend worker",
+      "description": "As a developer, I need the backfill-ad-spend one-off job worker so that historical ad spend data can be imported in 7-day chunks with progress tracking.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/test/unit/handlers/ contains one test file per handler (13 files)",
-        "Each test mocks the pg Pool/PoolClient, mocking pool.connect(), client.query(), client.release()",
-        "For each handler: assert the correct analytics_events insert SQL is called with expected params; assert the correct rollup upsert SQL is called with expected dimension values",
-        "Idempotency: when insertEvent returns inserted=false (simulate ON CONFLICT DO NOTHING returning rowCount=0), assert the rollup upsert is NOT called",
-        "stage-changed handler: assert coordinator rollup is skipped when triggered_by is absent; assert response_time increment is skipped when response_time_seconds is absent; assert both pipeline AND coordinator rollups are skipped on duplicate event_id",
-        "ad-spend-synced handler: assert upsertAdSpendDaily IS called even when insertEvent returns inserted=false (relaxed idempotency)",
-        "campaign-delivered handler: assert delivered is incremented by recipient_count (e.g. 842), not by 1",
-        "referral-converted handler: assert both metrics_referrals_daily and metrics_conversions_daily upserts are skipped on duplicate",
-        "Tests pass"
+        "src/jobs/backfill-ad-spend.ts exports createBackfillAdSpendWorker(pool, connectorRegistry, bus, log) returning a BullMQ Worker on queue 'integration-hub:backfill-ad-spend'",
+        "Job data type: { account_id: string, backfill_job_id: string }",
+        "Worker execution: load backfill_job row; load account; get connector; divide from_date..to_date into 7-day chunks; for each chunk: call fetchSpendRange; load mappings; drop unmapped campaigns; group by location_id; publish one ad_spend.synced event per (location_id, date); update backfill_jobs chunks_done++",
+        "On complete: setCompleted(backfill_job_id)",
+        "On error: setFailed(backfill_job_id, err.message)",
+        "Typecheck passes"
       ],
       "priority": 19,
       "passes": true,
-      "notes": "Mock the repositories module (events.ts and rollups.ts) using vi.mock or pass mock implementations. The handlers accept a Pool parameter, so inject a mock Pool in tests."
+      "notes": ""
     },
     {
       "id": "US-020",
-      "title": "Unit tests \u2014 query-builder.ts (SQL generation) and api-key-auth.ts (cache behaviour)",
-      "description": "As a developer, I need unit tests for the query builder pure function and the API key auth plugin so that SQL generation correctness and auth caching are verified without network calls.",
+      "title": "Routes — OAuth (connect, callback, disconnect)",
+      "description": "As a developer, I need the OAuth route handlers so that users can connect ad accounts, receive tokens via callback, and disconnect accounts.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/test/unit/query-builder.test.ts: tests for aggregate=count (no aggregate_field needed), aggregate=sum with aggregate_field, aggregate=avg with aggregate_field",
-        "query-builder tests: filters with single value, filters with multiple values (IN), group_by with one and two fields, granularity=daily/monthly/total, period date range applied correctly as WHERE occurred_at BETWEEN clauses",
-        "query-builder tests: assert generated SQL strings contain expected fragments and bindings array contains expected values",
-        "apps/platform/analytics/test/unit/api-key-auth.test.ts: mock fetch/http call to Identity Service; assert first call with ak_-prefixed key hits Identity Service and caches result",
-        "api-key-auth tests: second call with same key uses cache (Identity Service called only once); assert TTL expiry causes re-validation (simulate by manipulating cache); assert non-ak_ Authorization header bypasses the plugin",
-        "Tests pass"
+        "src/routes/oauth.ts registers three routes under the JWT-protected scope: GET /integrations/connect/:platform, GET /integrations/oauth/:platform/callback, DELETE /integrations/accounts/:id",
+        "GET /connect/:platform: validates platform exists in ConnectorRegistry (400 if not); calls createState(); calls connector.getAuthorizationUrl(codeChallenge, state); reply.redirect(authUrl)",
+        "GET /oauth/:platform/callback: verifyState(query.state, OAUTH_STATE_SECRET) — 400 if invalid; calls connector.exchangeCode(query.code, codeVerifier); encrypts tokens; inserts integration_accounts row; calls upsertPollJob for the new account; if Google Ads calls scheduleTokenRefresh; reply.redirect to UI success URL (or return 200 JSON { account_id } if no REDIRECT_URI configured)",
+        "DELETE /accounts/:id: loads account (404 if not found); calls removeTokenRefreshJob; removes repeatable poll job via pollQueue.removeRepeatable or upsertJobScheduler with removeOnComplete; deletes account (cascade removes mappings); returns 204",
+        "Typecheck passes"
       ],
       "priority": 20,
       "passes": true,
-      "notes": "query-builder.ts is a pure function \u2014 no mocking needed for its tests, just call buildQuery() with params and assert the returned { sql, bindings }. For api-key-auth, mock the HTTP call to IDENTITY_SERVICE_URL using vi.mock or vi.spyOn on the underlying fetch/http module."
+      "notes": ""
     },
     {
       "id": "US-021",
-      "title": "Integration tests \u2014 event routing \u2192 handler \u2192 DB and HTTP endpoint suite",
-      "description": "As a developer, I need integration tests that run against a real Postgres database to verify that the full event ingestion path correctly writes to analytics_events and rollup tables, and that the HTTP API returns correct data.",
+      "title": "Routes — accounts (list, campaigns, mappings)",
+      "description": "As a developer, I need the account management route handlers so that the UI can list connected accounts, view campaigns, and configure location mappings.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/test/integration/event-ingestion.test.ts: uses describe.skipIf(!process.env['DATABASE_URL']); creates schema and all tables inline (no migration runner); routes events through routeEvent() with a real pool; asserts rows in analytics_events and relevant rollup tables",
-        "Duplicate event_id test: calling routeEvent twice with the same event_id results in exactly one row in analytics_events and no double-counting in the rollup table",
-        "stage-changed integration: assert both metrics_pipeline_daily and metrics_coordinators_daily rows exist after routing a lead.stage_changed event with triggered_by set",
-        "ad-spend-synced integration: route same event twice (same event_id), assert metrics_ad_spend_daily was overwritten (not double-counted), assert analytics_events has only one row for that event_id",
-        "apps/platform/analytics/test/integration/http.test.ts: uses describe.skipIf(!process.env['DATABASE_URL']); builds the Fastify app with a real pool; seeds analytics_events rows directly; calls POST /analytics/query via app.inject and asserts response shape { rows, total, truncated }",
-        "GET /health \u2192 200 { status: 'ok' } and GET /ready \u2192 200 { status: 'ready' } tested via app.inject",
-        "Tests pass"
+        "src/routes/accounts.ts registers three routes under JWT-protected scope: GET /integrations/accounts, GET /integrations/accounts/:id/campaigns, PUT /integrations/accounts/:id/mappings",
+        "GET /accounts: calls findAll from accounts repository; returns array of { id, platform, account_id, account_name, status, last_polled_at, last_error } (no token fields)",
+        "GET /accounts/:id/campaigns: loads account (404 if not found); decrypts access_token; creates connector client; calls a live API to fetch current campaigns (connector method or direct client call); loads existing mappings; merges: returns [{ campaign_id, campaign_name, location_id: existing mapping or null }]",
+        "PUT /accounts/:id/mappings: validates body { mappings: [{ campaign_id: string, location_id: string }] } with typebox; calls mappings repository replaceAll in a transaction; returns 200 { count: mappings.length }",
+        "Typecheck passes"
       ],
       "priority": 21,
       "passes": true,
-      "notes": "Follow the AI service integration test pattern: create tables with raw SQL in beforeAll, delete rows in beforeEach, end pool in afterAll. Use MockDriver from @ortho/event-bus for the SQS consumer in integration tests (no real SQS needed). The HTTP tests use app.inject \u2014 no real HTTP server needed."
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Routes — webhooks (POST ingest + GET verify)",
+      "description": "As a developer, I need the webhook route handlers so that Meta and Google Ads can push lead events and verify webhook subscriptions.",
+      "acceptanceCriteria": [
+        "src/routes/webhooks.ts registers two routes WITHOUT JWT auth: POST /integrations/webhooks/:platform, GET /integrations/webhooks/:platform/verify",
+        "POST /webhooks/:platform: get connector (400 if unknown platform); call connector.verifyWebhook(headers, rawBody) — rawBody must be the raw Buffer (use Fastify's addContentTypeParser or rawBody option); if signature invalid return 403 immediately; call connector.parseLeadWebhook(body); on parse error: insert to failed_webhooks, log warn, return 200; on success: for each LeadEvent enqueue process-lead-webhook job with ID {platform}:{external_lead_id}; return 200",
+        "GET /webhooks/:platform/verify: get connector (400 if unknown); call connector.verifyChallenge(query); if result is null return 403; return challenge string with status 200",
+        "Fastify's built-in body parsing must be bypassed for rawBody access; use a content type parser that captures rawBody as Buffer on the webhook route",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Routes — backfill (trigger + status)",
+      "description": "As a developer, I need the backfill route handlers so that operators can trigger historical ad spend imports and monitor their progress.",
+      "acceptanceCriteria": [
+        "src/routes/backfill.ts registers two routes under JWT-protected scope: POST /integrations/accounts/:id/backfill, GET /integrations/accounts/:id/backfill/:job_id",
+        "POST /accounts/:id/backfill: validates body { from: string, to: string } (YYYY-MM-DD format, max 24-month range — return 400 if exceeded); loads account (404 if not found); inserts backfill_jobs row with chunks_total computed (ceil((days+1)/7)); enqueues backfill-ad-spend BullMQ job passing { account_id, backfill_job_id: row.id }; returns 201 { job_id: row.id }",
+        "GET /accounts/:id/backfill/:job_id: reads from backfill_jobs (404 if not found or account_id mismatch); returns { job_id, status, progress: { chunks_done, chunks_total }, error? }",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Service entry point — index.ts, app.ts, startup reconciliation",
+      "description": "As a developer, I need the complete service wiring — Fastify app setup, plugin registration, DB pool, BullMQ queues/workers, event bus, and startup reconciliation — so that the integration-hub service starts correctly.",
+      "acceptanceCriteria": [
+        "src/app.ts creates and exports a buildApp() function: registers @fastify/sensible, @fastify/rate-limit (global defaults); registers jwtAuthPlugin on a scoped prefix (/integrations) excluding /webhooks routes; registers oauthRoutes, accountsRoutes, backfillRoutes under JWT scope; registers webhookRoutes outside JWT scope; registers GET /health returning { status: 'ok' }",
+        "src/index.ts: loads env; calls createSecretsProvider(); loads INTEGRATION_HUB_ENCRYPTION_KEY; creates pg Pool; creates ioredis client; creates BullMQ Queues (one per job type: integration-hub:poll-ad-spend, integration-hub:refresh-token, integration-hub:process-lead-webhook, integration-hub:backfill-ad-spend); creates bus via createEventBus() (no bus.start()); creates Workers via createPollAdSpendWorker etc.; populates ConnectorRegistry (GoogleAdsConnector, MetaConnector); startup reconciliation: loads active accounts, calls upsertPollJob for each; starts Fastify on PORT",
+        "Graceful shutdown: SIGTERM closes Fastify, closes workers, closes queues, closes pool",
+        "Log at startup: log.info('integration-hub started on port X')",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Unit tests — credential-store + oauth-state",
+      "description": "As a developer, I need unit tests for the cryptographic modules to verify correctness and catch regressions.",
+      "acceptanceCriteria": [
+        "test/unit/credential-store.test.ts: encrypt→decrypt round-trip produces original plaintext; two calls to encrypt with same plaintext produce different IVs (randomness); decrypting with wrong key throws; decrypting tampered ciphertext throws",
+        "test/unit/oauth-state.test.ts: createState returns a state string and codeVerifier; verifyState on unmodified state returns matching codeVerifier; verifyState on tampered signature throws; verifyState on state older than 10 minutes throws",
+        "Tests use vitest; no external dependencies mocked beyond Date.now() for expiry tests",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Unit tests — Google Ads connector + Meta connector",
+      "description": "As a developer, I need unit tests for the connector webhook methods to verify signature verification, payload parsing, and challenge handling.",
+      "acceptanceCriteria": [
+        "test/unit/google-ads-connector.test.ts: verifyWebhook returns true for valid HMAC signature, false for wrong secret; parseLeadWebhook returns correct LeadEvent[] for a well-formed payload fixture; parseLeadWebhook throws for unrecognisable structure; verifyChallenge returns challenge token when verify_token matches, null when it does not match",
+        "test/unit/meta-connector.test.ts: verifyWebhook returns true for valid X-Hub-Signature-256 (HMAC-SHA256 of rawBody using META_APP_SECRET), false for tampered body; parseLeadWebhook returns LeadEvent[] for valid Meta leadgen webhook fixture (with batched entry[].changes[]); parseLeadWebhook returns [] for empty changes; parseLeadWebhook throws for malformed structure; verifyChallenge returns challenge when verify_token matches, null otherwise",
+        "All tests use vitest; connector instantiated with test env values injected",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": true,
+      "notes": ""
     }
   ]
 }
