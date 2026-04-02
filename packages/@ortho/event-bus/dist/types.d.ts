@@ -1,4 +1,5 @@
 export interface OrthoEvent {
+    event_id?: string;
     event_type: string;
     entity_type?: string;
     entity_id?: string;
