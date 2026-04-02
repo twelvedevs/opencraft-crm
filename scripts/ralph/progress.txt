@@ -32,3 +32,25 @@ Started: Thu Apr  2 00:00:00 UTC 2026
   - Plugin exports JwtAuthOptions interface for configuration by app.ts (US-024)
   - Webhook routes must NOT have this plugin applied — register them on a separate scope
 ---
+
+## 2026-04-02 - US-009
+- Implemented stateless PKCE state generation and verification in src/services/oauth-state.ts
+- createState: generates 43-byte random codeVerifier (base64url), SHA-256 codeChallenge, HMAC-SHA256 signed state payload with timestamp
+- verifyState: constant-time HMAC comparison via timingSafeEqual, 10-minute TTL check, returns codeVerifier
+- Files created: apps/platform/integration-hub/src/services/oauth-state.ts
+- **Learnings for future iterations:**
+  - State format: base64url(JSON { cv, ts }) + '.' + HMAC-SHA256 signature (base64url)
+  - codeChallenge is base64url(SHA-256(codeVerifier)) — needed by OAuth routes (US-020) for authorization URL
+  - CreateStateResult interface exported for use by route handlers
+  - Uses node:crypto for all cryptographic operations (consistent with credential-store.ts)
+---
+
+## 2026-04-02 - US-001
+- Verified service scaffold already complete from prior stories (US-006 through US-009)
+- All acceptance criteria met: package.json with deps, tsconfig.json (ES2022/NodeNext/strict), Dockerfile (node:24-alpine multi-stage), env.ts (24 env vars validated via typebox), index.ts placeholder
+- Typecheck passes
+- Files verified: package.json, tsconfig.json, Dockerfile, src/env.ts, src/index.ts
+- **Learnings for future iterations:**
+  - Earlier stories (US-006+) created the scaffold as a prerequisite, so US-001 was already satisfied
+  - US-002 through US-005 files also exist and likely pass — verify in subsequent iterations
+---
