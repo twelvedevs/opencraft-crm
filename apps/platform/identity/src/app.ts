@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import type { AuthProvider } from './providers/auth-provider.interface.js';
 import { env } from './env.js';
 import { healthRoutes } from './routes/health.js';
+import { sessionRoutes } from './routes/session.js';
 
 export async function buildApp(
   pool: Pool,
@@ -19,6 +20,7 @@ export async function buildApp(
   app.decorate('provider', provider);
 
   await app.register(healthRoutes, { pool });
+  await app.register(sessionRoutes, { pool, provider });
 
   return app;
 }
