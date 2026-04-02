@@ -352,7 +352,7 @@
         "Tests pass"
       ],
       "priority": 21,
-      "passes": false,
+      "passes": true,
       "notes": "Follow the AI service integration test pattern: create tables with raw SQL in beforeAll, delete rows in beforeEach, end pool in afterAll. Use MockDriver from @ortho/event-bus for the SQS consumer in integration tests (no real SQS needed). The HTTP tests use app.inject \u2014 no real HTTP server needed."
     }
   ]

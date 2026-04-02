@@ -1,3 +1,17 @@
+## 2026-04-02 - US-021
+- Created test/integration/event-ingestion.test.ts: describe.skipIf(!DATABASE_URL); creates schema + 9 tables inline (IF NOT EXISTS) using raw pool.query; no migration runner; routes events through routeEvent() with a real Pool; cleans all tables in beforeEach via DELETE FROM
+- Tests: lead.created writes analytics_events row + metrics_leads_daily increment; duplicate event_id → exactly one row + rollup count=1; stage-changed with triggered_by → both pipeline and coordinator rows; stage-changed duplicate → both rollups stay at 1; ad_spend.synced same event_id twice → analytics_events has one row, metrics_ad_spend_daily.spend overwritten with corrected value
+- Created test/integration/http.test.ts: describe.skipIf(!DATABASE_URL); builds app once in beforeAll using minimal mock Queue; tests GET /health (200 ok), GET /ready (200 ready with live DB), POST /analytics/query (200 with rows/total/truncated shape), POST /analytics/query missing event_type (400), missing aggregate (400), no matching events (total=0)
+- 11 integration tests correctly skipped when DATABASE_URL absent; all 82 unit tests continue to pass
+- Files changed: test/integration/event-ingestion.test.ts, test/integration/http.test.ts
+- **Learnings for future iterations:**
+  - Integration tests create tables inline with IF NOT EXISTS — safe to rerun against same DB without errors
+  - analytics_events is partitioned; DELETE FROM parent table cascades to all partitions including default; seed rows via analytics_events_default (direct partition) for HTTP tests
+  - buildApp requires (pool, queue) — pass a minimal mock queue `{ add: vi.fn(), getJob: vi.fn() } as unknown as Queue` for integration tests that don't exercise admin routes
+  - describe.skipIf(!process.env['DATABASE_URL']) is the correct pattern for integration tests that require a real DB
+  - `@ortho/logger` mocking not needed for analytics integration tests — app.ts doesn't import it directly
+---
+
 ## 2026-04-02 - US-020
 - Created test/unit/query-builder.test.ts: 12 tests covering count/sum/avg aggregates, single/multi-value filters, group_by one/two fields, daily/monthly/total granularity, period binding positions, injection guard (throws on invalid field), and binding ordering with multiple filters
 - Created test/unit/api-key-auth.test.ts: 8 tests covering first call hits Identity Service + caches, second call uses cache (fetch called only once), TTL expiry with vi.useFakeTimers() + vi.setSystemTime(), non-ak_ bypass, no-auth bypass, Identity Service 401 → 401 to client, network error → 401, header injection verification via route handler echoing request headers
