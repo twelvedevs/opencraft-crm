@@ -1,0 +1,212 @@
+{
+  "project": "Ortho CRM — AI Service",
+  "branchName": "feature/ai-service",
+  "description": "Platform-layer AI Service — thin Claude API gateway with prompt registry, context injection, two-layer response cache (lru-cache + Postgres), and Arize Phoenix LLM observability",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffolding — package.json, tsconfig, knexfile, Dockerfile",
+      "description": "As a developer, I need the AI service project structure set up so that the service can be built, run, and tested.",
+      "acceptanceCriteria": [
+        "apps/platform/ai/package.json exists with name '@platform/ai', type 'module', scripts: build/dev/start/test/typecheck, dependencies: fastify ^5, @fastify/sensible ^6, @sinclair/typebox ^0.34, @anthropic-ai/sdk, lru-cache, pg ^8, @opentelemetry/instrumentation, @arize-ai/openinference-instrumentation-anthropic, @ortho/logger (file:../../../packages/@ortho/logger), devDependencies: typescript ^5, tsx ^4, vitest ^2, @types/node ^22, @types/pg ^8",
+        "apps/platform/ai/tsconfig.json exists with module: NodeNext, moduleResolution: NodeNext, target: ES2022, strict: true, outDir: dist",
+        "apps/platform/ai/knexfile.ts exists using pg client, DATABASE_URL env, migrations directory ./migrations",
+        "apps/platform/ai/Dockerfile exists with node:24-alpine, npm ci, npm run build, CMD node dist/index.js",
+        "Directory structure created: src/routes/, src/services/, src/repositories/, src/prompts/, migrations/, test/unit/, test/integration/",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Database migration — ai_completions table",
+      "description": "As a developer, I need the ai_completions cache table created in the platform_ai schema so that L2 cross-instance response caching works.",
+      "acceptanceCriteria": [
+        "migrations/001_create_ai_completions.ts exists with up() and down() functions",
+        "up() creates table ai_completions with columns: id (uuid PK, gen_random_uuid()), cache_key (text NOT NULL), prompt_id (text NOT NULL), model (text NOT NULL), response_text (text NOT NULL), expires_at (timestamptz NOT NULL), created_at (timestamptz NOT NULL DEFAULT NOW())",
+        "UNIQUE constraint on cache_key column",
+        "Index on expires_at column",
+        "down() drops ai_completions table",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Arize Phoenix instrumentation setup",
+      "description": "As a developer, I need OpenInference Anthropic instrumentation registered before any SDK imports so that all Claude calls are automatically traced in Arize Phoenix.",
+      "acceptanceCriteria": [
+        "src/instrumentation.ts exists and calls registerInstrumentations({ instrumentations: [new AnthropicInstrumentation()] }) using @opentelemetry/instrumentation and @arize-ai/openinference-instrumentation-anthropic",
+        "Instrumentation is registered unconditionally (not gated on ARIZE_PHOENIX_ENDPOINT env var)",
+        "src/index.ts exists and imports './instrumentation.js' as its very first import before any other application imports",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Prompt registry — PromptDefinition interface + all 9 prompts",
+      "description": "As a developer, I need all 9 prompt definitions loaded into an in-memory registry at startup so that prompt_id lookups work correctly.",
+      "acceptanceCriteria": [
+        "src/services/prompt-registry.ts exports PromptDefinition interface with fields: id (string), defaultModel ('haiku' | 'sonnet'), systemPrompt (string), userPromptTemplate (string), maxTokens (optional number, default 500), structured (optional boolean)",
+        "src/services/prompt-registry.ts exports a Map<string, PromptDefinition> loaded from all 9 prompt files at module init time",
+        "src/services/prompt-registry.ts exports getPrompt(id: string): PromptDefinition | null returning null for unknown IDs",
+        "9 prompt files exist under src/prompts/: smart-reply-draft.ts, sequence-personalization.ts, objection-handling.ts, conversation-summary.ts, follow-up-timing.ts, lead-scoring-commentary.ts, conversation-reply-drafts.ts, conversation-objection-handling.ts, conversation-agent-reply.ts",
+        "Each prompt file exports a single PromptDefinition with appropriate id, defaultModel, systemPrompt, userPromptTemplate, and structured field matching the spec table",
+        "conversation-agent-reply.ts has structured: true and its systemPrompt instructs Claude to always respond as JSON { text: string, escalate: boolean }",
+        "Prompts that default to haiku: smart-reply-draft, sequence-personalization, conversation-summary, follow-up-timing, lead-scoring-commentary, conversation-reply-drafts, conversation-agent-reply",
+        "Prompts that default to sonnet: objection-handling, conversation-objection-handling",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Context injector — {{merge_tag}} pure function",
+      "description": "As a developer, I need a pure function that substitutes {{merge_tag}} placeholders in prompt templates using caller-supplied context so that prompts are personalized correctly.",
+      "acceptanceCriteria": [
+        "src/services/context-injector.ts exports injectContext(template: string, context: Record<string, unknown> | unknown[]): string",
+        "Tags of the form {{key}} are replaced with the corresponding value from context",
+        "Dot-notation paths up to 3 levels deep are resolved ({{name}}, {{lead.name}}, {{lead.address.city}})",
+        "Paths 4+ levels deep ({{a.b.c.d}}) are treated as not found: replaced with empty string and a structured log warning emitted via @ortho/logger",
+        "Non-string resolved values have .toString() called before substitution (numbers render as '42', booleans as 'true', objects as '[object Object]')",
+        "Missing keys are replaced with empty string and a structured log warning emitted — no throw",
+        "Multiple occurrences of the same tag are all replaced",
+        "Templates with no tags pass through unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Repository — ai_completions raw pg CRUD",
+      "description": "As a developer, I need a repository for ai_completions using the raw pg client with search_path=platform_ai so that L2 cache reads, writes, and cleanup work correctly.",
+      "acceptanceCriteria": [
+        "src/repositories/completions.ts exports createCompletionsRepository(pool: Pool) returning an object with findByKey, upsert, and deleteExpired methods",
+        "findByKey(cacheKey: string): Promise<{ response_text: string } | null> — SELECT WHERE cache_key = $1 AND expires_at > NOW(), returns null on miss",
+        "upsert(row: { cache_key, prompt_id, model, response_text, expires_at }): Promise<void> — INSERT ... ON CONFLICT (cache_key) DO UPDATE SET response_text = EXCLUDED.response_text, expires_at = EXCLUDED.expires_at",
+        "deleteExpired(): Promise<void> — DELETE FROM ai_completions WHERE expires_at < NOW() - INTERVAL '1 hour'",
+        "pg Pool is created with search_path=platform_ai set via the options object so all queries use bare table names",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Response cache service — L1 lru-cache + L2 Postgres + cache key",
+      "description": "As a developer, I need the two-layer response cache service so that repeated identical requests are served from memory or Postgres without calling Claude.",
+      "acceptanceCriteria": [
+        "src/services/completion-cache.ts exports createCompletionCache(repo) returning an object with get and set methods",
+        "computeCacheKey(promptId: string, model: string, context: unknown): string — SHA256 of promptId + ':' + model + ':' + JSON(context) where context keys are recursively sorted before serialization",
+        "get(key) checks L1 lru-cache first (TTL 60s, max 500 entries using lru-cache npm package) → returns { text, cached: true } on hit",
+        "get(key) on L1 miss queries L2 Postgres via repo.findByKey() → on hit, populates L1, returns { text, cached: true }",
+        "get(key) on both misses returns null",
+        "set(key, text, promptId, model) writes to Postgres via void repo.upsert() (fire-and-forget — not awaited), calls void repo.deleteExpired() for lazy cleanup (also fire-and-forget), and populates L1",
+        "L2 Postgres expires_at is set to NOW() + INTERVAL '5 minutes' on write",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Claude client — Anthropic SDK wrapper with typed error handling",
+      "description": "As a developer, I need a Claude API wrapper that maps RateLimitError/APIStatusError/APIError to 503, adds custom Phoenix span attributes, and resolves haiku/sonnet aliases to full Anthropic model IDs.",
+      "acceptanceCriteria": [
+        "src/services/claude-client.ts exports createClaudeClient() returning an object with complete(params: { promptId, systemPrompt, userPrompt, model, maxTokens }): Promise<string>",
+        "Model alias resolution: 'haiku' → 'claude-haiku-4-5-20251001', 'sonnet' → 'claude-sonnet-4-6'",
+        "Sets custom OpenTelemetry span attributes before each call: prompt_id (string) and cached: false (boolean)",
+        "Catches RateLimitError (429), APIStatusError (529 and all 5xx), APIError (unexpected SDK errors) and re-throws each as a new Error with message 'Claude API unavailable' and a .statusCode = 503 property for the route handler to detect",
+        "Non-Anthropic errors bubble up without wrapping (re-thrown as-is)",
+        "Returns the completion text string from the first content block",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Fastify server — env, app, routes, and index.ts wiring",
+      "description": "As a developer, I need the Fastify server wired up with GET /health and POST /ai/complete routes so that the service is fully runnable.",
+      "acceptanceCriteria": [
+        "src/env.ts exports parsed env with DATABASE_URL (string), PORT (optional integer, default 3000), ARIZE_PHOENIX_ENDPOINT (optional string) using @sinclair/typebox Value.Check",
+        "src/routes/health.ts exports healthRoutes: FastifyPlugin — GET /health returns 200 { status: 'ok' } always",
+        "src/routes/complete.ts exports completeRoutes: FastifyPlugin — POST /ai/complete",
+        "POST /ai/complete validates request with TypeBox schema: prompt_id (non-empty string, required), context (required), model (optional 'haiku' | 'sonnet')",
+        "POST /ai/complete performs manual runtime check: rejects null, string, number, boolean values for context with 400 { error: '...' }; accepts plain objects {} and arrays []",
+        "POST /ai/complete returns 404 { error: 'Prompt not found' } when prompt_id not in registry",
+        "POST /ai/complete returns 400 { error: '...' } for invalid model value",
+        "POST /ai/complete resolves model (request override > prompt defaultModel), checks cache, calls Claude on miss, writes to cache, returns { text, model, prompt_id, cached, structured }",
+        "POST /ai/complete returns 503 { error: 'Claude API unavailable' } when claude-client throws a 503 error",
+        "src/app.ts exports buildApp(pool: Pool): Promise<FastifyInstance> — registers @fastify/sensible, decorates with pool, registers both route plugins",
+        "src/index.ts wires up env, pg Pool, buildApp, listen on PORT, SIGTERM handler — instrumentation.js is the first import",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Unit tests — context injector, prompt registry, cache key, model resolution",
+      "description": "As a developer, I need unit tests for the pure functions so that the core logic is verified without external dependencies.",
+      "acceptanceCriteria": [
+        "test/unit/context-injector.test.ts passes: all tags present → correct substitution; missing key → empty string no throw; dot-notation 1/2/3 levels resolved; dot-notation 4+ levels → empty string; multiple occurrences all replaced; no tags → passthrough; number value → '42'; boolean → 'true'; nested object → '[object Object]'",
+        "test/unit/prompt-registry.test.ts passes: known prompt_id resolves to correct definition; unknown prompt_id returns null; conversation-agent-reply resolves with structured: true",
+        "test/unit/cache-key.test.ts passes: identical context with different key insertion order → same hash; different context → different hash; different prompt_id → different hash; different model → different hash",
+        "test/unit/model-resolution.test.ts passes: 'haiku' → 'claude-haiku-4-5-20251001'; 'sonnet' → 'claude-sonnet-4-6'; explicit model field overrides prompt defaultModel; absent model field uses prompt defaultModel",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Integration tests — full HTTP suite with real Postgres and mocked Claude SDK",
+      "description": "As a developer, I need integration tests covering the full request lifecycle, caching layers, and error scenarios so that the service behaves correctly end-to-end.",
+      "acceptanceCriteria": [
+        "test/integration/complete.test.ts uses real Postgres (DATABASE_URL env, platform_ai schema) and mocks @anthropic-ai/sdk via vi.mock()",
+        "GET /health → 200 { status: 'ok' }",
+        "Happy path: valid request → 200 with text, model, prompt_id, cached: false, structured: false",
+        "conversation-agent-reply prompt → 200 with structured: true",
+        "Unknown prompt_id → 404",
+        "Missing context → 400",
+        "Missing prompt_id → 400",
+        "context is null → 400",
+        "context is a string → 400",
+        "context is a number → 400",
+        "context: [] (empty array) → 200",
+        "Invalid model value (e.g. 'gpt-4') → 400",
+        "L1 cache hit on second identical request → Claude not called, cached: true",
+        "L2 cache hit (L1 cleared between requests) → Claude not called, cached: true, L1 repopulated",
+        "Expired L2 entry (expires_at set to past) → Claude called again, fresh entry written",
+        "Claude throws RateLimitError → 503",
+        "Claude throws APIStatusError with status 529 → 503",
+        "Claude throws APIStatusError with status 500 → 503",
+        "L2 write error (pg failure simulated) → response still returned to caller, error logged",
+        "Lazy cleanup: write with expired rows present in DB → expired rows deleted after write",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
