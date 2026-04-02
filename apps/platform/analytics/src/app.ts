@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
 import type { Pool } from 'pg';
+import type { Queue } from 'bullmq';
 import { apiKeyAuthPlugin } from './plugins/api-key-auth.js';
 import { healthRoutes } from './routes/health.js';
 import { leadsRoutes } from './routes/metrics/leads.js';
@@ -13,8 +14,9 @@ import { campaignsRoutes } from './routes/metrics/campaigns.js';
 import { referralsRoutes } from './routes/metrics/referrals.js';
 import { coordinatorsRoutes } from './routes/metrics/coordinators.js';
 import { queryRoutes } from './routes/query.js';
+import { adminRoutes } from './routes/admin.js';
 
-export async function buildApp(pool: Pool): Promise<FastifyInstance> {
+export async function buildApp(pool: Pool, queue: Queue): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
 
   await app.register(sensible);
@@ -31,6 +33,7 @@ export async function buildApp(pool: Pool): Promise<FastifyInstance> {
   await app.register(referralsRoutes, { pool });
   await app.register(coordinatorsRoutes, { pool });
   await app.register(queryRoutes, { pool });
+  await app.register(adminRoutes, { queue });
 
   return app;
 }

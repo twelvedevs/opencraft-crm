@@ -8,7 +8,6 @@ import { registerPartitionMaintenanceJob } from './jobs/partition-maintenance.js
 import { createRecomputeRollupsWorker } from './jobs/recompute-rollups.js';
 
 const pool = new Pool({ connectionString: env.DATABASE_URL });
-const app = await buildApp(pool);
 const consumer = createSqsConsumer(pool);
 
 // BullMQ queues — job scheduling is tied to the HTTP server process (not worker.ts)
@@ -21,6 +20,8 @@ const recomputeQueue = new Queue('analytics:recompute', { connection: queueConne
 
 registerPartitionMaintenanceJob(maintenanceQueue, pool);
 createRecomputeRollupsWorker(recomputeQueue, pool);
+
+const app = await buildApp(pool, recomputeQueue);
 
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
 await consumer.start();
