@@ -1,5 +1,5 @@
 {
-  "project": "Ortho CRM — Analytics Service",
+  "project": "Ortho CRM \u2014 Analytics Service",
   "branchName": "feature/analytics-service",
   "description": "Platform-layer Analytics Service: SQS event ingestion, 13 typed handlers, 8 rollup tables, 9 named metric REST endpoints, generic query DSL, BullMQ partition maintenance, admin recompute. Spec: docs/superpowers/specs/2026-04-02-analytics-service-updated-design.md",
   "userStories": [
@@ -10,7 +10,7 @@
       "acceptanceCriteria": [
         "packages/@ortho/event-bus/src/types.ts: add optional field event_id?: string to the OrthoEvent interface",
         "packages/@ortho/event-bus/src/index.ts still exports OrthoEvent cleanly",
-        "Existing event-bus tests still pass (event_id is optional — no breaking change)",
+        "Existing event-bus tests still pass (event_id is optional \u2014 no breaking change)",
         "Typecheck passes in packages/@ortho/event-bus"
       ],
       "priority": 1,
@@ -19,7 +19,7 @@
     },
     {
       "id": "US-002",
-      "title": "Project scaffolding — package.json, tsconfig.json, Dockerfile",
+      "title": "Project scaffolding \u2014 package.json, tsconfig.json, Dockerfile",
       "description": "As a developer, I need the apps/platform/analytics/ service directory wired up with correct tooling so that subsequent stories can add code that builds, typechecks, and runs tests.",
       "acceptanceCriteria": [
         "apps/platform/analytics/package.json exists with name @platform/analytics, type module, Node >=24",
@@ -37,7 +37,7 @@
     },
     {
       "id": "US-003",
-      "title": "Database migration — analytics_events table with monthly partitioning",
+      "title": "Database migration \u2014 analytics_events table with monthly partitioning",
       "description": "As a developer, I need the analytics_events immutable raw event log table created with partitioning and indexes so that handlers can write and deduplicate events.",
       "acceptanceCriteria": [
         "apps/platform/analytics/migrations/001_create_analytics_events.ts exists",
@@ -51,11 +51,11 @@
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Use knex.raw() for the PARTITION BY RANGE DDL and for creating the default partition — Knex schema builder doesn't support native partitioning. Table goes in platform_analytics schema. The UNIQUE constraint on event_id is the deduplication anchor."
+      "notes": "Use knex.raw() for the PARTITION BY RANGE DDL and for creating the default partition \u2014 Knex schema builder doesn't support native partitioning. Table goes in platform_analytics schema. The UNIQUE constraint on event_id is the deduplication anchor."
     },
     {
       "id": "US-004",
-      "title": "Database migrations — 8 rollup tables",
+      "title": "Database migrations \u2014 8 rollup tables",
       "description": "As a developer, I need all eight daily rollup tables created so that event handlers can atomically increment metrics alongside the raw event insert.",
       "acceptanceCriteria": [
         "apps/platform/analytics/migrations/002_create_rollup_tables.ts exists",
@@ -73,11 +73,11 @@
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Add a comment in the migration for metrics_ad_spend_daily explaining that campaign_name is a display hint only — queries must always group by campaign_id, never campaign_name. All tables are in platform_analytics schema."
+      "notes": "Add a comment in the migration for metrics_ad_spend_daily explaining that campaign_name is a display hint only \u2014 queries must always group by campaign_id, never campaign_name. All tables are in platform_analytics schema."
     },
     {
       "id": "US-005",
-      "title": "Repositories — events.ts (raw insert + dedup) and rollups.ts (upsert helpers)",
+      "title": "Repositories \u2014 events.ts (raw insert + dedup) and rollups.ts (upsert helpers)",
       "description": "As a developer, I need typed repository functions for inserting events and upserting rollup rows so that handlers can share consistent SQL patterns.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/repositories/events.ts exports insertEvent(client: PoolClient, params: InsertEventParams): Promise<{ inserted: boolean }> using INSERT INTO platform_analytics.analytics_events ... ON CONFLICT (event_id) DO NOTHING, returning true if a row was inserted",
@@ -92,7 +92,7 @@
     },
     {
       "id": "US-006",
-      "title": "Event handlers — lead-created, lead-archived, lead-converted",
+      "title": "Event handlers \u2014 lead-created, lead-archived, lead-converted",
       "description": "As a developer, I need the three lead lifecycle handlers that write to analytics_events and the lead/conversion rollup tables so that lead acquisition metrics are captured.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/handlers/lead-created.ts: extracts location_id and channel from payload, writes analytics_events row (entity_type='lead') and increments metrics_leads_daily.count in one transaction; skips rollup if event was a duplicate",
@@ -108,12 +108,12 @@
     },
     {
       "id": "US-007",
-      "title": "Event handler — stage-changed (dual rollup: pipeline + coordinators)",
+      "title": "Event handler \u2014 stage-changed (dual rollup: pipeline + coordinators)",
       "description": "As a developer, I need the StageChangedHandler that atomically writes to both metrics_pipeline_daily and metrics_coordinators_daily so that funnel and coordinator performance metrics are captured in one transaction.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/handlers/stage-changed.ts exists",
         "Extracts location_id, pipeline, stage_to, triggered_by?, response_time_seconds?, time_in_stage_seconds from payload",
-        "Opens one DB transaction: insertEvent → if inserted=true, upsertPipelineDaily (entries+1) AND if triggered_by non-null: upsertCoordinatorDaily (always increments time_in_stage_sum/count; increments response_time_sum/count only when response_time_seconds is present)",
+        "Opens one DB transaction: insertEvent \u2192 if inserted=true, upsertPipelineDaily (entries+1) AND if triggered_by non-null: upsertCoordinatorDaily (always increments time_in_stage_sum/count; increments response_time_sum/count only when response_time_seconds is present)",
         "If insertEvent returns inserted=false (duplicate), both rollup writes are skipped in the same transaction",
         "Events without triggered_by do NOT write to metrics_coordinators_daily",
         "Typecheck passes"
@@ -124,13 +124,13 @@
     },
     {
       "id": "US-008",
-      "title": "Event handlers — message-delivered, message-failed, opt-out-received",
+      "title": "Event handlers \u2014 message-delivered, message-failed, opt-out-received",
       "description": "As a developer, I need the three messaging handlers that update metrics_messages_daily so that delivery reliability and opt-out metrics are tracked.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/handlers/message-delivered.ts: extracts location_id, increments metrics_messages_daily.delivered by 1; skips on duplicate event_id",
         "apps/platform/analytics/src/handlers/message-failed.ts: extracts location_id, increments metrics_messages_daily.failed by 1; skips on duplicate event_id",
         "apps/platform/analytics/src/handlers/opt-out-received.ts: extracts location_id, increments metrics_messages_daily.opt_outs by 1; skips on duplicate event_id",
-        "All three use same transaction pattern: insertEvent → check inserted → upsert",
+        "All three use same transaction pattern: insertEvent \u2192 check inserted \u2192 upsert",
         "Typecheck passes"
       ],
       "priority": 8,
@@ -139,7 +139,7 @@
     },
     {
       "id": "US-009",
-      "title": "Event handlers — campaign-sent, campaign-delivered, email-opened, email-clicked",
+      "title": "Event handlers \u2014 campaign-sent, campaign-delivered, email-opened, email-clicked",
       "description": "As a developer, I need four handlers that update metrics_campaigns_daily so that email broadcast performance metrics (sent, delivered, opened, clicked) are tracked.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/handlers/campaign-sent.ts: extracts campaign_id, location_id, increments metrics_campaigns_daily.sent by 1; skips on duplicate",
@@ -151,15 +151,15 @@
       ],
       "priority": 9,
       "passes": true,
-      "notes": "campaign-delivered increments by recipient_count (bulk delivery confirmation from SendGrid webhook). Standard idempotency applies — if event_id is a duplicate, the rollup increment is also skipped."
+      "notes": "campaign-delivered increments by recipient_count (bulk delivery confirmation from SendGrid webhook). Standard idempotency applies \u2014 if event_id is a duplicate, the rollup increment is also skipped."
     },
     {
       "id": "US-010",
-      "title": "Event handlers — referral-converted (dual rollup) and ad-spend-synced (relaxed idempotency)",
+      "title": "Event handlers \u2014 referral-converted (dual rollup) and ad-spend-synced (relaxed idempotency)",
       "description": "As a developer, I need the referral and ad-spend handlers, which have non-standard rollup behaviour, so that referral attribution and ad performance data are correctly stored.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/handlers/referral-converted.ts: extracts location_id, writes to both metrics_referrals_daily (count+1) and metrics_conversions_daily (channel='referral', count+1) in one transaction; both rollup writes are skipped if event_id is a duplicate",
-        "apps/platform/analytics/src/handlers/ad-spend-synced.ts: extracts platform, location_id, synced_date from top-level payload; iterates records[] array; for each record upserts metrics_ad_spend_daily with ON CONFLICT DO UPDATE overwriting spend/clicks/impressions/campaign_name; the rollup upsert executes even if the analytics_events insert was skipped (relaxed idempotency — allows re-sync corrections)",
+        "apps/platform/analytics/src/handlers/ad-spend-synced.ts: extracts platform, location_id, synced_date from top-level payload; iterates records[] array; for each record upserts metrics_ad_spend_daily with ON CONFLICT DO UPDATE overwriting spend/clicks/impressions/campaign_name; the rollup upsert executes even if the analytics_events insert was skipped (relaxed idempotency \u2014 allows re-sync corrections)",
         "ad-spend-synced.ts has a comment explaining the relaxed idempotency rule and why it differs from other handlers",
         "Typecheck passes"
       ],
@@ -200,11 +200,11 @@
       ],
       "priority": 12,
       "passes": true,
-      "notes": "Do NOT modify @ortho/auth-middleware — this plugin is Analytics Service-specific. Use Node's built-in crypto.createHash('sha256') for the cache key. A simple Map with TTL (or lru-cache) is sufficient — no Redis needed for the auth cache."
+      "notes": "Do NOT modify @ortho/auth-middleware \u2014 this plugin is Analytics Service-specific. Use Node's built-in crypto.createHash('sha256') for the cache key. A simple Map with TTL (or lru-cache) is sufficient \u2014 no Redis needed for the auth cache."
     },
     {
       "id": "US-013",
-      "title": "Fastify server setup — env, app, health/ready routes, index.ts, worker.ts",
+      "title": "Fastify server setup \u2014 env, app, health/ready routes, index.ts, worker.ts",
       "description": "As a developer, I need the complete Fastify server wiring with environment validation, health endpoints, and dual-mode entry points so that the service can be started as an embedded HTTP+consumer process or as a standalone SQS worker.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/env.ts validates and exports all env vars from spec Section 7: DATABASE_URL (required), SQS_QUEUE_URL (required), IDENTITY_SERVICE_URL (required), REDIS_URL (required), ADMIN_RECOMPUTE_KEY (required), PORT (optional, default 3000), LOG_LEVEL (optional, default info), API_KEY_CACHE_TTL_SECONDS (optional, default 60), SQS_POLLING_INTERVAL_MS (optional), SQS_BATCH_SIZE (optional, default 10), SQS_CONCURRENCY (optional, default 5)",
@@ -221,7 +221,7 @@
     },
     {
       "id": "US-014",
-      "title": "Named metric routes — leads, pipeline, conversions, messages",
+      "title": "Named metric routes \u2014 leads, pipeline, conversions, messages",
       "description": "As a developer, I need the first four named metric endpoints so that the Reporting Service can query lead counts, pipeline funnel data, conversion rates, and messaging delivery stats.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/routes/metrics/leads.ts: GET /analytics/metrics/leads accepts period, granularity (daily|monthly|total, default daily), location_id[], channel[], page (default 1), page_size (default 1000, max 1000); queries metrics_leads_daily; returns { period, granularity, data: [...], meta: { total, page, page_size, total_pages } }",
@@ -234,32 +234,32 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "granularity=daily returns one row per date per dimension group; granularity=monthly aggregates to YYYY-MM; granularity=total returns a single aggregate row. Use SQL GROUP BY DATE_TRUNC for monthly and no date grouping for total. All routes are in the platform_analytics schema."
     },
     {
       "id": "US-015",
-      "title": "Named metric routes — ad-spend (+ /campaigns sub-route), campaigns, referrals, coordinators",
+      "title": "Named metric routes \u2014 ad-spend (+ /campaigns sub-route), campaigns, referrals, coordinators",
       "description": "As a developer, I need the remaining four named metric endpoints so that ad performance, email campaign stats, referral counts, and coordinator activity data are all queryable.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/routes/metrics/ad-spend.ts: GET /analytics/metrics/ad-spend with platform and campaign_id filters; GET /analytics/metrics/ad-spend/campaigns always groups by campaign_id (prevents misuse of campaign_name display hint); both accept shared period/granularity/location_id/page/page_size params",
         "apps/platform/analytics/src/routes/metrics/campaigns.ts: GET /analytics/metrics/campaigns with campaign_id filter; returns sent, delivered, opened, clicked per row",
         "apps/platform/analytics/src/routes/metrics/referrals.ts: GET /analytics/metrics/referrals; queries metrics_referrals_daily",
-        "apps/platform/analytics/src/routes/metrics/coordinators.ts: GET /analytics/metrics/coordinators with coordinator_id filter; response rows include coordinator_id, response_time_sum, response_time_count, time_in_stage_sum, time_in_stage_count (raw sums — Reporting Service computes means)",
+        "apps/platform/analytics/src/routes/metrics/coordinators.ts: GET /analytics/metrics/coordinators with coordinator_id filter; response rows include coordinator_id, response_time_sum, response_time_count, time_in_stage_sum, time_in_stage_count (raw sums \u2014 Reporting Service computes means)",
         "All four routes use shared query param validation; return { period, granularity, data, meta } envelope",
         "All four routes registered in app.ts",
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": "The /ad-spend/campaigns sub-route must always GROUP BY campaign_id regardless of other params — this enforces the constraint documented in the migration and handler."
+      "passes": true,
+      "notes": "The /ad-spend/campaigns sub-route must always GROUP BY campaign_id regardless of other params \u2014 this enforces the constraint documented in the migration and handler."
     },
     {
       "id": "US-016",
-      "title": "Generic query DSL — query-builder.ts + POST /analytics/query route",
+      "title": "Generic query DSL \u2014 query-builder.ts + POST /analytics/query route",
       "description": "As a developer, I need a pure-function query builder and the POST /analytics/query endpoint so that the Reporting Service and other callers can run ad-hoc queries against the raw analytics_events table.",
       "acceptanceCriteria": [
-        "apps/platform/analytics/src/services/query-builder.ts exports buildQuery(params: QueryParams): { sql: string; bindings: unknown[] } as a pure function — no DB calls, no side effects",
+        "apps/platform/analytics/src/services/query-builder.ts exports buildQuery(params: QueryParams): { sql: string; bindings: unknown[] } as a pure function \u2014 no DB calls, no side effects",
         "buildQuery supports: aggregate (count | sum | avg), aggregate_field (dot-notation into dimensions/properties jsonb), filters (equality or IN matching with dot-notation keys, all ANDed), group_by (array of dot-notation fields), granularity (daily | monthly | total), period ({ from: string, to: string })",
         "apps/platform/analytics/src/routes/query.ts: POST /analytics/query validates body with typebox, calls buildQuery, executes against analytics_events, caps result at 10000 rows, returns { rows, total, truncated: boolean }",
         "Route registered in app.ts",
@@ -268,19 +268,19 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": "query-builder.ts is a pure function so it can be unit-tested exhaustively without a DB. Dot-notation mapping: 'dimensions.channel' → jsonb operator dimensions->>'channel'. group_by fields map to the same JSONB extraction syntax in the SQL GROUP BY clause."
+      "passes": true,
+      "notes": "query-builder.ts is a pure function so it can be unit-tested exhaustively without a DB. Dot-notation mapping: 'dimensions.channel' \u2192 jsonb operator dimensions->>'channel'. group_by fields map to the same JSONB extraction syntax in the SQL GROUP BY clause."
     },
     {
       "id": "US-017",
-      "title": "BullMQ jobs — partition maintenance and recompute rollups processor",
+      "title": "BullMQ jobs \u2014 partition maintenance and recompute rollups processor",
       "description": "As a developer, I need the two BullMQ job processors registered so that monthly partition creation and admin-triggered rollup recomputes execute as background jobs.",
       "acceptanceCriteria": [
         "apps/platform/analytics/src/jobs/partition-maintenance.ts exports registerPartitionMaintenanceJob(queue: Queue, pool: Pool): void that schedules a BullMQ repeatable job (cron '1 0 1 * *') under queue prefix analytics:; job logic: creates next month partition (e.g. analytics_events_2026_05), moves rows from analytics_events_default into it if they fall in range, drops the partition 25 months ago",
         "apps/platform/analytics/src/jobs/recompute-rollups.ts exports a BullMQ Worker processor that reads table and date_range from job.data; deletes rows in that table for the date range; re-inserts by aggregating from analytics_events raw log; updates job progress",
         "Recompute processor returns { rows_written: number } on completion",
         "Both jobs use REDIS_URL env var for the BullMQ connection; queue name prefixed with analytics:",
-        "Jobs registered in index.ts (not in worker.ts — job scheduling is tied to the HTTP server process)",
+        "Jobs registered in index.ts (not in worker.ts \u2014 job scheduling is tied to the HTTP server process)",
         "Typecheck passes"
       ],
       "priority": 17,
@@ -305,7 +305,7 @@
     },
     {
       "id": "US-019",
-      "title": "Unit tests — all 13 event handlers",
+      "title": "Unit tests \u2014 all 13 event handlers",
       "description": "As a developer, I need unit tests for each of the 13 event handlers so that rollup logic, idempotency gates, and edge cases are verified without a real database.",
       "acceptanceCriteria": [
         "apps/platform/analytics/test/unit/handlers/ contains one test file per handler (13 files)",
@@ -324,7 +324,7 @@
     },
     {
       "id": "US-020",
-      "title": "Unit tests — query-builder.ts (SQL generation) and api-key-auth.ts (cache behaviour)",
+      "title": "Unit tests \u2014 query-builder.ts (SQL generation) and api-key-auth.ts (cache behaviour)",
       "description": "As a developer, I need unit tests for the query builder pure function and the API key auth plugin so that SQL generation correctness and auth caching are verified without network calls.",
       "acceptanceCriteria": [
         "apps/platform/analytics/test/unit/query-builder.test.ts: tests for aggregate=count (no aggregate_field needed), aggregate=sum with aggregate_field, aggregate=avg with aggregate_field",
@@ -336,11 +336,11 @@
       ],
       "priority": 20,
       "passes": false,
-      "notes": "query-builder.ts is a pure function — no mocking needed for its tests, just call buildQuery() with params and assert the returned { sql, bindings }. For api-key-auth, mock the HTTP call to IDENTITY_SERVICE_URL using vi.mock or vi.spyOn on the underlying fetch/http module."
+      "notes": "query-builder.ts is a pure function \u2014 no mocking needed for its tests, just call buildQuery() with params and assert the returned { sql, bindings }. For api-key-auth, mock the HTTP call to IDENTITY_SERVICE_URL using vi.mock or vi.spyOn on the underlying fetch/http module."
     },
     {
       "id": "US-021",
-      "title": "Integration tests — event routing → handler → DB and HTTP endpoint suite",
+      "title": "Integration tests \u2014 event routing \u2192 handler \u2192 DB and HTTP endpoint suite",
       "description": "As a developer, I need integration tests that run against a real Postgres database to verify that the full event ingestion path correctly writes to analytics_events and rollup tables, and that the HTTP API returns correct data.",
       "acceptanceCriteria": [
         "apps/platform/analytics/test/integration/event-ingestion.test.ts: uses describe.skipIf(!process.env['DATABASE_URL']); creates schema and all tables inline (no migration runner); routes events through routeEvent() with a real pool; asserts rows in analytics_events and relevant rollup tables",
@@ -348,12 +348,12 @@
         "stage-changed integration: assert both metrics_pipeline_daily and metrics_coordinators_daily rows exist after routing a lead.stage_changed event with triggered_by set",
         "ad-spend-synced integration: route same event twice (same event_id), assert metrics_ad_spend_daily was overwritten (not double-counted), assert analytics_events has only one row for that event_id",
         "apps/platform/analytics/test/integration/http.test.ts: uses describe.skipIf(!process.env['DATABASE_URL']); builds the Fastify app with a real pool; seeds analytics_events rows directly; calls POST /analytics/query via app.inject and asserts response shape { rows, total, truncated }",
-        "GET /health → 200 { status: 'ok' } and GET /ready → 200 { status: 'ready' } tested via app.inject",
+        "GET /health \u2192 200 { status: 'ok' } and GET /ready \u2192 200 { status: 'ready' } tested via app.inject",
         "Tests pass"
       ],
       "priority": 21,
       "passes": false,
-      "notes": "Follow the AI service integration test pattern: create tables with raw SQL in beforeAll, delete rows in beforeEach, end pool in afterAll. Use MockDriver from @ortho/event-bus for the SQS consumer in integration tests (no real SQS needed). The HTTP tests use app.inject — no real HTTP server needed."
+      "notes": "Follow the AI service integration test pattern: create tables with raw SQL in beforeAll, delete rows in beforeEach, end pool in afterAll. Use MockDriver from @ortho/event-bus for the SQS consumer in integration tests (no real SQS needed). The HTTP tests use app.inject \u2014 no real HTTP server needed."
     }
   ]
 }

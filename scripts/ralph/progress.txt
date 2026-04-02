@@ -1,3 +1,28 @@
+## 2026-04-02 - US-016
+- Created src/services/query-builder.ts: pure function buildQuery(params: QueryParams): { sql, bindings }; supports count/sum/avg aggregates; dot-notation (dimensions.channel → (dimensions->>'channel')); period bounds via occurred_at >= $1::date AND occurred_at < ($2::date + INTERVAL '1 day'); equality and IN filters; group_by fields; daily/monthly/total granularity; validates field names against /^[a-z_][a-z0-9_.]*$/i to guard injection
+- Created src/routes/query.ts: POST /analytics/query; validates body with typebox (event_type required, aggregate required, aggregate_field required for sum/avg); prepends event_type as first filter; caps result at 10000 rows with truncated flag; per-route @fastify/rate-limit override: API key callers (ak_ prefix) 100 req/min, JWT/anon callers 10 req/min; key generator hashes API key or extracts JWT sub
+- Registered queryRoutes in app.ts
+- Files changed: src/services/query-builder.ts, src/routes/query.ts, src/app.ts
+- **Learnings for future iterations:**
+  - @fastify/rate-limit per-route override uses `config: { rateLimit: { keyGenerator, max, timeWindow } }` on the route options; `max` can be a function (req, key) => number
+  - query-builder throws on invalid field names (caught by route, returned as 400)
+  - event_type is prepended as a filter (not a separate param) before calling buildQuery; this keeps the pure function generic
+  - occurred_at comparison uses `occurred_at >= $1::date AND occurred_at < ($2::date + INTERVAL '1 day')` for inclusive end-date day range
+---
+
+## 2026-04-02 - US-015
+- Created src/routes/metrics/ad-spend.ts: GET /analytics/metrics/ad-spend with platform and campaign_id filters; GET /analytics/metrics/ad-spend/campaigns always groups by campaign_id (enforces campaign_name is display hint only); both routes aggregate impressions, clicks, spend; support shared period/granularity/location_id/page/page_size params
+- Created src/routes/metrics/campaigns.ts: GET /analytics/metrics/campaigns with campaign_id filter; returns sent, delivered, opened, clicked per row
+- Created src/routes/metrics/referrals.ts: GET /analytics/metrics/referrals using shared params; queries metrics_referrals_daily
+- Created src/routes/metrics/coordinators.ts: GET /analytics/metrics/coordinators with coordinator_id filter; returns raw sums (response_time_sum/count, time_in_stage_sum/count) — Reporting Service computes means
+- Registered all four routes in app.ts
+- Files changed: src/routes/metrics/ad-spend.ts, campaigns.ts, referrals.ts, coordinators.ts, src/app.ts
+- **Learnings for future iterations:**
+  - /ad-spend/campaigns sub-route uses identical SQL to /ad-spend but with a comment documenting the campaign_name constraint — both always GROUP BY campaign_id
+  - coordinators route returns raw sums not averages; division happens in Reporting Service
+  - referrals route has no extra filters beyond shared params (location_id, period, granularity, pagination)
+---
+
 ## 2026-04-02 - US-013
 - Created src/env.ts: validates all env vars with typebox; required: DATABASE_URL, SQS_QUEUE_URL, IDENTITY_SERVICE_URL, REDIS_URL, ADMIN_RECOMPUTE_KEY; optional with defaults: PORT (3000), LOG_LEVEL (info), API_KEY_CACHE_TTL_SECONDS (60), SQS_BATCH_SIZE (10), SQS_CONCURRENCY (5), SQS_POLLING_INTERVAL_MS (no default)
 - Created src/routes/health.ts: GET /health always 200 { status: 'ok' }; GET /ready runs SELECT 1 → 200 { status: 'ready' } or 503 { status: 'unavailable', reason }; takes { pool } as plugin options
@@ -167,4 +192,20 @@ Started: Thu Apr  2 14:38:21 +03 2026
   - Added @aws-sdk/client-sqs, ioredis, bullmq, p-limit, knex in addition to fastify/typebox/pg deps
   - @fastify/rate-limit is a separate dep from @fastify/sensible — both required
   - npm install completes cleanly; typecheck passes with empty src/index.ts placeholder
+---
+
+## 2026-04-02 - US-014
+- Created src/routes/metrics/shared.ts: parsePeriod (YYYY-MM + YYYY-MM-DD/YYYY-MM-DD), dateExpr for granularity, toArray for multi-value params, paginateMeta helper; typebox SharedQuerySchema + GranularitySchema
+- Created src/routes/metrics/leads.ts: GET /analytics/metrics/leads; queries metrics_leads_daily; supports granularity daily/monthly/total, location_id[], channel[], page, page_size
+- Created src/routes/metrics/pipeline.ts: GET /analytics/metrics/pipeline; queries metrics_pipeline_daily; adds pipeline[], stage[] filters
+- Created src/routes/metrics/conversions.ts: GET /analytics/metrics/conversions; queries metrics_conversions_daily; channel[] filter
+- Created src/routes/metrics/messages.ts: GET /analytics/metrics/messages; queries metrics_messages_daily; response rows include delivered, failed, opt_outs
+- Registered all four routes in app.ts
+- Files changed: src/app.ts, src/routes/metrics/shared.ts, leads.ts, pipeline.ts, conversions.ts, messages.ts
+- **Learnings for future iterations:**
+  - dateExpr returns SQL expr for SELECT+GROUP BY: daily→'date::text', monthly→"DATE_TRUNC('month', date)::date::text", total→null (no date column in result)
+  - Pagination uses a count subquery: SELECT COUNT(*) FROM (SELECT 1 FROM ... WHERE ... GROUP BY ...) sub
+  - location_id[] and channel[] params: use ANY($N) with array parameter — pg driver accepts JS string[] for ANY
+  - granularity=total drops date from SELECT and GROUP BY entirely
+  - Type.Intersect([SharedQuerySchema, Type.Object({...})]) used to extend shared schema per route
 ---
