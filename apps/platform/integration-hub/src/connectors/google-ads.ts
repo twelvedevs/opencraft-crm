@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Connector, IntegrationAccount, LeadEvent, OAuthTokens, SpendRecord } from './interface.js';
-import { GoogleAdsClient } from './clients/google-ads-client.js';
+import { GoogleAdsClient, GOOGLE_ADS_API_VERSION } from './clients/google-ads-client.js';
 import { decrypt } from '../services/credential-store.js';
 
 export interface GoogleAdsConnectorConfig {
@@ -68,6 +68,32 @@ export class GoogleAdsConnector implements Connector {
     };
   }
 
+  async getAccountId(accessToken: string): Promise<string> {
+    const res = await fetch(
+      `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers:listAccessibleCustomers`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'developer-token': this.config.developerToken,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Google Ads listAccessibleCustomers failed (${res.status}): ${text}`);
+    }
+
+    const data = (await res.json()) as { resourceNames?: string[] };
+    const first = data.resourceNames?.[0];
+    if (!first) {
+      throw new Error('No accessible Google Ads customers found for this account');
+    }
+
+    // resourceName format: "customers/1234567890"
+    return first.replace('customers/', '');
+  }
+
   async refreshTokens(account: IntegrationAccount): Promise<OAuthTokens> {
     if (!account.refresh_token) {
       throw new Error('No refresh token available for account');
@@ -108,7 +134,7 @@ export class GoogleAdsConnector implements Connector {
 
   async fetchSpend(account: IntegrationAccount, date: string): Promise<SpendRecord[]> {
     const accessToken = decrypt(account.access_token, this.config.encryptionKey);
-    const client = new GoogleAdsClient(accessToken, account.account_id);
+    const client = new GoogleAdsClient(accessToken, account.account_id, this.config.developerToken);
     const rows = await client.searchCampaignPerformance(date);
     return rows.map((r) => ({
       campaign_id: r.campaign_id,
@@ -116,12 +142,13 @@ export class GoogleAdsConnector implements Connector {
       spend: r.spend,
       impressions: r.impressions,
       clicks: r.clicks,
+      date: r.date,
     }));
   }
 
   async fetchSpendRange(account: IntegrationAccount, from: string, to: string): Promise<SpendRecord[]> {
     const accessToken = decrypt(account.access_token, this.config.encryptionKey);
-    const client = new GoogleAdsClient(accessToken, account.account_id);
+    const client = new GoogleAdsClient(accessToken, account.account_id, this.config.developerToken);
     const rows = await client.searchCampaignPerformanceRange(from, to);
     return rows.map((r) => ({
       campaign_id: r.campaign_id,
@@ -129,6 +156,7 @@ export class GoogleAdsConnector implements Connector {
       spend: r.spend,
       impressions: r.impressions,
       clicks: r.clicks,
+      date: r.date,
     }));
   }
 

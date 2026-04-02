@@ -24,21 +24,24 @@ interface JwksResponse {
   keys: JwksKey[];
 }
 
-let jwksCache: { keys: JwksKey[]; fetchedAt: number } | null = null;
 const JWKS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-async function fetchJwks(url: string): Promise<JwksKey[]> {
-  const now = Date.now();
-  if (jwksCache && now - jwksCache.fetchedAt < JWKS_CACHE_TTL_MS) {
-    return jwksCache.keys;
-  }
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch JWKS from ${url}: ${res.status}`);
-  }
-  const data = (await res.json()) as JwksResponse;
-  jwksCache = { keys: data.keys, fetchedAt: now };
-  return data.keys;
+function makeJwksFetcher(url: string) {
+  let cache: { keys: JwksKey[]; fetchedAt: number } | null = null;
+
+  return async (): Promise<JwksKey[]> => {
+    const now = Date.now();
+    if (cache && now - cache.fetchedAt < JWKS_CACHE_TTL_MS) {
+      return cache.keys;
+    }
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch JWKS from ${url}: ${res.status}`);
+    }
+    const data = (await res.json()) as JwksResponse;
+    cache = { keys: data.keys, fetchedAt: now };
+    return data.keys;
+  };
 }
 
 function jwksKeyToPublicKey(key: JwksKey): KeyObject {
@@ -76,11 +79,11 @@ async function jwtAuthPluginImpl(
     if (!opts.jwksUrl) {
       throw new Error('IDENTITY_SERVICE_JWKS_URL is required when JWT_MODE=jwks');
     }
-    const jwksUrl = opts.jwksUrl;
+    const fetchJwks = makeJwksFetcher(opts.jwksUrl);
     verify = createVerifier({
       ...verifierOpts,
       key: async (decoded: { header: { kid?: string } }) => {
-        const keys = await fetchJwks(jwksUrl);
+        const keys = await fetchJwks();
         const kid = decoded.header.kid;
         const matchingKey = kid
           ? keys.find((k) => k.kid === kid)

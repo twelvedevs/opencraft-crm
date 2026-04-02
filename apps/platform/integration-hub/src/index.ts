@@ -92,6 +92,7 @@ const app = await buildApp({
   accounts: {
     pool,
     encryptionKey,
+    googleAdsDeveloperToken: env.GOOGLE_ADS_DEVELOPER_TOKEN,
   },
   backfill: {
     pool,

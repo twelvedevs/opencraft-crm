@@ -57,6 +57,12 @@ export function createProcessLeadWebhookWorker(
           { platform, external_lead_id: leadEvent.external_lead_id, location_id: locationId },
           'process-lead-webhook succeeded',
         );
+      } catch (err) {
+        log.error(
+          { platform, external_lead_id: leadEvent.external_lead_id, err },
+          'process-lead-webhook failed',
+        );
+        throw err;
       } finally {
         client.release();
       }

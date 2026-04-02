@@ -89,11 +89,10 @@ export function createPollAdSpendWorker(
         await accountsRepo.setLastPolled(client, account.id);
         log.info({ account_id, platform: account.platform }, 'poll-ad-spend succeeded');
       } catch (err) {
-        const client2 = await pool.connect();
         try {
-          await accountsRepo.setError(client2, account_id, (err as Error).message);
-        } finally {
-          client2.release();
+          await accountsRepo.setError(client, account_id, (err as Error).message);
+        } catch {
+          // ignore secondary error — primary error is re-thrown below
         }
         log.error({ account_id, err }, 'poll-ad-spend failed');
         throw err;

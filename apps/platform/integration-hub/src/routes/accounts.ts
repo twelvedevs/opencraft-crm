@@ -12,6 +12,7 @@ import * as mappingsRepo from '../repositories/mappings.js';
 export interface AccountsRoutesOpts {
   pool: Pool;
   encryptionKey: Buffer;
+  googleAdsDeveloperToken: string;
 }
 
 const MappingsBodySchema = Type.Object({
@@ -27,7 +28,7 @@ export async function accountsRoutes(
   fastify: FastifyInstance,
   opts: AccountsRoutesOpts,
 ): Promise<void> {
-  const { pool, encryptionKey } = opts;
+  const { pool, encryptionKey, googleAdsDeveloperToken } = opts;
 
   // GET /integrations/accounts
   fastify.get('/integrations/accounts', async (_request, _reply) => {
@@ -64,7 +65,7 @@ export async function accountsRoutes(
 
         let campaigns: { campaign_id: string; campaign_name: string }[];
         if (account.platform === 'google_ads') {
-          const adsClient = new GoogleAdsClient(accessToken, account.account_id);
+          const adsClient = new GoogleAdsClient(accessToken, account.account_id, googleAdsDeveloperToken);
           campaigns = await adsClient.listCampaigns();
         } else if (account.platform === 'facebook_ads') {
           const metaClient = new MetaApiClient(accessToken, account.account_id);

@@ -78,27 +78,29 @@ export function createBackfillAdSpendWorker(
 
         const chunks = chunkDateRange(backfillJob.from_date, backfillJob.to_date);
 
-        for (const chunk of chunks) {
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i]!;
           const records = await connector.fetchSpendRange(account, chunk.from, chunk.to);
 
           // Filter to mapped campaigns only
           const mapped = records.filter((r) => campaignToLocation.has(r.campaign_id));
 
-          // Group by location_id
-          const byLocation = new Map<string, SpendRecord[]>();
+          // Group by (location_id, date) — one event per combination per spec §6.1
+          const byLocationDate = new Map<string, SpendRecord[]>();
           for (const r of mapped) {
             const locationId = campaignToLocation.get(r.campaign_id)!;
-            const group = byLocation.get(locationId) ?? [];
+            const key = `${locationId}::${r.date}`;
+            const group = byLocationDate.get(key) ?? [];
             group.push(r);
-            byLocation.set(locationId, group);
+            byLocationDate.set(key, group);
           }
 
-          // Publish one event per (location_id, date) — for range chunks we group all dates together per location
-          for (const [locationId, locationRecords] of byLocation) {
+          for (const [key, locationRecords] of byLocationDate) {
+            const [locationId, synced_date] = key.split('::') as [string, string];
             const payload: AdSpendSyncedPayload = {
               platform: account.platform,
               location_id: locationId,
-              synced_date: `${chunk.from}..${chunk.to}`,
+              synced_date,
               records: locationRecords.map((r) => ({
                 campaign_id: r.campaign_id,
                 campaign_name: r.campaign_name,
@@ -110,18 +112,17 @@ export function createBackfillAdSpendWorker(
             await publishAdSpendSynced(bus, payload);
           }
 
-          // Update progress
-          await backfillJobsRepo.updateProgress(client, backfill_job_id, backfillJob.chunks_done + chunks.indexOf(chunk) + 1);
+          // Update progress using absolute chunk index (safe on BullMQ retry)
+          await backfillJobsRepo.updateProgress(client, backfill_job_id, i + 1);
         }
 
         await backfillJobsRepo.setCompleted(client, backfill_job_id);
         log.info({ account_id, backfill_job_id, platform: account.platform }, 'backfill-ad-spend completed');
       } catch (err) {
-        const client2 = await pool.connect();
         try {
-          await backfillJobsRepo.setFailed(client2, backfill_job_id, (err as Error).message);
-        } finally {
-          client2.release();
+          await backfillJobsRepo.setFailed(client, backfill_job_id, (err as Error).message);
+        } catch {
+          // ignore secondary error — primary error is re-thrown below
         }
         log.error({ account_id, backfill_job_id, err }, 'backfill-ad-spend failed');
         throw err;

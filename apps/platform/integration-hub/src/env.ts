@@ -79,10 +79,10 @@ function parseEnv(): Env {
   };
 
   if (!Value.Check(EnvSchema, raw)) {
-    const errors = [...Value.Errors(EnvSchema, raw)];
-    const first = errors[0];
-    const field = first ? first.path.replace(/^\//, '') : 'unknown';
-    throw new Error(`Missing required env: ${field}`);
+    const fields = [...Value.Errors(EnvSchema, raw)]
+      .map((e) => e.path.replace(/^\//, '') || 'unknown')
+      .join(', ');
+    throw new Error(`Invalid or missing env vars: ${fields}`);
   }
 
   const parsed = raw as Static<typeof EnvSchema>;

@@ -25,11 +25,13 @@ const BASE_URL = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`;
 export class GoogleAdsClient {
   private readonly accessToken: string;
   private readonly customerId: string;
+  private readonly developerToken: string;
 
-  constructor(accessToken: string, customerId: string) {
+  constructor(accessToken: string, customerId: string, developerToken: string) {
     this.accessToken = accessToken;
     // Strip hyphens from customer ID (Google Ads API requires plain digits)
     this.customerId = customerId.replace(/-/g, '');
+    this.developerToken = developerToken;
   }
 
   async searchCampaignPerformance(date: string): Promise<CampaignPerformanceRow[]> {
@@ -70,6 +72,7 @@ export class GoogleAdsClient {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
+        'developer-token': this.developerToken,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query }),
@@ -109,6 +112,7 @@ export class GoogleAdsClient {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.accessToken}`,
+          'developer-token': this.developerToken,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),

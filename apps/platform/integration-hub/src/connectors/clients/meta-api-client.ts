@@ -85,8 +85,9 @@ export class MetaApiClient {
   private async fetchInsights(since: string, until: string): Promise<MetaInsightRow[]> {
     const timeRange = JSON.stringify({ since, until });
     const params = new URLSearchParams({
-      fields: 'spend,impressions,clicks,campaign_id,campaign_name',
+      fields: 'spend,impressions,clicks,campaign_id,campaign_name,date_start',
       time_range: timeRange,
+      time_increment: '1',
       level: 'campaign',
       access_token: this.accessToken,
     });

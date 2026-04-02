@@ -12,6 +12,7 @@ export interface SpendRecord {
   spend: number;
   impressions: number;
   clicks: number;
+  date: string; // YYYY-MM-DD
 }
 
 // --- Parsed lead from webhook ---
@@ -31,6 +32,7 @@ export interface Connector {
   // OAuth
   getAuthorizationUrl(codeChallenge: string, state: string): string;
   exchangeCode(code: string, codeVerifier: string): Promise<OAuthTokens>;
+  getAccountId(accessToken: string): Promise<string>;
   refreshTokens(account: IntegrationAccount): Promise<OAuthTokens>;
 
   // Polling

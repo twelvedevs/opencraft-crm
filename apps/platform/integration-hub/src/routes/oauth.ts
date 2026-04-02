@@ -53,6 +53,7 @@ export async function oauthRoutes(
 
       const connector = getConnector(platform);
       const tokens = await connector.exchangeCode(code, codeVerifier);
+      const platformAccountId = await connector.getAccountId(tokens.accessToken);
 
       const encryptedAccess = encrypt(tokens.accessToken, encryptionKey);
       const encryptedRefresh = tokens.refreshToken
@@ -63,7 +64,7 @@ export async function oauthRoutes(
       try {
         const account = await accountsRepo.insert(client, {
           platform,
-          account_id: platform, // placeholder — real account ID would come from connector
+          account_id: platformAccountId,
           access_token: encryptedAccess,
           refresh_token: encryptedRefresh,
           token_expires_at: tokens.expiresAt ?? null,

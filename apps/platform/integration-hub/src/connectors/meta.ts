@@ -84,6 +84,23 @@ export class MetaConnector implements Connector {
     };
   }
 
+  async getAccountId(accessToken: string): Promise<string> {
+    const params = new URLSearchParams({ fields: 'id', access_token: accessToken });
+    const res = await fetch(`https://graph.facebook.com/${META_GRAPH_API_VERSION}/me?${params.toString()}`);
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Meta /me failed (${res.status}): ${text}`);
+    }
+
+    const data = (await res.json()) as { id?: string };
+    if (!data.id) {
+      throw new Error('Meta /me returned no user ID');
+    }
+
+    return data.id;
+  }
+
   async refreshTokens(_account: IntegrationAccount): Promise<OAuthTokens> {
     throw new Error('Meta tokens require manual reconnect');
   }
@@ -98,6 +115,7 @@ export class MetaConnector implements Connector {
       spend: parseFloat(r.spend),
       impressions: parseInt(r.impressions, 10),
       clicks: parseInt(r.clicks, 10),
+      date: r.date_start,
     }));
   }
 
@@ -111,6 +129,7 @@ export class MetaConnector implements Connector {
       spend: parseFloat(r.spend),
       impressions: parseInt(r.impressions, 10),
       clicks: parseInt(r.clicks, 10),
+      date: r.date_start,
     }));
   }
 
