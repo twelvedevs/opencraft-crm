@@ -14,7 +14,7 @@
         "Typecheck passes in packages/@ortho/event-bus"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Make the field optional (event_id?: string) to keep backward compat with publishers that don't yet set it. Analytics handlers will fall back to randomUUID() if event_id is absent."
     },
     {
@@ -32,7 +32,7 @@
         "Typecheck passes (no src files yet, just empty src/index.ts placeholder)"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Mirror the AI service (apps/platform/ai) package.json and tsconfig.json structure. Add @aws-sdk/client-sqs as a dependency (used by EventBridgeDriver transitively) plus ioredis for BullMQ. The @fastify/rate-limit package provides per-route rate limiting."
     },
     {

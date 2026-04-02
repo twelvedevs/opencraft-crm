@@ -1,0 +1,28 @@
+## Codebase Patterns
+- OrthoEvent is in packages/@ortho/event-bus/src/types.ts — add new fields there first, then use them in analytics handlers
+- All services use ESM ("type": "module") with NodeNext module resolution
+- Handlers signature: (event: OrthoEvent, pool: Pool) => Promise<void>
+- Use raw pg PoolClient (not Knex) for transactional handler operations
+- insertEvent returns { inserted: boolean } — gate all rollup writes on inserted=true (except ad-spend-synced which has relaxed idempotency)
+
+# Ralph Progress Log
+Started: Thu Apr  2 14:38:21 +03 2026
+---
+
+## 2026-04-02 - US-001
+- Added optional `event_id?: string` field to OrthoEvent interface in packages/@ortho/event-bus/src/types.ts
+- Files changed: packages/@ortho/event-bus/src/types.ts
+- **Learnings for future iterations:**
+  - event_id is optional for backward compat; analytics handlers should fall back to randomUUID() when absent
+  - All 30 existing event-bus tests pass unchanged (field is additive/optional)
+---
+
+## 2026-04-02 - US-002
+- Created project scaffolding for @platform/analytics service
+- Files changed: apps/platform/analytics/package.json, apps/platform/analytics/tsconfig.json, apps/platform/analytics/Dockerfile, apps/platform/analytics/src/index.ts
+- **Learnings for future iterations:**
+  - Mirrored AI service structure exactly; tsconfig has declaration/declarationMap/sourceMap/esModuleInterop/skipLibCheck
+  - Added @aws-sdk/client-sqs, ioredis, bullmq, p-limit, knex in addition to fastify/typebox/pg deps
+  - @fastify/rate-limit is a separate dep from @fastify/sensible — both required
+  - npm install completes cleanly; typecheck passes with empty src/index.ts placeholder
+---
