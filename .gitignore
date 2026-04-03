@@ -2,3 +2,9 @@
 node_modules
 tmp/
 dist/
+
+# Environment
+.env
+
+# OS
+.DS_Store

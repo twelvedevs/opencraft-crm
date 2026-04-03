@@ -1,0 +1,34 @@
+# Multi-stage dev build. Build any platform service via SERVICE_PATH build arg.
+# Usage: docker build --build-arg SERVICE_PATH=apps/platform/identity -f docker/Dockerfile.dev .
+ARG SERVICE_PATH
+
+# ── Stage 1: build ──────────────────────────────────────────────────────────
+FROM node:24-alpine AS builder
+ARG SERVICE_PATH
+
+WORKDIR /repo
+
+# Copy workspace packages so file: dependencies resolve
+COPY packages/ ./packages/
+
+# Install service deps (including devDeps — tsx needed for migrations)
+COPY ${SERVICE_PATH}/package*.json ./${SERVICE_PATH}/
+WORKDIR /repo/${SERVICE_PATH}
+RUN npm ci
+
+# Copy source and compile
+COPY ${SERVICE_PATH}/ ./${SERVICE_PATH}/
+WORKDIR /repo/${SERVICE_PATH}
+RUN npm run build
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM node:24-alpine
+ARG SERVICE_PATH
+
+WORKDIR /app
+
+# Copy the entire service dir: dist/ (compiled), node_modules/ (deps + tsx),
+# migrations/ (*.ts files for knex migrate), knexfile.ts (if at service root)
+COPY --from=builder /repo/${SERVICE_PATH} ./
+
+CMD ["node", "dist/index.js"]

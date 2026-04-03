@@ -3,11 +3,12 @@ import type { Knex } from 'knex';
 const config: Knex.Config = {
   client: 'pg',
   connection: process.env['DATABASE_URL'],
-  searchPath: ['platform_audience', 'public'],
+  searchPath: ['platform_identity', 'public'],
   migrations: {
-    directory: './migrations',
-    schemaName: 'platform_audience',
+    directory: '.',
+    schemaName: 'platform_identity',
     tableName: 'knex_migrations',
+    loadExtensions: ['.ts'],
   },
 };
 

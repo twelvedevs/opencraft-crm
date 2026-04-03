@@ -541,3 +541,192 @@ Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/ty
 Write implementation plan for Phase 2, store to ./scripts/ralph/prd-phase-2.json \
 ' --dangerously-skip-permissions
 ```
+
+#### Analytics Service
+
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-analytics-service-design.md
+Refer to essential package implementation docs/arch/adr-event-bus.md , and it's original spec in case of ambiguity docs/superpowers/specs/2026-03-29-event-bus-adapter-design.md
+```
+- `claude -p 'Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-analytics-service-design.md' --dangerously-skip-permissions`
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-analytics-service-design.md
+- clarifying questions and answers @tasks/prd-questions-analytics-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-analytics-service-design.md with clarifications you got from @tasks/prd-questions-analytics-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-02-analytics-service-updated-design.md
+```
+
+V1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-02-analytics-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest.
+Write implementation plan, store to prd.json 
+```
+
+#### Integration Hub
+
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/superpowers/specs/2026-03-25-integration-hub-design.md . Check which common packages can be used for the Integration hub
+```
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-integration-hub-design.md .
+Refer to essential packages implementation docs/arch/adr-event-bus.md , docs/arch/adr-logger.md 
+```
+- `claude -p 'Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-integration-hub-design.md . Refer to essential packages implementation docs/arch/adr-event-bus.md , docs/arch/adr-logger.md' --dangerously-skip-permissions`
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-integration-hub-design.md
+- clarifying questions and answers @tasks/prd-questions-integration-hub.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-integration-hub-design.md with clarifications you got from @tasks/prd-questions-integration-hub.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-02-integration-hub-updated-design.md
+```
+
+V1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-02-integration-hub-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan, store to prd-integration-hub.json 
+```
+
+```
+Load codereview skill. Please do review of implementation of apps/platform/integration-hub against spec in @docs/superpowers/specs/2026-04-02-integration-hub-updated-design.md
+```
+
+#### Identity Service
+
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/NAVIGATOR.md & docs/superpowers/specs/2026-03-25-identity-service-design.md . Check which common packages can be used for the Identity Service
+```
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-identity-service-design.md .
+Refer to essential packages implementation docs/arch/adr-logger.md 
+```
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-identity-service-design.md
+- clarifying questions and answers @tasks/prd-questions-identity-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-identity-service-design.md with clarifications you got from @tasks/prd-questions-identity-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-02-identity-service-updated-design.md
+```
+
+V1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-02-identity-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan, store to prd.json 
+```
+
+```
+Load codereview skill. Please do review of implementation of apps/platform/integration-hub against spec in @docs/superpowers/specs/2026-04-02-identity-service-updated-design.md
+```
+
+
+
+**packages/@ortho/auth-middleware**
+
+Code review:
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- @docs/superpowers/specs/2026-04-02-identity-service-updated-design.md
+
+Do code-review of the package "auth-middleware" ( packages/@ortho/auth-middleware ) either it completely satisfies requirements of the Identity Service.
+```
+
+Docs:
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- @docs/superpowers/specs/2026-04-02-identity-service-updated-design.md
+
+Scan packages implementation in:
+- packages/@ortho/auth-middleware
+
+Write package API description so that other consumers of these packages know how to use it. Provide several examples. Format should be similar to ADR.
+Store document in
+- docs/arch/adr-auth-middleware.md
+
+Update docs NAVIGATOR
+```
+
+
+
+#### Media / File Service
+
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/NAVIGATOR.md & docs/superpowers/specs/2026-03-25-media-service-design.md . Check which common packages can be used for the Media / File Service
+```
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-media-service-design.md .
+Refer to essential packages implementation:
+- docs/arch/adr-logger.md 
+- docs/arch/adr-event-bus.md
+- docs/arch/adr-interpolator.md
+- docs/arch/adr-filter-engine.md
+```
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-media-service-design.md
+- clarifying questions and answers @tasks/prd-questions-media-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-media-service-design.md with clarifications you got from @tasks/prd-questions-media-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-03-media-service-updated-design.md
+```
+
+V1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-03-media-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan, store to prd.json 
+```
+
+
+
+
+```
+Load codereview skill. Please do review of implementation of apps/platform/media-service against spec in @docs/superpowers/specs/2026-04-03-media-service-updated-design.md
+```
+
+#### Docker Compose
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- @docs/NAVIGATOR.md
+We need implement docker-compose setup for development purposes. Read all specs if you need, read all the code, understand what assumptions have been made which services have to be run in local dev env.
+```
