@@ -130,6 +130,9 @@ export async function listUsers(
   let nextCursor: string | null = null;
   if (result.rows.length > limit) {
     const last = rows[rows.length - 1];
+    // Date.toISOString() preserves millisecond precision, which matches PostgreSQL's
+    // timestamptz → JS Date conversion. Microseconds are truncated by the pg driver
+    // before they reach us, so the cursor is stable across serialization round-trips.
     nextCursor = Buffer.from(
       JSON.stringify({ created_at: last.created_at, id: last.id }),
     ).toString('base64');

@@ -81,6 +81,15 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
 
   async function loadKeys(): Promise<void> {
     const jwks = await fetchJwksWithRetry(jwksUrl);
+    // Rebuild caches from scratch on every fetch so retired keys (removed from JWKS
+    // during rotation) are evicted rather than retained indefinitely.
+    const newKids = new Set(jwks.keys.map((k) => k.kid));
+    for (const kid of keyCache.keys()) {
+      if (!newKids.has(kid)) {
+        keyCache.delete(kid);
+        verifierCache.delete(kid);
+      }
+    }
     for (const key of jwks.keys) {
       if (!keyCache.has(key.kid)) {
         const pem = jwkToPem(key);

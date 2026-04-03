@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import type { Pool } from 'pg';
@@ -23,8 +24,14 @@ const adminOnly = requireRole(['marketing_manager', 'super_admin']);
 
 async function internalSecretGuard(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const secret = req.headers['x-internal-secret'];
-  if (secret !== env.INTERNAL_API_SECRET) {
-    reply.status(401).send({ error: 'unauthorized' });
+  const expected = env.INTERNAL_API_SECRET;
+  const secretBuf = Buffer.from(typeof secret === 'string' ? secret : '');
+  const expectedBuf = Buffer.from(expected);
+  const match =
+    secretBuf.length === expectedBuf.length &&
+    timingSafeEqual(secretBuf, expectedBuf);
+  if (!match) {
+    return reply.status(401).send({ error: 'unauthorized' });
   }
 }
 

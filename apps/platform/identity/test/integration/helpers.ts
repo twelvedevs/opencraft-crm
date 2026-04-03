@@ -17,6 +17,19 @@ export { privateKey, publicKey, jwksKeys };
 const JWKS_URL = 'http://localhost:9999/identity/.well-known/jwks.json';
 
 /**
+ * Warn loudly when integration tests will be skipped due to missing DATABASE_URL.
+ * Call this at the top of every integration test file (before describe.skipIf).
+ */
+export function warnIfSkipped(): void {
+  if (!process.env['DATABASE_URL']) {
+    console.warn(
+      '\n[identity integration] DATABASE_URL not set — all tests in this file will be SKIPPED.\n' +
+      'Set DATABASE_URL to run the full integration suite.\n',
+    );
+  }
+}
+
+/**
  * Set all env vars needed before importing app.ts / env.ts / token.service.ts.
  * Must be called BEFORE any dynamic import of those modules.
  */
@@ -124,7 +137,7 @@ export function createMockProvider(): AuthProvider {
     createUser: async (_email: string, _password: string) => ({ providerUserId: `provider-${Date.now()}` }),
     setPassword: async () => {},
     deactivateUser: async () => {},
-    signInWithPassword: async () => ({ providerUserId: 'provider-user-1', email: 'test@example.com' }),
+    signInWithPassword: async () => {},
   };
 }
 

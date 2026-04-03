@@ -10,12 +10,22 @@ vi.mock('axios', () => {
   return { default: mockAxios };
 });
 
-// Mock fast-jwt createVerifier to avoid JWK→PEM issues in test
+// Mock node:crypto createPublicKey to return a fake key object that exports as PEM
+vi.mock('node:crypto', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:crypto')>();
+  return {
+    ...real,
+    createPublicKey: vi.fn(() => ({
+      export: () => '-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----\n',
+    })),
+  };
+});
+
+// Mock fast-jwt createVerifier to avoid real RSA verification in tests
 vi.mock('fast-jwt', () => ({
   createVerifier: vi.fn(() => {
-    // Return a sync verifier function that returns a mock payload
+    // Return a sync verifier function that decodes the payload section
     return (token: string) => {
-      // Decode the payload section (not real verification, but we test that the right key was selected)
       const payloadB64 = token.split('.')[1];
       return JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
     };
@@ -58,7 +68,8 @@ describe('Auth0Provider', () => {
       expect(result.providerUserId).toBe('auth0|user1');
       expect(result.email).toBe('user@test.com');
       expect(axios.get).toHaveBeenCalledWith('https://test.auth0.com/.well-known/jwks.json');
-      expect(createVerifier).toHaveBeenCalledWith({ algorithms: ['RS256'], key: testJwk });
+      // createVerifier is called with the PEM-exported key, not the raw JWK
+      expect(createVerifier).toHaveBeenCalledWith({ algorithms: ['RS256'], key: expect.stringContaining('BEGIN PUBLIC KEY') });
     });
 
     it('throws when kid not found in JWKS', async () => {
@@ -135,6 +146,37 @@ describe('Auth0Provider', () => {
         password: 'password',
         audience: 'https://test.auth0.com/api/v2/',
       });
+    });
+  });
+
+  describe('JWKS caching', () => {
+    it('caches JWKS and does not re-fetch on subsequent verifyToken calls with the same kid', async () => {
+      const testJwk = { kid: 'auth0-kid-1', kty: 'RSA', n: 'test-n', e: 'AQAB' };
+      vi.mocked(axios.get).mockResolvedValue({ data: { keys: [testJwk] } } as any);
+
+      const token = makeFakeJwt({ sub: 'auth0|user1', email: 'user@test.com' }, 'auth0-kid-1');
+
+      await provider.verifyToken(token);
+      await provider.verifyToken(token);
+
+      // JWKS endpoint should only be fetched once; second call uses the cache
+      expect(axios.get).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-fetches JWKS when the token kid is not in the cache', async () => {
+      const jwk1 = { kid: 'auth0-kid-1', kty: 'RSA', n: 'n1', e: 'AQAB' };
+      const jwk2 = { kid: 'auth0-kid-2', kty: 'RSA', n: 'n2', e: 'AQAB' };
+      vi.mocked(axios.get)
+        .mockResolvedValueOnce({ data: { keys: [jwk1] } } as any)  // first call
+        .mockResolvedValueOnce({ data: { keys: [jwk1, jwk2] } } as any); // re-fetch
+
+      const token1 = makeFakeJwt({ sub: 'auth0|user1', email: 'user@test.com' }, 'auth0-kid-1');
+      const token2 = makeFakeJwt({ sub: 'auth0|user2', email: 'user2@test.com' }, 'auth0-kid-2');
+
+      await provider.verifyToken(token1);
+      await provider.verifyToken(token2); // kid-2 not in cache → re-fetch
+
+      expect(axios.get).toHaveBeenCalledTimes(2);
     });
   });
 

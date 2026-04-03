@@ -18,7 +18,9 @@ export async function meRoutes(
 
   // GET /identity/me — current user profile
   app.get('/identity/me', async (req, reply) => {
+    const log = req.log.child({ userId: req.user.sub });
     const user = await userService.getUser(pool, req.user.sub);
+    log.info('profile fetched');
     return reply.status(200).send({
       id: user.id,
       email: user.email,

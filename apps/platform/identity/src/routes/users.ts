@@ -49,6 +49,7 @@ export async function usersRoutes(
     schema: { body: CreateUserBody },
     preHandler: [adminOnly],
   }, async (req, reply) => {
+    const log = req.log.child({ userId: req.user.sub });
     const body = req.body as { email: string; name: string; role: string; password: string; locations?: string[] };
 
     try {
@@ -60,6 +61,7 @@ export async function usersRoutes(
         locations: body.locations,
         created_by: req.user.sub,
       });
+      log.info({ targetEmail: body.email }, 'user created');
       return reply.status(201).send({
         id: user.id,
         email: user.email,

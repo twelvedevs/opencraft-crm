@@ -44,6 +44,12 @@ export async function validateApiKey(
     throw err;
   }
 
+  // NOTE: The spec says last_used_at should only update on CRM API Gateway cache misses.
+  // Since the Gateway caches /validate responses for 60 s, Identity Service cannot
+  // distinguish cache-miss calls from cache-hit calls — it sees every gateway check.
+  // last_used_at therefore reflects "last time the gateway validated with us", which
+  // is an acceptable approximation. Resolving this precisely would require the gateway
+  // to pass a cache-miss indicator header.
   await apiKeyRepo.touchLastUsed(pool, row.id);
 
   return { permissions: row.permissions };

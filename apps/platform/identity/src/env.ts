@@ -54,8 +54,8 @@ function parseEnv() {
   return {
     ...base,
     AUTH0_DOMAIN: required('AUTH0_DOMAIN'),
-    AUTH0_CLIENT_ID: required('AUTH0_CLIENT_ID'),
-    AUTH0_CLIENT_SECRET: required('AUTH0_CLIENT_SECRET'),
+    AUTH0_MGMT_CLIENT_ID: required('AUTH0_MGMT_CLIENT_ID'),
+    AUTH0_MGMT_CLIENT_SECRET: required('AUTH0_MGMT_CLIENT_SECRET'),
   };
 }
 

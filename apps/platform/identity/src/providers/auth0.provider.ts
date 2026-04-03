@@ -1,3 +1,4 @@
+import { createPublicKey } from 'node:crypto';
 import axios from 'axios';
 import { createVerifier } from 'fast-jwt';
 import type { AuthProvider } from './auth-provider.interface.js';
@@ -12,6 +13,9 @@ export class Auth0Provider implements AuthProvider {
   private clientId: string;
   private clientSecret: string;
   private m2mTokenCache: M2MTokenCache | null = null;
+  // Cache PEM public keys by kid to avoid fetching JWKS on every verifyToken call.
+  // Re-fetches when a token presents an unknown kid (same strategy as auth-middleware).
+  private jwksCache = new Map<string, string>(); // kid → PEM
 
   constructor(auth0Domain: string, clientId: string, clientSecret: string) {
     this.auth0Domain = auth0Domain;
@@ -40,21 +44,31 @@ export class Auth0Provider implements AuthProvider {
     return access_token;
   }
 
-  async verifyToken(token: string): Promise<{ providerUserId: string; email: string }> {
+  private async fetchJwks(): Promise<void> {
     const jwksResponse = await axios.get(`https://${this.auth0Domain}/.well-known/jwks.json`);
-    const jwks = jwksResponse.data;
+    for (const jwk of jwksResponse.data.keys as { kid: string; kty: string; n: string; e: string }[]) {
+      const pem = createPublicKey({ key: jwk, format: 'jwk' }).export({ type: 'spki', format: 'pem' }) as string;
+      this.jwksCache.set(jwk.kid, pem);
+    }
+  }
 
+  async verifyToken(token: string): Promise<{ providerUserId: string; email: string }> {
     // Decode header to find kid
     const headerB64 = token.split('.')[0];
     const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString());
     const kid = header.kid;
 
-    const key = jwks.keys.find((k: { kid: string }) => k.kid === kid);
-    if (!key) {
+    // Populate cache on first call or re-fetch when kid is unknown
+    if (!this.jwksCache.has(kid)) {
+      await this.fetchJwks();
+    }
+
+    const pem = this.jwksCache.get(kid);
+    if (!pem) {
       throw new Error('Unable to find matching key for token verification');
     }
 
-    const verifier = createVerifier({ algorithms: ['RS256'], key });
+    const verifier = createVerifier({ algorithms: ['RS256'], key: pem });
     const payload = verifier(token);
 
     return {

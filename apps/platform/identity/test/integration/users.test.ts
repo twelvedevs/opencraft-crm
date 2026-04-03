@@ -3,6 +3,7 @@ import pg from 'pg';
 import {
   setTestEnv,
   mockJwksFetch,
+  warnIfSkipped,
   createSchema,
   truncateTables,
   createMockProvider,
@@ -10,6 +11,7 @@ import {
 } from './helpers.js';
 
 // Set env and mock JWKS fetch before any app imports
+warnIfSkipped();
 setTestEnv();
 mockJwksFetch();
 
