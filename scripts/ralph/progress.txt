@@ -54,3 +54,14 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Use `Object.assign(new Error(...), { statusCode: 400 })` for Fastify-compatible error throwing with @fastify/sensible
   - `downloadFromS3` uses `response.Body!.transformToByteArray()` then `Buffer.from()` for AWS SDK v3 stream handling
 ---
+
+## 2026-04-03 - US-005
+- Implemented image processor service with sharp resize + WebP conversion
+- Files created: src/services/image-processor.ts
+- **Learnings for future iterations:**
+  - `processImage` catches all sharp errors and returns empty variants array (graceful degradation) — original file is always usable
+  - `isImageMimeType` supports: image/jpeg, image/png, image/gif, image/webp
+  - Variant widths: medium=800px (quality 85), thumb=200px (quality 80) — both converted to WebP
+  - `buffer.length` gives sizeBytes for variant rows
+  - Logger instantiated at module level: `createLogger('platform-media')`
+---
