@@ -1,70 +1,29 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { generateKeyPairSync, createSign } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
-import { authPlugin } from '../src/plugin.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { makeKeyPair, makeJwt, JWKS_URL, buildApp } from './helpers.js';
 
-// Generate two distinct RSA key pairs
-function makeKeyPair(kid: string) {
-  const { privateKey, publicKey } = generateKeyPairSync('rsa', {
-    modulusLength: 2048,
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
-  });
-  const jwk = {
-    ...require('node:crypto').createPublicKey(publicKey).export({ format: 'jwk' }),
-    kid,
-    kty: 'RSA',
-    use: 'sig',
-    alg: 'RS256',
-  };
-  return { privateKey, publicKey, jwk };
-}
+const key1 = makeKeyPair('kid-1');
+const key2 = makeKeyPair('kid-2');
 
-function makeJwt(privateKey: string, kid: string, payload: Record<string, unknown>): string {
-  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid })).toString('base64url');
-  const body = Buffer.from(JSON.stringify({ iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 900, ...payload })).toString('base64url');
-  const signing = `${header}.${body}`;
-  const sign = createSign('RSA-SHA256');
-  sign.update(signing);
-  const sig = sign.sign(privateKey, 'base64url');
-  return `${signing}.${sig}`;
-}
+beforeEach(() => {
+  vi.restoreAllMocks();
+});
 
-const JWKS_URL = 'http://test-identity/.well-known/jwks.json';
+afterEach(async () => {
+  vi.unstubAllGlobals();
+});
 
-describe('@ortho/auth-middleware JWKS cache', () => {
-  const key1 = makeKeyPair('kid-1');
-  const key2 = makeKeyPair('kid-2');
-
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-  });
-
-  async function buildApp(initialKeys: object[]): Promise<FastifyInstance> {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ keys: initialKeys }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-
-    const app = Fastify({ logger: false });
-    await app.register(authPlugin, { jwksUrl: JWKS_URL, allowedPaths: ['/public'] });
-
-    app.get('/protected', async (req, reply) => {
-      return reply.send({ sub: req.user.sub });
-    });
-
-    await app.ready();
-    return app;
-  }
-
+describe('JWKS cache — key acceptance and rotation', () => {
   it('accepts a JWT signed with a key present in the initial JWKS', async () => {
     const app = await buildApp([key1.jwk]);
-    const token = makeJwt(key1.privateKey, 'kid-1', { sub: 'user-1', role: 'super_admin', locations: [], must_change_password: false });
+    app.get('/protected', async (req, reply) => reply.send({ sub: req.user?.sub }));
+    await app.ready();
+
+    const token = makeJwt(key1.privateKey, 'kid-1', {
+      sub: 'user-1',
+      role: 'super_admin',
+      locations: [],
+      must_change_password: false,
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -77,38 +36,247 @@ describe('@ortho/auth-middleware JWKS cache', () => {
   });
 
   it('evicts retired keys from cache when JWKS is re-fetched on unknown kid', async () => {
-    // Initial JWKS: only kid-1
     const app = await buildApp([key1.jwk]);
+    app.get('/protected', async (req, reply) => reply.send({ sub: req.user?.sub }));
+    await app.ready();
 
     // Re-fetch returns only kid-2 (kid-1 retired)
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ keys: [key2.jwk] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ keys: [key2.jwk] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
     );
 
-    // First: present a JWT with kid-2 (unknown) to trigger re-fetch
-    const tokenKid2 = makeJwt(key2.privateKey, 'kid-2', { sub: 'user-2', role: 'super_admin', locations: [], must_change_password: false });
+    const tokenKid2 = makeJwt(key2.privateKey, 'kid-2', {
+      sub: 'user-2',
+      role: 'super_admin',
+      locations: [],
+      must_change_password: false,
+    });
     const refetchRes = await app.inject({
       method: 'GET',
       url: '/protected',
       headers: { authorization: `Bearer ${tokenKid2}` },
     });
-    // After re-fetch, kid-2 is in cache, kid-1 should be evicted
     expect(refetchRes.statusCode).toBe(200);
 
-    // Now: a JWT with kid-1 (retired) must be rejected
-    const tokenKid1 = makeJwt(key1.privateKey, 'kid-1', { sub: 'user-1', role: 'super_admin', locations: [], must_change_password: false });
+    const tokenKid1 = makeJwt(key1.privateKey, 'kid-1', {
+      sub: 'user-1',
+      role: 'super_admin',
+      locations: [],
+      must_change_password: false,
+    });
     const retiredRes = await app.inject({
       method: 'GET',
       url: '/protected',
       headers: { authorization: `Bearer ${tokenKid1}` },
     });
 
-    // With bug: kid-1 still in cache → 200. With fix: kid-1 evicted → 401.
     expect(retiredRes.statusCode).toBe(401);
+    await app.close();
+  });
+});
 
+describe('token rejection', () => {
+  it('returns 401 when Authorization header is missing', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.get('/protected', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/protected' });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'invalid_token' });
+    await app.close();
+  });
+
+  it('returns 401 when token is malformed', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.get('/protected', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/protected',
+      headers: { authorization: 'Bearer not.a.jwt' },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'invalid_token' });
+    await app.close();
+  });
+
+  it('returns 401 when token is signed by an unknown key', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.get('/protected', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const token = makeJwt(key2.privateKey, 'kid-unknown', {
+      sub: 'attacker',
+      role: 'super_admin',
+      locations: [],
+      must_change_password: false,
+    });
+
+    // re-fetch also returns no matching key
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ keys: [key1.jwk] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/protected',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+});
+
+describe('allowedPaths bypass', () => {
+  it('allows unauthenticated requests to paths in allowedPaths', async () => {
+    const app = await buildApp([key1.jwk], { allowedPaths: ['/public'] });
+    app.get('/public', async (_req, reply) => reply.send({ ok: true }));
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/public' });
+
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it('still rejects unauthenticated requests to paths not in allowedPaths', async () => {
+    const app = await buildApp([key1.jwk], { allowedPaths: ['/public'] });
+    app.get('/protected', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/protected' });
+
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+});
+
+describe('must_change_password enforcement', () => {
+  it('returns 403 on protected routes when must_change_password is true', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.get('/some/resource', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const token = makeJwt(key1.privateKey, 'kid-1', {
+      sub: 'user-1',
+      role: 'call_center_agent',
+      locations: ['loc-1'],
+      must_change_password: true,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/some/resource',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'password_change_required' });
+    await app.close();
+  });
+
+  it('allows PUT /identity/me/password when must_change_password is true', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.put('/identity/me/password', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const token = makeJwt(key1.privateKey, 'kid-1', {
+      sub: 'user-1',
+      role: 'call_center_agent',
+      locations: ['loc-1'],
+      must_change_password: true,
+    });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/identity/me/password',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it('allows GET /identity/me when must_change_password is true', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.get('/identity/me', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const token = makeJwt(key1.privateKey, 'kid-1', {
+      sub: 'user-1',
+      role: 'call_center_agent',
+      locations: ['loc-1'],
+      must_change_password: true,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/identity/me',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it('allows DELETE /identity/session when must_change_password is true', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.delete('/identity/session', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const token = makeJwt(key1.privateKey, 'kid-1', {
+      sub: 'user-1',
+      role: 'call_center_agent',
+      locations: ['loc-1'],
+      must_change_password: true,
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/identity/session',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it('passes normally when must_change_password is false', async () => {
+    const app = await buildApp([key1.jwk]);
+    app.get('/some/resource', async (_req, reply) => reply.send({}));
+    await app.ready();
+
+    const token = makeJwt(key1.privateKey, 'kid-1', {
+      sub: 'user-1',
+      role: 'call_center_agent',
+      locations: ['loc-1'],
+      must_change_password: false,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/some/resource',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
     await app.close();
   });
 });

@@ -4,7 +4,10 @@ const LOCATION_BYPASS_ROLES = ['marketing_staff', 'marketing_manager', 'super_ad
 
 export function requireLocation(): preHandlerHookHandler {
   return async (req, reply) => {
-    if (LOCATION_BYPASS_ROLES.includes(req.user?.role)) {
+    if (!req.user) {
+      return reply.code(403).send({ error: 'forbidden' });
+    }
+    if (LOCATION_BYPASS_ROLES.includes(req.user.role)) {
       return;
     }
 
