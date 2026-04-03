@@ -62,6 +62,12 @@ All specs are **Approved** unless noted otherwise.
 | [event-bus-adapter-design.md](superpowers/specs/2026-03-29-event-bus-adapter-design.md) | EventBridge adapter design |
 | [docker-compose-design.md](superpowers/specs/2026-04-03-docker-compose-design.md) | Local development docker-compose setup |
 
+## Development Guides (`docs/development/`)
+
+| Guide | Description |
+|-------|-------------|
+| [local-dev.md](development/local-dev.md) | Local development setup with docker-compose |
+
 ## Implementation Plans (`docs/superpowers/plans/`)
 
 | Plan | Description |
