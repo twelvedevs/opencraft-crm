@@ -1,0 +1,278 @@
+{
+  "project": "Ortho CRM — Media / File Service",
+  "branchName": "feature/media-file-service",
+  "description": "Platform Media Service — upload handling, S3 storage, CDN delivery, image optimization, and access-controlled asset URL issuance (apps/platform/media)",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffold — package.json, tsconfig, Dockerfile, env, app skeleton",
+      "description": "As a developer, I need the service directory wired up with correct dependencies, TypeScript config, Dockerfile, env validation, and a minimal Fastify app that registers the auth plugin and health route, so that subsequent stories can add routes and services without touching infrastructure.",
+      "acceptanceCriteria": [
+        "apps/platform/media/package.json created with name '@platform/media', type 'module', Node >=24, scripts: build/dev/start/test/typecheck",
+        "Production dependencies: fastify ^5, @fastify/multipart latest, @fastify/sensible ^6, @fastify/cors ^11, @aws-sdk/client-s3 ^3, @aws-sdk/s3-request-presigner ^3, sharp (pinned to a version with prebuilt linux/amd64 binaries — e.g. ^0.33.0), knex ^3, pg ^8, node-cron ^3, @sinclair/typebox ^0.34, @ortho/auth-middleware workspace ref, @ortho/event-bus workspace ref, @ortho/logger workspace ref",
+        "Dev dependencies: @types/node ^22, @types/pg ^8, tsx ^4, typescript ^5, vitest ^2",
+        "apps/platform/media/tsconfig.json: module ESNext, moduleResolution bundler, target ES2022, strict true, outDir dist, rootDir src",
+        "apps/platform/media/Dockerfile: FROM node:24-slim (NOT alpine — required for sharp prebuilt binaries), WORKDIR /app, COPY package*.json, RUN npm ci --omit=dev, COPY dist/ ./dist/, CMD [\"node\",\"dist/index.js\"]",
+        "apps/platform/media/src/env.ts: validates all required env vars: DATABASE_URL, AWS_REGION, S3_PUBLIC_BUCKET, S3_PRIVATE_BUCKET, CLOUDFRONT_BASE_URL, SERVICE_AUTH_TOKEN, SERVICE_CALLER_ID; optional with defaults: PORT (3000), PRESIGNED_PUT_TTL_SECONDS (900), PRESIGNED_GET_TTL_SECONDS (900), MAX_FILE_SIZE_BYTES (20971520), CORS_ORIGIN, IDENTITY_JWKS_URL, LOG_LEVEL",
+        "apps/platform/media/src/app.ts: buildApp(pool) function — registers @fastify/sensible, @fastify/cors, authPlugin with allowed paths ['/health','/ready'], GET /health returns 200 {status:'ok'}, GET /ready returns 200",
+        "apps/platform/media/src/index.ts: creates pg.Pool, calls buildApp, registers node-cron cleanup job (stub for now), listens on env.PORT, handles SIGTERM gracefully",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Database migrations — platform_media schema and 3 tables",
+      "description": "As a developer, I need the platform_media schema and all three tables (media_files, media_variants, media_upload_intents) created via Knex migrations, so that repositories have a schema to work against.",
+      "acceptanceCriteria": [
+        "apps/platform/media/migrations/001_create_platform_media_schema.ts: creates schema platform_media via knex.raw('CREATE SCHEMA IF NOT EXISTS platform_media')",
+        "apps/platform/media/migrations/002_create_media_files.ts: creates platform_media.media_files with all columns from spec §4: id (uuid PK gen_random_uuid()), upload_id (uuid UNIQUE NOT NULL), tier (text NOT NULL CHECK IN ('public','private')), status (text NOT NULL DEFAULT 'pending' CHECK IN ('pending','ready','deleted')), mime_type (text NOT NULL), original_key (text NOT NULL), original_filename (text NOT NULL), file_size_bytes (bigint nullable), location_id (uuid nullable), purpose (text nullable), uploaded_by (uuid NOT NULL), created_at (timestamptz NOT NULL DEFAULT now()), confirmed_at (timestamptz nullable), deleted_at (timestamptz nullable); indexes on location_id and partial index on (status,created_at) WHERE status='pending'",
+        "apps/platform/media/migrations/003_create_media_variants.ts: creates platform_media.media_variants: id (uuid PK), file_id (uuid NOT NULL FK media_files.id), variant (text NOT NULL CHECK IN ('medium','thumb')), s3_key (text NOT NULL), width_px (int NOT NULL), size_bytes (bigint NOT NULL), created_at (timestamptz NOT NULL DEFAULT now()); UNIQUE(file_id,variant)",
+        "apps/platform/media/migrations/004_create_media_upload_intents.ts: creates platform_media.media_upload_intents: id (uuid PK — this is the upload_id), file_id (uuid NOT NULL FK media_files.id), presigned_url (text NOT NULL), expires_at (timestamptz NOT NULL), created_at (timestamptz NOT NULL DEFAULT now()); index on expires_at",
+        "Each migration has a down() function that drops the table",
+        "apps/platform/media/knexfile.ts exports config using DATABASE_URL from process.env with searchPath platform_media",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Repositories — media-files, media-variants, upload-intents",
+      "description": "As a developer, I need typed repository functions for all three tables using a Knex instance, so that route handlers and services can read and write records without writing raw SQL inline.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/repositories/media-files.ts: functions — createPending(knex, data): inserts row with status='pending'; findByUploadId(knex, upload_id): returns row or null; findById(knex, id): returns row or null (excludes deleted); markReady(knex, id, data: {file_size_bytes, confirmed_at}): updates status='ready'; softDelete(knex, id): sets deleted_at=now(); exported TypeScript type MediaFile matching table columns",
+        "apps/platform/media/src/repositories/media-variants.ts: functions — insertVariant(knex, data): inserts row with ON CONFLICT DO NOTHING; findByFileId(knex, file_id): returns MediaVariant[]; exported TypeScript type MediaVariant",
+        "apps/platform/media/src/repositories/upload-intents.ts: functions — createIntent(knex, data): inserts row; findByUploadId(knex, upload_id): returns row or null; deleteExpired(knex): deletes rows where expires_at < now() (used by cleanup job); exported TypeScript type UploadIntent",
+        "Knex instance is passed as a parameter to all repository functions (not imported as a singleton)",
+        "All functions use the platform_media schema prefix in table references (e.g. 'platform_media.media_files')",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "S3 service and signed-URL service",
+      "description": "As a developer, I need helper modules for S3 operations (upload, download, presigned PUT/GET) and signed-URL issuance, so that route handlers can delegate all AWS SDK calls to a single testable layer.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/services/s3.ts: exports — uploadToS3(params: {bucket,key,body:Buffer,contentType,cacheControl?}): puts object; downloadFromS3(params: {bucket,key}): returns Buffer (throws on NoSuchKey); createPresignedPutUrl(params: {bucket,key,contentType,ttlSeconds,maxSizeBytes}): returns string URL (includes content-length-range condition via PutObjectCommand with conditions); createPresignedGetUrl(params: {bucket,key,ttlSeconds}): returns string URL; uses @aws-sdk/client-s3 S3Client and @aws-sdk/s3-request-presigner getSignedUrl; S3Client instantiated once with env.AWS_REGION",
+        "apps/platform/media/src/services/signed-url.ts: exports — issuePrivateGetUrl(knex, file): validates file.tier==='private' (throws 400 if public), calls createPresignedGetUrl with S3_PRIVATE_BUCKET, returns {signed_url: string, expires_at: string (ISO 8601)}; TTL from env.PRESIGNED_GET_TTL_SECONDS",
+        "apps/platform/media/src/lib/s3-key.ts (or similar): exports — derivePublicKey(upload_id, uuid, ext): returns '{upload_id}/{uuid}.{ext}'; derivePrivateKey(location_id, upload_id, uuid, ext): returns '{location_id}/{upload_id}/{uuid}.{ext}'; deriveVariantKey(baseKey, variantName): inserts '-{variantName}' before the extension and changes ext to 'webp' (e.g. 'abc/def.png' → 'abc/def-medium.webp')",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Image processor service — sharp resize + WebP conversion",
+      "description": "As a developer, I need a processImage() function that takes a Buffer and produces the original plus medium and thumb WebP variants, so that upload confirm and proxy upload routes can generate image variants consistently.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/services/image-processor.ts: exports processImage(input: Buffer, originalKey: string, bucket: string): Promise<ImageProcessResult>",
+        "ImageProcessResult type: { variants: Array<{variantName:'medium'|'thumb', s3Key:string, widthPx:number, sizeBytes:number}> }",
+        "Uses sharp.metadata() to detect dimensions",
+        "Generates medium variant: resize to max 800px width (withoutEnlargement: true), convert to WebP quality 85",
+        "Generates thumb variant: resize to max 200px width (withoutEnlargement: true), convert to WebP quality 80",
+        "Uploads all variants to S3 in parallel (Promise.all) using uploadToS3",
+        "Variant S3 keys derived using deriveVariantKey from s3-key helper",
+        "On sharp processing failure (catch block): logs warning via createLogger('platform-media'), returns empty variants array (does NOT throw — original is always usable)",
+        "isImageMimeType(mimeType: string): boolean helper exported — returns true for image/jpeg, image/png, image/gif, image/webp",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Service auth middleware — preHandler for /media/internal/* routes",
+      "description": "As a developer, I need a Fastify preHandler that validates the Authorization: Bearer <SERVICE_AUTH_TOKEN> header for all internal service-to-service endpoints, so that only trusted callers can access internal routes.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/middleware/service-auth.ts: exports serviceAuthHook — a FastifyReply preHandler function that reads Authorization header, extracts Bearer token, compares against env.SERVICE_AUTH_TOKEN using a timing-safe comparison (crypto.timingSafeEqual after Buffer.from), returns 401 with {error:'Unauthorized'} if missing or invalid",
+        "The hook is exported as a named FastifyPreHandlerHookHandler-typed function",
+        "No user JWT involved — this is entirely separate from @ortho/auth-middleware",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Route: POST /media/upload-url — issue presigned PUT URL",
+      "description": "As a browser client, I want to request a presigned S3 PUT URL so that I can upload a file directly to S3 without routing the bytes through the service.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/routes/upload.ts created; uploadRoutes(app, {knex}) registered in app.ts under prefix '/media'",
+        "POST /media/upload-url: TypeBox body schema with required fields filename (string), mime_type (string), tier ('public'|'private'); optional fields location_id (string uuid format), purpose (string), file_size_bytes (integer)",
+        "Returns 413 immediately if file_size_bytes provided and > env.MAX_FILE_SIZE_BYTES, body {error:'File exceeds 20MB limit'}",
+        "Returns 400 if tier is not 'public' or 'private' (TypeBox schema rejects automatically)",
+        "Generates upload_id (crypto.randomUUID()), file uuid (crypto.randomUUID()), extracts extension from filename",
+        "Derives original_key: derivePublicKey for tier=public, derivePrivateKey (using location_id) for tier=private; returns 400 if tier=private and location_id missing",
+        "Calls createPresignedPutUrl with correct bucket (S3_PUBLIC_BUCKET or S3_PRIVATE_BUCKET), key, contentType=mime_type, ttlSeconds=env.PRESIGNED_PUT_TTL_SECONDS, maxSizeBytes=env.MAX_FILE_SIZE_BYTES",
+        "Inserts media_files row (status='pending', uploaded_by from JWT sub) and media_upload_intents row (expires_at=now()+PRESIGNED_PUT_TTL_SECONDS) in a single transaction",
+        "Response 200: {upload_id, upload_url, expires_at (ISO 8601 UTC string)}",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Route: POST /media/confirm/:upload_id — confirm upload and process image",
+      "description": "As a browser client, I want to confirm that my S3 PUT is complete so that the service downloads the file, processes image variants, and returns stable URLs.",
+      "acceptanceCriteria": [
+        "POST /media/confirm/:upload_id added to apps/platform/media/src/routes/upload.ts",
+        "Looks up upload intent by upload_id — returns 404 if not found",
+        "Returns 410 if intent.expires_at < now()",
+        "Loads media_files row via findByUploadId — returns 404 if not found or status !== 'pending'",
+        "Returns 403 if JWT sub does not match file.uploaded_by",
+        "Uses a DB transaction with ON CONFLICT DO NOTHING on the upload_id unique constraint to handle concurrent double-tap; second concurrent call returns 404",
+        "Downloads original from S3 using downloadFromS3 — returns 502 (not 404) if download fails (S3 NoSuchKey or network error)",
+        "If isImageMimeType(file.mime_type): calls processImage(), inserts variant rows via insertVariant() with ON CONFLICT DO NOTHING for each returned variant",
+        "Updates media_files: status='ready', confirmed_at=now(), file_size_bytes from actual buffer byte length",
+        "Deletes the upload intent row after successful confirm",
+        "Response 200: {file_id, tier, urls: {original: <cloudfront or presigned>, ...variantUrls}, location_id, created_at}; public files use CLOUDFRONT_BASE_URL+'/'+original_key; private files use presigned GET URL; medium/thumb only included if variant rows exist",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Route: POST /media/upload — proxy multipart upload",
+      "description": "As a server-side caller, I want a single-call upload endpoint that accepts multipart/form-data and returns complete file metadata immediately, without the presigned PUT flow.",
+      "acceptanceCriteria": [
+        "POST /media/upload added to apps/platform/media/src/routes/upload.ts",
+        "@fastify/multipart registered in app.ts with limits: {fileSize: env.MAX_FILE_SIZE_BYTES}; on limit exceeded the handler returns 413 {error:'File exceeds 20MB limit'}",
+        "Parses multipart fields: file (binary), tier (required, 'public'|'private'), location_id (optional), purpose (optional); returns 400 if file field missing or tier missing/invalid",
+        "Generates upload_id and file uuid, derives S3 key using derivePublicKey or derivePrivateKey",
+        "Buffers file stream, uploads to correct S3 bucket via uploadToS3",
+        "Creates media_files row directly with status='ready', file_size_bytes from actual buffer length, confirmed_at=now(), uploaded_by from JWT sub",
+        "If isImageMimeType(mime_type detected from file field or caller-supplied content-type): calls processImage() and inserts variant rows",
+        "Response 200: same shape as POST /media/confirm — {file_id, tier, urls:{original,...variants}, location_id, created_at}",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Routes: GET /media/:file_id and DELETE /media/:file_id",
+      "description": "As a client, I want to retrieve file metadata with URLs and soft-delete files, with proper access control enforced by location_id and JWT claims.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/routes/files.ts created; fileRoutes(app, {knex}) registered in app.ts",
+        "GET /media/:file_id: loads file via findById — returns 404 if not found or status='deleted'; if file.tier='private' and file.location_id is NOT NULL: verifies JWT location_id claim matches file.location_id → 403 if not; loads variants via findByFileId; builds urls object — public files use CloudFront URLs, private files use presigned GET URLs (15min TTL); only includes variant keys that exist (no null slots); returns {file_id, tier, mime_type, original_filename, file_size_bytes, purpose, location_id, urls, created_at}",
+        "DELETE /media/:file_id: loads file — returns 404 if not found or deleted; if file.tier='private' and file.location_id NOT NULL: JWT location_id must match → 403; if file.tier='public' OR file.location_id IS NULL: user-facing delete returns 403 (only service token can delete, out of scope); calls softDelete() on match; returns 204",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Routes: POST /media/internal/store and GET /media/internal/:file_id/signed-url",
+      "description": "As a trusted service (e.g. Reporting Service), I want to store a generated file and retrieve a presigned URL without location_id enforcement, using a shared service auth token.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/routes/internal.ts created; internalRoutes(app, {knex}) registered in app.ts with prefix '/media/internal' and serviceAuthHook applied as preHandler to all routes in this plugin",
+        "POST /media/internal/store: accepts multipart/form-data (same plugin config as /media/upload); required fields: file, tier; optional: location_id, purpose; returns 400 if missing; generates upload_id and uuid; uploads to S3; creates media_files row with uploaded_by=env.SERVICE_CALLER_ID, status='ready', confirmed_at=now(); NO image processing (PDFs are stored as-is); response: {file_id, urls:{original}}",
+        "GET /media/internal/:file_id/signed-url: loads file via findById — 404 if not found or deleted; if file.tier='public' → 400 {error:'Use CloudFront URL for public files'}; calls issuePrivateGetUrl — returns {signed_url, expires_at}",
+        "Both routes return 401 if service auth token missing or invalid (from serviceAuthHook)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Cleanup job — hourly node-cron orphan cleanup",
+      "description": "As a system operator, I want an hourly background job that deletes expired pending upload records (variants → files → intents, in that order) in a single transaction, so that stale pending records do not accumulate.",
+      "acceptanceCriteria": [
+        "apps/platform/media/src/jobs/cleanup.ts: exports registerCleanupJob(knex) function that schedules a node-cron job with schedule '0 * * * *' (every hour)",
+        "Job runs a single knex transaction executing the three-step SQL from spec §4.3 in order: (1) DELETE media_variants WHERE file_id IN (SELECT file_id FROM media_upload_intents WHERE expires_at < now()); (2) DELETE media_files WHERE status='pending' AND id IN (...same subquery...); (3) DELETE media_upload_intents WHERE expires_at < now()",
+        "Job logs start, completion, and row counts deleted at each step using createLogger('platform-media')",
+        "On error: logs the error, does NOT crash the process",
+        "registerCleanupJob is called in src/index.ts after buildApp, receiving the same knex instance",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Unit tests — repositories (media-files, media-variants, upload-intents)",
+      "description": "As a developer, I want unit tests for all repository functions using a mocked Knex instance, so that data access logic is verified in isolation.",
+      "acceptanceCriteria": [
+        "apps/platform/media/test/unit/repositories/media-files.test.ts: tests createPending (verifies INSERT parameters), findByUploadId (returns row / null), findById (excludes deleted rows), markReady (verifies UPDATE fields), softDelete (verifies deleted_at set); Knex mocked via vi.mock",
+        "apps/platform/media/test/unit/repositories/media-variants.test.ts: tests insertVariant (verifies ON CONFLICT DO NOTHING), findByFileId (returns array); Knex mocked",
+        "apps/platform/media/test/unit/repositories/upload-intents.test.ts: tests createIntent, findByUploadId, deleteExpired; Knex mocked",
+        "apps/platform/media/vitest.config.ts created (or vitest.config.js) pointing to test/unit and test/integration",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Unit tests — services (image-processor, s3, signed-url) and middleware (service-auth)",
+      "description": "As a developer, I want unit tests for service-layer modules with AWS SDK and sharp mocked, so that processing logic and URL issuance are verified without hitting real infrastructure.",
+      "acceptanceCriteria": [
+        "apps/platform/media/test/unit/services/image-processor.test.ts: mocks sharp via vi.mock('sharp'); tests that processImage generates medium (800px) and thumb (200px) variants with correct WebP quality; tests corrupt file fallback (sharp throws → returns empty variants array, does not throw); tests isImageMimeType returns true for supported types and false for others",
+        "apps/platform/media/test/unit/services/s3.test.ts: mocks @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner via vi.mock; tests uploadToS3 constructs PutObjectCommand with correct Bucket/Key/Body/ContentType; tests downloadFromS3 returns buffer; tests createPresignedPutUrl calls getSignedUrl with correct TTL; tests createPresignedGetUrl similarly",
+        "apps/platform/media/test/unit/services/signed-url.test.ts: tests issuePrivateGetUrl returns {signed_url, expires_at}; tests it returns 400 error when called with a public-tier file",
+        "apps/platform/media/test/unit/middleware/service-auth.test.ts: tests valid token passes (next called); tests missing Authorization header returns 401; tests wrong token returns 401",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Integration tests — upload flow (upload-url, confirm, proxy upload)",
+      "description": "As a developer, I want integration tests for the upload endpoints running against a real PostgreSQL test DB and LocalStack S3, so that the full presigned-PUT flow and proxy upload are verified end-to-end.",
+      "acceptanceCriteria": [
+        "apps/platform/media/test/integration/helpers.ts: buildTestApp() creates a test Fastify instance with a real pg.Pool connected to DATABASE_URL (test DB), runs migrations, sets up LocalStack S3 buckets (S3_PUBLIC_BUCKET + S3_PRIVATE_BUCKET) using AWS SDK pointed at http://localhost:4566; exports cleanup() to drop tables and delete buckets after suite",
+        "apps/platform/media/test/integration/upload.test.ts covers:",
+        "  POST /media/upload-url: valid request creates DB records and returns upload_id + presigned URL; returns 413 when file_size_bytes > MAX; returns 400 for invalid tier; returns 400 for private tier without location_id",
+        "  POST /media/confirm/:upload_id: after PUT to LocalStack URL, confirm downloads file, creates variant rows for image, marks status=ready, returns URLs with original + medium + thumb for image; returns 502 when S3 object is missing; returns 403 on sub mismatch; returns 404 on double confirm",
+        "  POST /media/upload: streams a test image to LocalStack, returns complete file record with variant URLs; returns 413 on oversized file; returns 400 on missing tier",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Integration tests — file routes and internal routes",
+      "description": "As a developer, I want integration tests for GET/DELETE file routes and internal endpoints, so that access control, soft-delete, and service auth are verified against a real DB and LocalStack.",
+      "acceptanceCriteria": [
+        "apps/platform/media/test/integration/files.test.ts covers:",
+        "  GET /media/:file_id (public file): returns CloudFront URLs including variants; returns 404 for deleted file; returns 404 for unknown id",
+        "  GET /media/:file_id (private file): returns presigned S3 GET URLs; returns 403 when JWT location_id does not match file.location_id",
+        "  DELETE /media/:file_id (private file with location_id): soft-deletes and returns 204; returns 403 when location_id mismatch",
+        "  DELETE /media/:file_id (public file): returns 403",
+        "apps/platform/media/test/integration/internal.test.ts covers:",
+        "  POST /media/internal/store: valid service token stores PDF, returns {file_id, urls:{original}}; returns 401 on bad/missing token; returns 413 on oversized file",
+        "  GET /media/internal/:file_id/signed-url: returns {signed_url, expires_at} for private file; returns 400 for public file; returns 401 on bad token; returns 404 for deleted file",
+        "Tests pass"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
