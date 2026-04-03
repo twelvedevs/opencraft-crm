@@ -3,6 +3,7 @@ Started: Fri Apr  3 11:10:48 UTC 2026
 ---
 
 ## Codebase Patterns
+- Use `vi.hoisted()` for mock variables referenced inside `vi.mock()` factories — hoisted mocks can't access outer `const` declarations
 - Workspace packages (@ortho/logger, @ortho/auth-middleware, @ortho/event-bus) must be built (`npm run build`) before consuming services can typecheck — they resolve via `file:` references to `dist/`
 - Use `node:24-slim` (not alpine) for media service Dockerfile — required for sharp prebuilt binaries
 - Follow identity service patterns: `buildApp(pool)` factory, `createLogger('platform-media')`, cast logger `as unknown as FastifyBaseLogger`
@@ -13,6 +14,7 @@ Started: Fri Apr  3 11:10:48 UTC 2026
 - `buildApp(pool, knex)` now takes both pg.Pool and Knex instance — routes receive knex via `opts: { knex }` parameter
 - Route registration pattern: `uploadRoutes(app, { knex })` called directly in app.ts (not via `app.register(import(...))`)
 - Access JWT user in routes via `(request as any).user.sub` — auth-middleware decorates `request.user`
+- Knex mock pattern for unit tests: `makeQueryBuilder()` with `vi.fn().mockReturnThis()` for chainable methods, `makeDb(qb)` wrapping as Knex type; mock `db.fn.now()` separately
 
 ---
 
@@ -157,4 +159,27 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Use `knex.transaction(async (trx) => {...})` and pass `trx` for all queries within the cleanup to ensure atomicity
   - Knex `.whereIn('col', function() { this.select(...) })` generates a subquery — useful for the three-step cascading delete pattern
   - Always wrap cron job body in try/catch to prevent unhandled rejection from crashing the process
+---
+
+## 2026-04-03 - US-013
+- Created vitest.config.ts and unit tests for all three repository modules
+- Files created: vitest.config.ts, test/unit/repositories/media-files.test.ts, test/unit/repositories/media-variants.test.ts, test/unit/repositories/upload-intents.test.ts
+- 14 tests total, all passing
+- **Learnings for future iterations:**
+  - Use `makeQueryBuilder` / `makeDb` helper pattern for mocking Knex — creates chainable mock with `vi.fn().mockReturnThis()` for builder methods and `mockResolvedValue` for terminal methods
+  - Mock `db.fn.now()` on the db object for repos that use `knex.fn.now()` (e.g., softDelete)
+  - `findByFileId` in media-variants uses `.where()` as a terminal call (returns promise directly), not chained with `.first()`
+  - vitest.config.ts uses `pool: 'forks'` with `singleFork: true` to match other services — integration tests share a Postgres schema
+---
+
+## 2026-04-03 - US-014
+- Created unit tests for image-processor, s3, signed-url services and service-auth middleware
+- Files created: test/unit/services/image-processor.test.ts, test/unit/services/s3.test.ts, test/unit/services/signed-url.test.ts, test/unit/middleware/service-auth.test.ts
+- 15 new tests, 29 total passing
+- **Learnings for future iterations:**
+  - Use `vi.hoisted()` to declare mock variables that are referenced inside `vi.mock()` factory functions — hoisted mocks execute before any `const` declarations
+  - For AWS SDK mocks: mock S3Client as `{ send: mockSend }`, mock command constructors to pass through params
+  - `getSignedUrl` from s3-request-presigner receives the instantiated command object (not the raw params), so assert `expect.anything()` for the command arg and focus on TTL assertion
+  - For service-auth tests, mock `env.js` to provide `SERVICE_AUTH_TOKEN` — the hook reads it at call time
+  - Sharp mock: return a chainable object with `resize().webp().toBuffer()` — mock `toBuffer` to reject for corrupt file test
 ---
