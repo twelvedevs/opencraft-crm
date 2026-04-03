@@ -7,8 +7,7 @@ export async function up(knex: Knex): Promise<void> {
       .uuid('file_id')
       .notNullable()
       .references('id')
-      .inTable('platform_media.media_files')
-      .onDelete('CASCADE');
+      .inTable('platform_media.media_files');
     table.text('variant').notNullable();
     table.text('s3_key').notNullable();
     table.integer('width_px').notNullable();

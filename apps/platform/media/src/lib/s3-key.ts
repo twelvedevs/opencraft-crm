@@ -3,11 +3,11 @@
  */
 
 export function derivePublicKey(uploadId: string, uuid: string, ext: string): string {
-  return `${uploadId}/${uuid}.${ext}`;
+  return ext ? `${uploadId}/${uuid}.${ext}` : `${uploadId}/${uuid}`;
 }
 
 export function derivePrivateKey(locationId: string, uploadId: string, uuid: string, ext: string): string {
-  return `${locationId}/${uploadId}/${uuid}.${ext}`;
+  return ext ? `${locationId}/${uploadId}/${uuid}.${ext}` : `${locationId}/${uploadId}/${uuid}`;
 }
 
 /**

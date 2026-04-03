@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { Knex } from 'knex';
 import { env } from '../env.js';
-import { uploadToS3 } from '../services/s3.js';
+import { uploadToS3, createPresignedGetUrl } from '../services/s3.js';
 import { issuePrivateGetUrl } from '../services/signed-url.js';
 import { derivePublicKey, derivePrivateKey } from '../lib/s3-key.js';
 import * as mediaFilesRepo from '../repositories/media-files.js';
@@ -113,8 +113,11 @@ export async function internalRoutes(
       if (tier === 'public') {
         urls.original = `${env.CLOUDFRONT_BASE_URL}/${originalKey}`;
       } else {
-        // For internal store, just return the key path — caller can use signed-url endpoint
-        urls.original = originalKey;
+        urls.original = await createPresignedGetUrl({
+          bucket: env.S3_PRIVATE_BUCKET,
+          key: originalKey,
+          ttlSeconds: env.PRESIGNED_GET_TTL_SECONDS,
+        });
       }
 
       return reply.status(200).send({

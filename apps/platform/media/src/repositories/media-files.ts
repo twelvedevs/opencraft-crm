@@ -74,5 +74,5 @@ export async function markReady(
 }
 
 export async function softDelete(knex: Knex, id: string): Promise<void> {
-  await knex(TABLE).where({ id }).update({ deleted_at: knex.fn.now() });
+  await knex(TABLE).where({ id }).update({ status: 'deleted', deleted_at: knex.fn.now() });
 }
