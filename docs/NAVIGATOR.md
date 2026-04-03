@@ -15,6 +15,7 @@
 | [arch/adr-logger.md](arch/adr-logger.md) | ADR: Logger selection and configuration |
 | [arch/adr-interpolator.md](arch/adr-interpolator.md) | ADR: `@ortho/interpolator` — field interpolation & active hours |
 | [arch/adr-filter-engine.md](arch/adr-filter-engine.md) | ADR: `@platform/filter-engine` — shared filter evaluation package |
+| [arch/adr-auth-middleware.md](arch/adr-auth-middleware.md) | ADR: `@ortho/auth-middleware` — JWT verification and RBAC Fastify plugin |
 
 ## Component Design Specs (`docs/superpowers/specs/`)
 
