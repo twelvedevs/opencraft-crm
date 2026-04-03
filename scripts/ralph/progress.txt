@@ -105,3 +105,16 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Variant URLs are only included in response when variants were actually produced (variantRows array from processImage)
   - `deleteById` was added to upload-intents repo — wasn't needed before but confirm route needs to clean up the intent after success
 ---
+
+## 2026-04-03 - US-009
+- Implemented POST /media/upload proxy multipart upload endpoint
+- Registered @fastify/multipart in app.ts with fileSize limit from env.MAX_FILE_SIZE_BYTES
+- Handler parses multipart fields (file, tier, location_id, purpose), buffers file, uploads to S3, creates media_files row as 'ready', processes image variants
+- Files changed: src/app.ts (added multipart registration), src/routes/upload.ts (added /media/upload handler, added uploadToS3 import)
+- **Learnings for future iterations:**
+  - @fastify/multipart fields are accessed via `file.fields` as Record, each field has a `.value` property for string fields
+  - Check `file.file.truncated` after `toBuffer()` to detect if file exceeded the fileSize limit
+  - Wrap `toBuffer()` in try/catch as it can throw on stream errors — return 413 on failure
+  - For proxy upload, create row as 'pending' first then update to 'ready' in same transaction (reuses createPending repo function)
+  - `request.file()` returns the first file from multipart stream — fields must be sent before the file in the form data, or accessed via file.fields
+---
