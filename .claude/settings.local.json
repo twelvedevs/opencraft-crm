@@ -37,7 +37,8 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('keys:', list\\(d.keys\\(\\)\\)\\); stories=d.get\\('stories', d.get\\('userStories', []\\)\\); print\\('total stories:', len\\(stories\\)\\); print\\('first few:', [s.get\\('id','?'\\) for s in stories[:5]]\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); stories=d.get\\('userStories',[]\\); [print\\(s.get\\('id'\\), '|', s.get\\('title'\\), '| passes:', s.get\\('passes'\\)\\) for s in stories]\")",
       "Bash(grep:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(npx vitest:*)"
     ]
   }
 }
