@@ -202,3 +202,16 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - For confirm flow: after `POST /media/upload-url`, query DB for `original_key` and put test data in S3 mock store at `{bucket}/{original_key}`
   - Sharp works with the base64 1x1 PNG test image — produces real WebP variants
 ---
+
+## 2026-04-03 - US-016
+- Created integration tests for file routes (GET/DELETE /media/:file_id) and internal routes (POST /media/internal/store, GET /media/internal/:file_id/signed-url)
+- Files created: test/integration/files.test.ts (8 tests), test/integration/internal.test.ts (8 tests)
+- files.test.ts: public GET with CloudFront URLs + variants, 404 for deleted/unknown, private GET with presigned URLs, 403 on location_id mismatch, DELETE 204 for private matching location, DELETE 403 on mismatch, DELETE 403 for public files
+- internal.test.ts: store PDF with service token, 401 on bad/missing token, signed-url for private file, 400 for public file, 401 on bad token, 404 for deleted file
+- **Learnings for future iterations:**
+  - Use helper function `createReadyFile` via proxy upload (POST /media/upload) to create test fixtures — avoids duplicating S3 upload logic in tests
+  - For testing location_id access control, create file with one location_id (using auth header with matching location_id) and then request with a different location_id
+  - Internal routes use service auth token (Bearer test-service-token) not JWT — separate auth header helper needed
+  - `issuePrivateGetUrl` throws with `statusCode: 400` for public files — Fastify catches this and returns 400 automatically via @fastify/sensible
+  - Soft-deleting via direct DB query is needed for testing delete scenarios on public files (which can't be user-deleted via API)
+---
