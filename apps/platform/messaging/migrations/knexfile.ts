@@ -12,7 +12,7 @@ const config: Record<string, Knex.Config> = {
     },
     searchPath: ['platform_messaging', 'public'],
     migrations: {
-      directory: './migrations',
+      directory: '.',
       loadExtensions: ['.ts'],
       schemaName: 'platform_messaging',
       tableName: 'knex_migrations',
@@ -29,7 +29,7 @@ const config: Record<string, Knex.Config> = {
     },
     searchPath: ['platform_messaging', 'public'],
     migrations: {
-      directory: './migrations',
+      directory: '.',
       loadExtensions: ['.ts'],
       schemaName: 'platform_messaging',
       tableName: 'knex_migrations',
