@@ -10,6 +10,9 @@ Started: Fri Apr  3 11:10:48 UTC 2026
 - All imports use `.js` extension for ESM compatibility (e.g. `./env.js`)
 - Repository functions are standalone exports (not class-based), with `knex: Knex` as first parameter and fully-qualified table names (`'platform_media.media_files'`)
 - PostgreSQL bigint columns come back as strings via Knex — type them as `string | null`
+- `buildApp(pool, knex)` now takes both pg.Pool and Knex instance — routes receive knex via `opts: { knex }` parameter
+- Route registration pattern: `uploadRoutes(app, { knex })` called directly in app.ts (not via `app.register(import(...))`)
+- Access JWT user in routes via `(request as any).user.sub` — auth-middleware decorates `request.user`
 
 ---
 
@@ -74,4 +77,18 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Must check buffer lengths match before calling `timingSafeEqual` (throws on length mismatch)
   - Hook signature is `async (request: FastifyRequest, reply: FastifyReply): Promise<void>` — send 401 and return early on failure
   - This middleware is separate from @ortho/auth-middleware (JWT-based) — it's for service-to-service calls using a shared token
+---
+
+## 2026-04-03 - US-007
+- Implemented POST /media/upload-url route with presigned S3 PUT URL issuance
+- Created src/routes/upload.ts with TypeBox schema validation, file size check, private tier location_id check, S3 key derivation, presigned URL generation, and transactional DB inserts
+- Updated src/app.ts to accept Knex instance and register upload routes
+- Updated src/index.ts to create Knex instance alongside pg.Pool
+- Files changed: src/routes/upload.ts (new), src/app.ts, src/index.ts
+- **Learnings for future iterations:**
+  - `buildApp` now takes `(pool, knex)` — both are needed since pool is for health checks and knex for query building
+  - Routes receive knex via `opts: { knex }` parameter pattern (see template service for reference)
+  - Use `(request as any).user.sub` to access JWT subject — auth-middleware types aren't augmented on FastifyRequest
+  - Use `knex.transaction(async (trx) => {...})` for multi-table inserts, pass `trx` to repo functions as the knex param
+  - Extract file extension with `filename.substring(filename.lastIndexOf('.') + 1)` — handle no-extension case
 ---
