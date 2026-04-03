@@ -4,9 +4,11 @@ import cors from '@fastify/cors';
 import { authPlugin } from '@ortho/auth-middleware';
 import { createLogger } from '@ortho/logger';
 import type { Pool } from 'pg';
+import type { Knex } from 'knex';
 import { env } from './env.js';
+import { uploadRoutes } from './routes/upload.js';
 
-export async function buildApp(pool: Pool): Promise<FastifyInstance> {
+export async function buildApp(pool: Pool, knex: Knex): Promise<FastifyInstance> {
   const log = createLogger('platform-media');
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
@@ -19,11 +21,14 @@ export async function buildApp(pool: Pool): Promise<FastifyInstance> {
   });
 
   app.decorate('pool', pool);
+  app.decorate('knex', knex);
 
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/ready', async (_req, reply) => {
     reply.code(200).send();
   });
+
+  await uploadRoutes(app, { knex });
 
   return app;
 }
