@@ -37,7 +37,8 @@ All specs are **Approved** unless noted otherwise.
 | [analytics-service-design.md](superpowers/specs/2026-03-25-analytics-service-design.md) | [memories/analytics-service.md](memories/analytics-service.md) |
 | [integration-hub-design.md](superpowers/specs/2026-03-25-integration-hub-design.md) | [memories/integration-hub.md](memories/integration-hub.md) |
 | [media-service-design.md](superpowers/specs/2026-03-25-media-service-design.md) | [memories/media-service.md](memories/media-service.md) |
-| [identity-service-design.md](superpowers/specs/2026-03-25-identity-service-design.md) | [memories/identity-service.md](memories/identity-service.md) |
+| [identity-service-design.md](superpowers/specs/2026-03-25-identity-service-design.md) _(superseded)_ | [memories/identity-service.md](memories/identity-service.md) |
+| [identity-service-updated-design.md](superpowers/specs/2026-04-02-identity-service-updated-design.md) _(supersedes above)_ | [memories/identity-service.md](memories/identity-service.md) |
 
 ### Ortho CRM Layer
 
