@@ -19,7 +19,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Mirror apps/platform/ai package.json and tsconfig.json structure. The @ortho/auth-middleware local package will be scaffolded in US-012 — npm install may warn about missing peer but must not fail. Add @ortho/auth-middleware to package.json now so the dependency is declared; it will be satisfied when US-012 creates the package."
     },
     {
@@ -40,7 +40,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Use knex.raw() for CREATE SCHEMA and CHECK constraint DDL where needed — Knex schema builder may not support all syntax. All tables go in platform_identity schema. The CHECK constraint on role uses varchar not a Postgres ENUM to allow future ALTER TABLE extension."
     },
     {
@@ -56,7 +56,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "This is a pure function module — no DB, no network. Config is read once at module load from process.env. Used in user.service.ts before createUser and setPassword calls."
     },
     {
@@ -75,7 +75,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "SupabaseProvider uses @supabase/supabase-js. The deactivateUser ban_duration '87600h' is 10 years — effectively permanent without requiring a delete. The createAuthProvider factory in index.ts will be extended in US-005 with the auth0 branch."
     },
     {
@@ -94,7 +94,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Auth0 Management API calls require a Bearer token obtained via client credentials. The M2M token TTL is typically 86400s; refresh when within 60s of expiry. Use axios for all Management API HTTP calls."
     },
     {
@@ -112,7 +112,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Use raw pg Pool (not Knex query builder) for all repo functions for consistency with the analytics service pattern. Cursor base64 encoding/decoding: Buffer.from(JSON.stringify({created_at, id})).toString('base64') / Buffer.from(cursor, 'base64').toString(). Define shared TypeScript types in src/types.ts."
     },
     {
@@ -129,7 +129,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "fast-jwt createSigner is called once at module load (cached closure), not per request. IDENTITY_PRIVATE_KEY is a PEM string from env; fast-jwt accepts PEM directly. The kid must match one entry in IDENTITY_JWKS_KEYS — use the kid from JWKS_KEYS[0] as the active signing key. Replay detection: revoked_at IS NOT NULL on a presented token is a sign of token theft — bulk-revoke all user sessions."
     },
     {
@@ -146,7 +146,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "changeOwnPassword current_password re-verification: since AuthProvider.verifyToken accepts a provider token (not a password), the password check for voluntary change must be done differently. For Supabase: call supabase.auth.signInWithPassword({email, password}) using the service client. For Auth0: call password grant (POST /oauth/token with grant_type=password). Alternatively, accept current_password and call a new AuthProvider method signInWithPassword — add this as an optional method. Check the spec again: spec says 'verified via AuthProvider.verifyToken equivalent'. Simplest approach: add signInWithPassword(email, password) to AuthProvider interface as optional or as a separate method."
     },
     {
@@ -162,7 +162,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Use Node's built-in crypto.randomBytes(32) and crypto.createHash('sha256'). The last_used_at update strategy per spec: 'Updates last_used_at on cache miss only' — the CRM API Gateway caches valid /validate responses for 60s, so touchLastUsed is called at most once per 60s per key. Service layer just calls it on every validate; the route layer or a future cache could suppress it."
     },
     {
@@ -178,7 +178,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Follow the analytics service BullMQ pattern from US-017 of the analytics archive. Use bullmq Queue + Worker with the same Redis URL. Cron '0 3 * * *' = 03:00 UTC every day."
     },
     {
@@ -194,7 +194,7 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "CORS_ORIGIN can be comma-separated: parse with .split(',').map(s => s.trim()) and pass as an array to @fastify/cors origin option. IDENTITY_JWKS_KEYS is a JSON string — parse with JSON.parse in env.ts and export as JWK[]. No @fastify/rate-limit — rate limiting is at ALB only per spec."
     },
     {
@@ -214,7 +214,7 @@
         "Typecheck passes in packages/@ortho/auth-middleware"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "The req.user object is typed as JwtPayload (same shape as identity service JwtPayload: { sub, role, locations, must_change_password }). Declare FastifyRequest augmentation in plugin.ts stub so TypeScript knows about req.user in preHandlers. Define the permission strings carefully — they must match what the CRM API Gateway and other services check."
     },
     {
@@ -234,7 +234,7 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "JWKS response shape: { keys: [{ kid, kty, n, e, ... }] }. Convert JWK to PEM using fast-jwt's built-in key support or the 'jwk-to-pem' utility. The re-fetch guard: store lastRefetchAt timestamp; only re-fetch if now() - lastRefetchAt > 60000ms. The exponential back-off applies to JWKS fetch failures (network errors), not to unknown-kid misses."
     },
     {
@@ -250,7 +250,7 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "POST /identity/session and POST /identity/refresh are unauthenticated (in allowedPaths for authPlugin). DELETE /identity/session requires a valid JWT but only revokes the specific refresh token in the body — not all tokens. The refresh token rotation (rotateRefreshToken) handles replay detection internally and returns the new raw token."
     },
     {
@@ -266,7 +266,7 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "This is a simple pass-through of the IDENTITY_JWKS_KEYS env var (already parsed as JWK[] in env.ts). Wrap in { keys: [...] } envelope. No caching headers needed — consumers (auth-middleware) handle their own caching."
     },
     {
@@ -281,7 +281,7 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "The must_change_password gate exclusion is handled in the authPlugin (US-013) — these paths are hardcoded in the gate check. GET /identity/me exposes force_password_reset from the DB row (same value as must_change_password in the JWT claim — keep in sync at issue time)."
     },
     {
@@ -300,7 +300,7 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "notes": "Cursor pagination: the cursor query param is an opaque base64 string; decode it in user.repo.listUsers (US-006). The PUT /users/:id route accepts status field in the TypeBox schema (optional string) but the service layer enforces the reactivation restriction."
     },
     {
@@ -318,7 +318,7 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "The /validate endpoint is VPC-only (enforced at network level) but also has an application-level guard via X-Internal-Secret header checked in a preHandler. This endpoint is NOT in the authPlugin's allowedPaths — but since it has its own preHandler that runs before the authPlugin would touch it, and it checks X-Internal-Secret, it effectively bypasses JWT auth for this one path. Register /validate BEFORE authPlugin in the route registration order, or use a preHandler approach that short-circuits."
     },
     {
@@ -333,7 +333,7 @@
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "Use Node.js crypto.generateKeyPairSync('rsa', { modulusLength: 2048, publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs1', format: 'pem' } }). For JWK conversion from the public key: use the 'jwk-to-pem' or 'node-jose' library, or manually extract n and e from the key components. The .env merge: read existing .env, replace lines matching the key names or append if absent."
     },
     {
@@ -350,7 +350,7 @@
         "Tests pass"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "Mock repositories using vi.mock or factory injection (prefer injecting mock pool/repo functions over vi.mock of modules). For token.service tests, generate a real RSA key pair in the test setup using crypto.generateKeyPairSync to enable actual sign+verify round-trip without mocking fast-jwt."
     },
     {
@@ -370,7 +370,7 @@
         "Tests pass"
       ],
       "priority": 21,
-      "passes": false,
+      "passes": true,
       "notes": "Follow the analytics service integration test pattern: use app.inject for all HTTP assertions (no real TCP server needed). The AuthProvider is mocked using vi.fn() — no real Supabase or Auth0 calls in integration tests. For JWT generation in tests, call signAccessToken() directly using the test RSA key. The must_change_password gate is verified by signing a JWT with must_change_password=true and hitting a protected route."
     }
   ]
