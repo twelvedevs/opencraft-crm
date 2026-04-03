@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { authPlugin } from '@ortho/auth-middleware';
 import { createLogger } from '@ortho/logger';
 import type { Pool } from 'pg';
@@ -14,6 +15,7 @@ export async function buildApp(pool: Pool, knex: Knex): Promise<FastifyInstance>
 
   await app.register(sensible);
   await app.register(cors, { origin: env.CORS_ORIGIN });
+  await app.register(multipart, { limits: { fileSize: env.MAX_FILE_SIZE_BYTES } });
 
   await app.register(authPlugin, {
     jwksUrl: env.IDENTITY_JWKS_URL,

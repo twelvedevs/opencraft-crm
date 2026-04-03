@@ -3,7 +3,7 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import type { Knex } from 'knex';
 import { env } from '../env.js';
-import { createPresignedPutUrl, downloadFromS3, createPresignedGetUrl } from '../services/s3.js';
+import { createPresignedPutUrl, uploadToS3, downloadFromS3, createPresignedGetUrl } from '../services/s3.js';
 import { derivePublicKey, derivePrivateKey, deriveVariantKey } from '../lib/s3-key.js';
 import * as mediaFilesRepo from '../repositories/media-files.js';
 import * as mediaVariantsRepo from '../repositories/media-variants.js';
@@ -218,6 +218,155 @@ export async function uploadRoutes(
         urls,
         location_id: file.location_id,
         created_at: file.created_at,
+      });
+    },
+  );
+
+  app.post(
+    '/media/upload',
+    async (request, reply) => {
+      const userSub = (request as any).user.sub;
+
+      let file: Awaited<ReturnType<typeof request.file>>;
+      try {
+        file = await request.file();
+      } catch {
+        return reply.status(400).send({ error: 'Invalid multipart request' });
+      }
+
+      if (!file) {
+        return reply.status(400).send({ error: 'file field is required' });
+      }
+
+      // Collect fields from the multipart stream
+      const fields = file.fields as Record<string, { value?: string } | undefined>;
+
+      const tierField = fields.tier;
+      const tier = tierField && 'value' in tierField ? tierField.value : undefined;
+      if (!tier || (tier !== 'public' && tier !== 'private')) {
+        return reply.status(400).send({ error: 'tier is required and must be public or private' });
+      }
+
+      const locationIdField = fields.location_id;
+      const locationId = locationIdField && 'value' in locationIdField ? locationIdField.value : undefined;
+
+      const purposeField = fields.purpose;
+      const purpose = purposeField && 'value' in purposeField ? purposeField.value : undefined;
+
+      // Private tier requires location_id
+      if (tier === 'private' && !locationId) {
+        return reply.status(400).send({ error: 'location_id is required for private tier' });
+      }
+
+      // Buffer the file stream
+      let buffer: Buffer;
+      try {
+        buffer = await file.toBuffer();
+      } catch {
+        return reply.status(413).send({ error: 'File exceeds 20MB limit' });
+      }
+
+      // Check if file exceeded limit (fastify/multipart sets file.file.truncated)
+      if (file.file.truncated) {
+        return reply.status(413).send({ error: 'File exceeds 20MB limit' });
+      }
+
+      const uploadId = crypto.randomUUID();
+      const fileUuid = crypto.randomUUID();
+      const originalFilename = file.filename;
+      const mimeType = file.mimetype;
+      const ext = originalFilename.includes('.')
+        ? originalFilename.substring(originalFilename.lastIndexOf('.') + 1)
+        : '';
+
+      // Derive S3 key
+      const originalKey =
+        tier === 'public'
+          ? derivePublicKey(uploadId, fileUuid, ext)
+          : derivePrivateKey(locationId!, uploadId, fileUuid, ext);
+
+      const bucket =
+        tier === 'public' ? env.S3_PUBLIC_BUCKET : env.S3_PRIVATE_BUCKET;
+
+      // Upload to S3
+      await uploadToS3({
+        bucket,
+        key: originalKey,
+        body: buffer,
+        contentType: mimeType,
+      });
+
+      // Process image variants if applicable
+      let variantRows: Array<{ variantName: 'medium' | 'thumb'; s3Key: string; widthPx: number; sizeBytes: number }> = [];
+      if (isImageMimeType(mimeType)) {
+        const result = await processImage(buffer, originalKey, bucket);
+        variantRows = result.variants;
+      }
+
+      // Create media_files row directly as ready
+      const fileId = crypto.randomUUID();
+      await knex.transaction(async (trx) => {
+        await mediaFilesRepo.createPending(trx, {
+          id: fileId,
+          upload_id: uploadId,
+          tier: tier as 'public' | 'private',
+          mime_type: mimeType,
+          original_key: originalKey,
+          original_filename: originalFilename,
+          location_id: locationId ?? null,
+          purpose: purpose ?? null,
+          uploaded_by: userSub,
+        });
+
+        await trx('platform_media.media_files')
+          .where({ id: fileId })
+          .update({
+            status: 'ready',
+            file_size_bytes: buffer.length,
+            confirmed_at: new Date(),
+          });
+
+        for (const v of variantRows) {
+          await mediaVariantsRepo.insertVariant(trx, {
+            file_id: fileId,
+            variant: v.variantName,
+            s3_key: v.s3Key,
+            width_px: v.widthPx,
+            size_bytes: v.sizeBytes,
+          });
+        }
+      });
+
+      // Build URLs
+      const urls: Record<string, string> = {};
+      if (tier === 'public') {
+        urls.original = `${env.CLOUDFRONT_BASE_URL}/${originalKey}`;
+      } else {
+        urls.original = await createPresignedGetUrl({
+          bucket: env.S3_PRIVATE_BUCKET,
+          key: originalKey,
+          ttlSeconds: env.PRESIGNED_GET_TTL_SECONDS,
+        });
+      }
+
+      for (const v of variantRows) {
+        if (tier === 'public') {
+          urls[v.variantName] = `${env.CLOUDFRONT_BASE_URL}/${v.s3Key}`;
+        } else {
+          urls[v.variantName] = await createPresignedGetUrl({
+            bucket: env.S3_PRIVATE_BUCKET,
+            key: v.s3Key,
+            ttlSeconds: env.PRESIGNED_GET_TTL_SECONDS,
+          });
+        }
+      }
+
+      return reply.status(200).send({
+        file_id: fileId,
+        tier,
+        urls,
+        location_id: locationId ?? null,
+        created_at: new Date().toISOString(),
       });
     },
   );
