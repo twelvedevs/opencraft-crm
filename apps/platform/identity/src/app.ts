@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import cors from '@fastify/cors';
+import { authPlugin } from '@ortho/auth-middleware';
 import type { Pool } from 'pg';
 import type { AuthProvider } from './providers/auth-provider.interface.js';
 import { env } from './env.js';
@@ -19,6 +20,18 @@ export async function buildApp(
 
   await app.register(sensible);
   await app.register(cors, { origin: env.CORS_ORIGIN });
+
+  await app.register(authPlugin, {
+    jwksUrl: env.IDENTITY_JWKS_URL,
+    allowedPaths: [
+      '/health',
+      '/ready',
+      '/identity/session',
+      '/identity/refresh',
+      '/identity/.well-known/jwks.json',
+      '/identity/api-keys/validate',
+    ],
+  });
 
   app.decorate('pool', pool);
   app.decorate('provider', provider);

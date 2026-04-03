@@ -29,6 +29,10 @@ function parseEnv() {
     CORS_ORIGIN: required('CORS_ORIGIN')
       .split(',')
       .map((s) => s.trim()),
+    IDENTITY_JWKS_URL: optional(
+      'IDENTITY_JWKS_URL',
+      `http://localhost:${parseInt(optional('PORT', '3000'), 10)}/identity/.well-known/jwks.json`,
+    ),
     LOG_LEVEL: optional('LOG_LEVEL', 'info'),
     PORT: parseInt(optional('PORT', '3000'), 10),
     PASSWORD_MIN_LENGTH: parseInt(optional('PASSWORD_MIN_LENGTH', '12'), 10),
