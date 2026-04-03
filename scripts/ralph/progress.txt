@@ -1,0 +1,32 @@
+# Ralph Progress Log
+Started: Fri Apr  3 11:10:48 UTC 2026
+---
+
+## Codebase Patterns
+- Workspace packages (@ortho/logger, @ortho/auth-middleware, @ortho/event-bus) must be built (`npm run build`) before consuming services can typecheck — they resolve via `file:` references to `dist/`
+- Use `node:24-slim` (not alpine) for media service Dockerfile — required for sharp prebuilt binaries
+- Follow identity service patterns: `buildApp(pool)` factory, `createLogger('platform-media')`, cast logger `as unknown as FastifyBaseLogger`
+- tsconfig uses `module: NodeNext` / `moduleResolution: NodeNext` (not ESNext/bundler) to match other services
+- All imports use `.js` extension for ESM compatibility (e.g. `./env.js`)
+
+---
+
+## 2026-04-03 - US-001
+- Scaffolded apps/platform/media with package.json, tsconfig.json, Dockerfile, env.ts, app.ts, index.ts
+- Files created: package.json, tsconfig.json, Dockerfile, src/env.ts, src/app.ts, src/index.ts
+- **Learnings for future iterations:**
+  - Workspace packages need to be built first — logger had no dist/ initially
+  - auth-middleware was already built, event-bus was not
+  - Identity service is the best reference for scaffolding patterns
+  - Dockerfile uses node:24-slim (not alpine) per AC for sharp compatibility
+---
+
+## 2026-04-03 - US-002
+- Created knexfile.ts and 4 migration files for platform_media schema
+- Files created: knexfile.ts, migrations/001_create_platform_media_schema.ts, migrations/002_create_media_files.ts, migrations/003_create_media_variants.ts, migrations/004_create_media_upload_intents.ts
+- **Learnings for future iterations:**
+  - Follow notification service migration patterns: `withSchema('platform_media').createTable()` for tables, `knex.raw()` for CHECK constraints and complex indexes
+  - knexfile.ts goes at service root (not inside migrations/) with searchPath pointing to service schema
+  - Use `knex.raw('gen_random_uuid()')` for UUID defaults, not `uuid.v4()`
+  - media_upload_intents.id IS the upload_id (PK, not auto-generated) — it links to media_files.upload_id
+---
