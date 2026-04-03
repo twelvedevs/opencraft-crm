@@ -145,3 +145,16 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Internal store does NOT process images — PDFs and other files stored as-is
   - `issuePrivateGetUrl` from signed-url.ts handles the 400 error for public files (throws with statusCode:400)
 ---
+
+## 2026-04-03 - US-012
+- Implemented hourly cleanup job in src/jobs/cleanup.ts using node-cron
+- Job runs a single knex transaction: deletes variants → pending files → expired intents (in order)
+- Logs start, completion, and row counts at each step; catches errors without crashing
+- Updated src/index.ts to import and call registerCleanupJob(knex)
+- Files changed: src/jobs/cleanup.ts (new), src/index.ts, package.json (added @types/node-cron)
+- **Learnings for future iterations:**
+  - `node-cron` has no built-in types — need `@types/node-cron` as devDependency
+  - Use `knex.transaction(async (trx) => {...})` and pass `trx` for all queries within the cleanup to ensure atomicity
+  - Knex `.whereIn('col', function() { this.select(...) })` generates a subquery — useful for the three-step cascading delete pattern
+  - Always wrap cron job body in try/catch to prevent unhandled rejection from crashing the process
+---
