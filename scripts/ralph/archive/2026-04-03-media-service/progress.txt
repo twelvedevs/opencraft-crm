@@ -1,0 +1,217 @@
+# Ralph Progress Log
+Started: Fri Apr  3 11:10:48 UTC 2026
+---
+
+## Codebase Patterns
+- Use `vi.hoisted()` for mock variables referenced inside `vi.mock()` factories — hoisted mocks can't access outer `const` declarations
+- Workspace packages (@ortho/logger, @ortho/auth-middleware, @ortho/event-bus) must be built (`npm run build`) before consuming services can typecheck — they resolve via `file:` references to `dist/`
+- Use `node:24-slim` (not alpine) for media service Dockerfile — required for sharp prebuilt binaries
+- Follow identity service patterns: `buildApp(pool)` factory, `createLogger('platform-media')`, cast logger `as unknown as FastifyBaseLogger`
+- tsconfig uses `module: NodeNext` / `moduleResolution: NodeNext` (not ESNext/bundler) to match other services
+- All imports use `.js` extension for ESM compatibility (e.g. `./env.js`)
+- Repository functions are standalone exports (not class-based), with `knex: Knex` as first parameter and fully-qualified table names (`'platform_media.media_files'`)
+- PostgreSQL bigint columns come back as strings via Knex — type them as `string | null`
+- `buildApp(pool, knex)` now takes both pg.Pool and Knex instance — routes receive knex via `opts: { knex }` parameter
+- Route registration pattern: `uploadRoutes(app, { knex })` called directly in app.ts (not via `app.register(import(...))`)
+- Access JWT user in routes via `(request as any).user.sub` — auth-middleware decorates `request.user`
+- Knex mock pattern for unit tests: `makeQueryBuilder()` with `vi.fn().mockReturnThis()` for chainable methods, `makeDb(qb)` wrapping as Knex type; mock `db.fn.now()` separately
+- Integration test pattern: `warnIfSkipped()` → `setTestEnv()` → `mockJwksFetch()` → `vi.hoisted()` + `vi.mock()` → dynamic import in `beforeAll`; `describe.skipIf(!process.env['DATABASE_URL'])`
+- After `vi.clearAllMocks()` in `beforeEach`, re-apply default mock implementations (clearAllMocks removes them)
+- Build multipart body for `app.inject()` manually with boundary-delimited `Buffer.concat()`
+
+---
+
+## 2026-04-03 - US-001
+- Scaffolded apps/platform/media with package.json, tsconfig.json, Dockerfile, env.ts, app.ts, index.ts
+- Files created: package.json, tsconfig.json, Dockerfile, src/env.ts, src/app.ts, src/index.ts
+- **Learnings for future iterations:**
+  - Workspace packages need to be built first — logger had no dist/ initially
+  - auth-middleware was already built, event-bus was not
+  - Identity service is the best reference for scaffolding patterns
+  - Dockerfile uses node:24-slim (not alpine) per AC for sharp compatibility
+---
+
+## 2026-04-03 - US-002
+- Created knexfile.ts and 4 migration files for platform_media schema
+- Files created: knexfile.ts, migrations/001_create_platform_media_schema.ts, migrations/002_create_media_files.ts, migrations/003_create_media_variants.ts, migrations/004_create_media_upload_intents.ts
+- **Learnings for future iterations:**
+  - Follow notification service migration patterns: `withSchema('platform_media').createTable()` for tables, `knex.raw()` for CHECK constraints and complex indexes
+  - knexfile.ts goes at service root (not inside migrations/) with searchPath pointing to service schema
+  - Use `knex.raw('gen_random_uuid()')` for UUID defaults, not `uuid.v4()`
+  - media_upload_intents.id IS the upload_id (PK, not auto-generated) — it links to media_files.upload_id
+---
+
+## 2026-04-03 - US-003
+- Implemented three repository modules: media-files, media-variants, upload-intents
+- Files created: src/repositories/media-files.ts, src/repositories/media-variants.ts, src/repositories/upload-intents.ts
+- **Learnings for future iterations:**
+  - Use function-based repositories (not class-based) with Knex passed as first parameter — matches PRD requirements
+  - Use fully-qualified table names with schema prefix: `'platform_media.media_files'`
+  - bigint columns from Postgres come back as strings in JS (Knex), so `file_size_bytes` and `size_bytes` are typed as `string | null` / `string`
+  - Use `.onConflict(['file_id', 'variant']).ignore()` for Knex ON CONFLICT DO NOTHING
+  - `deleteExpired` returns the number of deleted rows (Knex `.del()` returns count)
+---
+
+## 2026-04-03 - US-004
+- Implemented S3 service (upload, download, presigned PUT/GET), signed-URL service, and S3 key derivation helpers
+- Files created: src/lib/s3-key.ts, src/services/s3.ts, src/services/signed-url.ts
+- **Learnings for future iterations:**
+  - S3Client is instantiated once at module level using env.AWS_REGION
+  - `issuePrivateGetUrl` takes `(knex, file)` signature per AC even though knex is unused — keeps consistency with repo pattern
+  - `deriveVariantKey` replaces extension with `.webp` — important for image-processor to match
+  - Use `Object.assign(new Error(...), { statusCode: 400 })` for Fastify-compatible error throwing with @fastify/sensible
+  - `downloadFromS3` uses `response.Body!.transformToByteArray()` then `Buffer.from()` for AWS SDK v3 stream handling
+---
+
+## 2026-04-03 - US-005
+- Implemented image processor service with sharp resize + WebP conversion
+- Files created: src/services/image-processor.ts
+- **Learnings for future iterations:**
+  - `processImage` catches all sharp errors and returns empty variants array (graceful degradation) — original file is always usable
+  - `isImageMimeType` supports: image/jpeg, image/png, image/gif, image/webp
+  - Variant widths: medium=800px (quality 85), thumb=200px (quality 80) — both converted to WebP
+  - `buffer.length` gives sizeBytes for variant rows
+  - Logger instantiated at module level: `createLogger('platform-media')`
+---
+
+## 2026-04-03 - US-006
+- Implemented service auth middleware for /media/internal/* routes
+- Files created: src/middleware/service-auth.ts
+- **Learnings for future iterations:**
+  - Use `crypto.timingSafeEqual` with `Buffer.from()` for timing-safe token comparison
+  - Must check buffer lengths match before calling `timingSafeEqual` (throws on length mismatch)
+  - Hook signature is `async (request: FastifyRequest, reply: FastifyReply): Promise<void>` — send 401 and return early on failure
+  - This middleware is separate from @ortho/auth-middleware (JWT-based) — it's for service-to-service calls using a shared token
+---
+
+## 2026-04-03 - US-007
+- Implemented POST /media/upload-url route with presigned S3 PUT URL issuance
+- Created src/routes/upload.ts with TypeBox schema validation, file size check, private tier location_id check, S3 key derivation, presigned URL generation, and transactional DB inserts
+- Updated src/app.ts to accept Knex instance and register upload routes
+- Updated src/index.ts to create Knex instance alongside pg.Pool
+- Files changed: src/routes/upload.ts (new), src/app.ts, src/index.ts
+- **Learnings for future iterations:**
+  - `buildApp` now takes `(pool, knex)` — both are needed since pool is for health checks and knex for query building
+  - Routes receive knex via `opts: { knex }` parameter pattern (see template service for reference)
+  - Use `(request as any).user.sub` to access JWT subject — auth-middleware types aren't augmented on FastifyRequest
+  - Use `knex.transaction(async (trx) => {...})` for multi-table inserts, pass `trx` to repo functions as the knex param
+  - Extract file extension with `filename.substring(filename.lastIndexOf('.') + 1)` — handle no-extension case
+---
+
+## 2026-04-03 - US-008
+- Implemented POST /media/confirm/:upload_id route for confirming uploads and processing image variants
+- Added `deleteById` function to upload-intents repository
+- Updated upload.ts imports to include downloadFromS3, createPresignedGetUrl, deriveVariantKey, mediaVariantsRepo, processImage, isImageMimeType
+- Files changed: src/routes/upload.ts, src/repositories/upload-intents.ts
+- **Learnings for future iterations:**
+  - Double-tap protection uses `WHERE status='pending'` in the UPDATE — if another call already set status='ready', the update returns 0 rows
+  - S3 download errors should return 502 (not 404) — wrapping downloadFromS3 in try/catch
+  - URL building: public tier uses `CLOUDFRONT_BASE_URL + '/' + key`, private tier uses presigned GET URL
+  - Variant URLs are only included in response when variants were actually produced (variantRows array from processImage)
+  - `deleteById` was added to upload-intents repo — wasn't needed before but confirm route needs to clean up the intent after success
+---
+
+## 2026-04-03 - US-009
+- Implemented POST /media/upload proxy multipart upload endpoint
+- Registered @fastify/multipart in app.ts with fileSize limit from env.MAX_FILE_SIZE_BYTES
+- Handler parses multipart fields (file, tier, location_id, purpose), buffers file, uploads to S3, creates media_files row as 'ready', processes image variants
+- Files changed: src/app.ts (added multipart registration), src/routes/upload.ts (added /media/upload handler, added uploadToS3 import)
+- **Learnings for future iterations:**
+  - @fastify/multipart fields are accessed via `file.fields` as Record, each field has a `.value` property for string fields
+  - Check `file.file.truncated` after `toBuffer()` to detect if file exceeded the fileSize limit
+  - Wrap `toBuffer()` in try/catch as it can throw on stream errors — return 413 on failure
+  - For proxy upload, create row as 'pending' first then update to 'ready' in same transaction (reuses createPending repo function)
+  - `request.file()` returns the first file from multipart stream — fields must be sent before the file in the form data, or accessed via file.fields
+---
+
+## 2026-04-03 - US-010
+- Implemented GET /media/:file_id and DELETE /media/:file_id routes with access control
+- Created src/routes/files.ts with fileRoutes(app, {knex}) pattern, registered in app.ts
+- GET returns full file metadata with URLs (CloudFront for public, presigned for private), includes variants
+- DELETE soft-deletes private files with matching location_id, returns 403 for public files or location_id mismatch
+- Files changed: src/routes/files.ts (new), src/app.ts
+- **Learnings for future iterations:**
+  - Access JWT location_id via `(request as any).user?.location_id` — same pattern as `.sub` for user identity
+  - `findById` already excludes deleted rows (WHERE deleted_at IS NULL), but AC also says return 404 for status='deleted' — belt-and-suspenders check
+  - Public files and files without location_id cannot be user-deleted (403) — only service token deletion (out of scope for this story)
+  - Route registration follows same pattern: `fileRoutes(app, { knex })` called directly in app.ts
+---
+
+## 2026-04-03 - US-011
+- Implemented POST /media/internal/store and GET /media/internal/:file_id/signed-url
+- Created src/routes/internal.ts with serviceAuthHook applied via addHook('preHandler') to all routes in the plugin
+- POST /media/internal/store: accepts multipart, uploads to S3, creates media_files row with uploaded_by=SERVICE_CALLER_ID, NO image processing
+- GET /media/internal/:file_id/signed-url: returns presigned URL for private files, 400 for public files
+- Registered internalRoutes in app.ts
+- Files changed: src/routes/internal.ts (new), src/app.ts
+- **Learnings for future iterations:**
+  - Use `app.addHook('preHandler', serviceAuthHook)` to apply service auth to all routes in a plugin scope
+  - Internal store uses `env.SERVICE_CALLER_ID` as uploaded_by instead of JWT sub
+  - Internal store does NOT process images — PDFs and other files stored as-is
+  - `issuePrivateGetUrl` from signed-url.ts handles the 400 error for public files (throws with statusCode:400)
+---
+
+## 2026-04-03 - US-012
+- Implemented hourly cleanup job in src/jobs/cleanup.ts using node-cron
+- Job runs a single knex transaction: deletes variants → pending files → expired intents (in order)
+- Logs start, completion, and row counts at each step; catches errors without crashing
+- Updated src/index.ts to import and call registerCleanupJob(knex)
+- Files changed: src/jobs/cleanup.ts (new), src/index.ts, package.json (added @types/node-cron)
+- **Learnings for future iterations:**
+  - `node-cron` has no built-in types — need `@types/node-cron` as devDependency
+  - Use `knex.transaction(async (trx) => {...})` and pass `trx` for all queries within the cleanup to ensure atomicity
+  - Knex `.whereIn('col', function() { this.select(...) })` generates a subquery — useful for the three-step cascading delete pattern
+  - Always wrap cron job body in try/catch to prevent unhandled rejection from crashing the process
+---
+
+## 2026-04-03 - US-013
+- Created vitest.config.ts and unit tests for all three repository modules
+- Files created: vitest.config.ts, test/unit/repositories/media-files.test.ts, test/unit/repositories/media-variants.test.ts, test/unit/repositories/upload-intents.test.ts
+- 14 tests total, all passing
+- **Learnings for future iterations:**
+  - Use `makeQueryBuilder` / `makeDb` helper pattern for mocking Knex — creates chainable mock with `vi.fn().mockReturnThis()` for builder methods and `mockResolvedValue` for terminal methods
+  - Mock `db.fn.now()` on the db object for repos that use `knex.fn.now()` (e.g., softDelete)
+  - `findByFileId` in media-variants uses `.where()` as a terminal call (returns promise directly), not chained with `.first()`
+  - vitest.config.ts uses `pool: 'forks'` with `singleFork: true` to match other services — integration tests share a Postgres schema
+---
+
+## 2026-04-03 - US-014
+- Created unit tests for image-processor, s3, signed-url services and service-auth middleware
+- Files created: test/unit/services/image-processor.test.ts, test/unit/services/s3.test.ts, test/unit/services/signed-url.test.ts, test/unit/middleware/service-auth.test.ts
+- 15 new tests, 29 total passing
+- **Learnings for future iterations:**
+  - Use `vi.hoisted()` to declare mock variables that are referenced inside `vi.mock()` factory functions — hoisted mocks execute before any `const` declarations
+  - For AWS SDK mocks: mock S3Client as `{ send: mockSend }`, mock command constructors to pass through params
+  - `getSignedUrl` from s3-request-presigner receives the instantiated command object (not the raw params), so assert `expect.anything()` for the command arg and focus on TTL assertion
+  - For service-auth tests, mock `env.js` to provide `SERVICE_AUTH_TOKEN` — the hook reads it at call time
+  - Sharp mock: return a chainable object with `resize().webp().toBuffer()` — mock `toBuffer` to reject for corrupt file test
+---
+
+## 2026-04-03 - US-015
+- Created integration test helpers and upload flow integration tests
+- Files created: test/integration/helpers.ts, test/integration/upload.test.ts
+- 13 tests covering POST /media/upload-url (4 tests), POST /media/confirm/:upload_id (5 tests), POST /media/upload (4 tests)
+- Tests skip gracefully when DATABASE_URL is not set (describe.skipIf pattern)
+- **Learnings for future iterations:**
+  - Integration test pattern: `warnIfSkipped()` → `setTestEnv()` → `mockJwksFetch()` → `vi.hoisted()` mocks → `vi.mock()` → dynamic `import()` inside `beforeAll`
+  - Use `vi.hoisted()` for S3 mock store (Map) so it's accessible both in `vi.mock()` factory and in test bodies
+  - After `vi.clearAllMocks()` in `beforeEach`, re-apply default mock implementations (clearAllMocks wipes them)
+  - Sign test JWTs using Node's `crypto.createSign('RSA-SHA256')` with a test RSA key pair — no extra deps needed
+  - Mock `globalThis.fetch` to intercept JWKS URL for `@ortho/auth-middleware` auth validation
+  - Multipart body for `app.inject()`: manually build boundary-delimited buffer with `Buffer.concat()`
+  - For confirm flow: after `POST /media/upload-url`, query DB for `original_key` and put test data in S3 mock store at `{bucket}/{original_key}`
+  - Sharp works with the base64 1x1 PNG test image — produces real WebP variants
+---
+
+## 2026-04-03 - US-016
+- Created integration tests for file routes (GET/DELETE /media/:file_id) and internal routes (POST /media/internal/store, GET /media/internal/:file_id/signed-url)
+- Files created: test/integration/files.test.ts (8 tests), test/integration/internal.test.ts (8 tests)
+- files.test.ts: public GET with CloudFront URLs + variants, 404 for deleted/unknown, private GET with presigned URLs, 403 on location_id mismatch, DELETE 204 for private matching location, DELETE 403 on mismatch, DELETE 403 for public files
+- internal.test.ts: store PDF with service token, 401 on bad/missing token, signed-url for private file, 400 for public file, 401 on bad token, 404 for deleted file
+- **Learnings for future iterations:**
+  - Use helper function `createReadyFile` via proxy upload (POST /media/upload) to create test fixtures — avoids duplicating S3 upload logic in tests
+  - For testing location_id access control, create file with one location_id (using auth header with matching location_id) and then request with a different location_id
+  - Internal routes use service auth token (Bearer test-service-token) not JWT — separate auth header helper needed
+  - `issuePrivateGetUrl` throws with `statusCode: 400` for public files — Fastify catches this and returns 400 automatically via @fastify/sensible
+  - Soft-deleting via direct DB query is needed for testing delete scenarios on public files (which can't be user-deleted via API)
+---
