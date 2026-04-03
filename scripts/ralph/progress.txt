@@ -131,3 +131,17 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Public files and files without location_id cannot be user-deleted (403) — only service token deletion (out of scope for this story)
   - Route registration follows same pattern: `fileRoutes(app, { knex })` called directly in app.ts
 ---
+
+## 2026-04-03 - US-011
+- Implemented POST /media/internal/store and GET /media/internal/:file_id/signed-url
+- Created src/routes/internal.ts with serviceAuthHook applied via addHook('preHandler') to all routes in the plugin
+- POST /media/internal/store: accepts multipart, uploads to S3, creates media_files row with uploaded_by=SERVICE_CALLER_ID, NO image processing
+- GET /media/internal/:file_id/signed-url: returns presigned URL for private files, 400 for public files
+- Registered internalRoutes in app.ts
+- Files changed: src/routes/internal.ts (new), src/app.ts
+- **Learnings for future iterations:**
+  - Use `app.addHook('preHandler', serviceAuthHook)` to apply service auth to all routes in a plugin scope
+  - Internal store uses `env.SERVICE_CALLER_ID` as uploaded_by instead of JWT sub
+  - Internal store does NOT process images — PDFs and other files stored as-is
+  - `issuePrivateGetUrl` from signed-url.ts handles the 400 error for public files (throws with statusCode:400)
+---
