@@ -65,3 +65,13 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - `buffer.length` gives sizeBytes for variant rows
   - Logger instantiated at module level: `createLogger('platform-media')`
 ---
+
+## 2026-04-03 - US-006
+- Implemented service auth middleware for /media/internal/* routes
+- Files created: src/middleware/service-auth.ts
+- **Learnings for future iterations:**
+  - Use `crypto.timingSafeEqual` with `Buffer.from()` for timing-safe token comparison
+  - Must check buffer lengths match before calling `timingSafeEqual` (throws on length mismatch)
+  - Hook signature is `async (request: FastifyRequest, reply: FastifyReply): Promise<void>` — send 401 and return early on failure
+  - This middleware is separate from @ortho/auth-middleware (JWT-based) — it's for service-to-service calls using a shared token
+---
