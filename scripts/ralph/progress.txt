@@ -8,6 +8,8 @@ Started: Fri Apr  3 11:10:48 UTC 2026
 - Follow identity service patterns: `buildApp(pool)` factory, `createLogger('platform-media')`, cast logger `as unknown as FastifyBaseLogger`
 - tsconfig uses `module: NodeNext` / `moduleResolution: NodeNext` (not ESNext/bundler) to match other services
 - All imports use `.js` extension for ESM compatibility (e.g. `./env.js`)
+- Repository functions are standalone exports (not class-based), with `knex: Knex` as first parameter and fully-qualified table names (`'platform_media.media_files'`)
+- PostgreSQL bigint columns come back as strings via Knex — type them as `string | null`
 
 ---
 
@@ -29,4 +31,15 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - knexfile.ts goes at service root (not inside migrations/) with searchPath pointing to service schema
   - Use `knex.raw('gen_random_uuid()')` for UUID defaults, not `uuid.v4()`
   - media_upload_intents.id IS the upload_id (PK, not auto-generated) — it links to media_files.upload_id
+---
+
+## 2026-04-03 - US-003
+- Implemented three repository modules: media-files, media-variants, upload-intents
+- Files created: src/repositories/media-files.ts, src/repositories/media-variants.ts, src/repositories/upload-intents.ts
+- **Learnings for future iterations:**
+  - Use function-based repositories (not class-based) with Knex passed as first parameter — matches PRD requirements
+  - Use fully-qualified table names with schema prefix: `'platform_media.media_files'`
+  - bigint columns from Postgres come back as strings in JS (Knex), so `file_size_bytes` and `size_bytes` are typed as `string | null` / `string`
+  - Use `.onConflict(['file_id', 'variant']).ignore()` for Knex ON CONFLICT DO NOTHING
+  - `deleteExpired` returns the number of deleted rows (Knex `.del()` returns count)
 ---
