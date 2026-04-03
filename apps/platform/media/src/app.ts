@@ -9,6 +9,7 @@ import type { Knex } from 'knex';
 import { env } from './env.js';
 import { uploadRoutes } from './routes/upload.js';
 import { fileRoutes } from './routes/files.js';
+import { internalRoutes } from './routes/internal.js';
 
 export async function buildApp(pool: Pool, knex: Knex): Promise<FastifyInstance> {
   const log = createLogger('platform-media');
@@ -33,6 +34,7 @@ export async function buildApp(pool: Pool, knex: Knex): Promise<FastifyInstance>
 
   await uploadRoutes(app, { knex });
   await fileRoutes(app, { knex });
+  await internalRoutes(app, { knex });
 
   return app;
 }
