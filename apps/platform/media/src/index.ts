@@ -12,9 +12,8 @@ const knex = knexLib({
 
 const app = await buildApp(pool, knex);
 
-// Cleanup job stub — will be implemented in a later story
-// import { registerCleanupJob } from './jobs/cleanup.js';
-// registerCleanupJob(knex);
+import { registerCleanupJob } from './jobs/cleanup.js';
+registerCleanupJob(knex);
 
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
 
