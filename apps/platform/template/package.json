@@ -11,7 +11,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "migrate": "npx tsx node_modules/knex/bin/cli.js migrate:latest --knexfile migrations/knexfile.ts"
   },
   "dependencies": {
     "@fastify/sensible": "^6.0.0",
