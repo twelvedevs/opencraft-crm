@@ -31,6 +31,10 @@ export async function findByUploadId(
   return (row as UploadIntent) ?? null;
 }
 
+export async function deleteById(knex: Knex, id: string): Promise<void> {
+  await knex(TABLE).where({ id }).del();
+}
+
 export async function deleteExpired(knex: Knex): Promise<number> {
   return knex(TABLE).where('expires_at', '<', knex.fn.now()).del();
 }

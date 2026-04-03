@@ -3,10 +3,12 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import type { Knex } from 'knex';
 import { env } from '../env.js';
-import { createPresignedPutUrl } from '../services/s3.js';
-import { derivePublicKey, derivePrivateKey } from '../lib/s3-key.js';
+import { createPresignedPutUrl, downloadFromS3, createPresignedGetUrl } from '../services/s3.js';
+import { derivePublicKey, derivePrivateKey, deriveVariantKey } from '../lib/s3-key.js';
 import * as mediaFilesRepo from '../repositories/media-files.js';
+import * as mediaVariantsRepo from '../repositories/media-variants.js';
 import * as uploadIntentsRepo from '../repositories/upload-intents.js';
+import { processImage, isImageMimeType } from '../services/image-processor.js';
 
 const UploadUrlBody = Type.Object({
   filename: Type.String(),
@@ -104,6 +106,118 @@ export async function uploadRoutes(
         upload_id: uploadId,
         upload_url: uploadUrl,
         expires_at: expiresAt.toISOString(),
+      });
+    },
+  );
+
+  app.post(
+    '/media/confirm/:upload_id',
+    async (request, reply) => {
+      const { upload_id } = request.params as { upload_id: string };
+      const userSub = (request as any).user.sub;
+
+      // Look up upload intent
+      const intent = await uploadIntentsRepo.findByUploadId(knex, upload_id);
+      if (!intent) {
+        return reply.status(404).send({ error: 'Upload intent not found' });
+      }
+
+      // Check expiry
+      if (intent.expires_at < new Date()) {
+        return reply.status(410).send({ error: 'Upload intent has expired' });
+      }
+
+      // Load media file
+      const file = await mediaFilesRepo.findByUploadId(knex, upload_id);
+      if (!file || file.status !== 'pending') {
+        return reply.status(404).send({ error: 'File not found or already confirmed' });
+      }
+
+      // Check ownership
+      if (file.uploaded_by !== userSub) {
+        return reply.status(403).send({ error: 'Forbidden' });
+      }
+
+      // Download original from S3
+      const bucket =
+        file.tier === 'public' ? env.S3_PUBLIC_BUCKET : env.S3_PRIVATE_BUCKET;
+
+      let buffer: Buffer;
+      try {
+        buffer = await downloadFromS3({ bucket, key: file.original_key });
+      } catch {
+        return reply.status(502).send({ error: 'Failed to download file from storage' });
+      }
+
+      // Process image variants if applicable
+      let variantRows: Array<{ variantName: 'medium' | 'thumb'; s3Key: string; widthPx: number; sizeBytes: number }> = [];
+      if (isImageMimeType(file.mime_type)) {
+        const result = await processImage(buffer, file.original_key, bucket);
+        variantRows = result.variants;
+      }
+
+      // Use transaction with conflict handling for double-tap protection
+      await knex.transaction(async (trx) => {
+        // Mark ready — use upload_id unique constraint to prevent double confirm
+        const updated = await trx('platform_media.media_files')
+          .where({ id: file.id, status: 'pending' })
+          .update({
+            status: 'ready',
+            file_size_bytes: buffer.length,
+            confirmed_at: new Date(),
+          });
+
+        if (updated === 0) {
+          // Another concurrent call already confirmed
+          return reply.status(404).send({ error: 'File not found or already confirmed' });
+        }
+
+        // Insert variants
+        for (const v of variantRows) {
+          await mediaVariantsRepo.insertVariant(trx, {
+            file_id: file.id,
+            variant: v.variantName,
+            s3_key: v.s3Key,
+            width_px: v.widthPx,
+            size_bytes: v.sizeBytes,
+          });
+        }
+
+        // Delete the upload intent
+        await uploadIntentsRepo.deleteById(trx, upload_id);
+      });
+
+      // Build URLs
+      const urls: Record<string, string> = {};
+      if (file.tier === 'public') {
+        urls.original = `${env.CLOUDFRONT_BASE_URL}/${file.original_key}`;
+      } else {
+        const signedOriginal = await createPresignedGetUrl({
+          bucket: env.S3_PRIVATE_BUCKET,
+          key: file.original_key,
+          ttlSeconds: env.PRESIGNED_GET_TTL_SECONDS,
+        });
+        urls.original = signedOriginal;
+      }
+
+      for (const v of variantRows) {
+        if (file.tier === 'public') {
+          urls[v.variantName] = `${env.CLOUDFRONT_BASE_URL}/${v.s3Key}`;
+        } else {
+          urls[v.variantName] = await createPresignedGetUrl({
+            bucket: env.S3_PRIVATE_BUCKET,
+            key: v.s3Key,
+            ttlSeconds: env.PRESIGNED_GET_TTL_SECONDS,
+          });
+        }
+      }
+
+      return reply.status(200).send({
+        file_id: file.id,
+        tier: file.tier,
+        urls,
+        location_id: file.location_id,
+        created_at: file.created_at,
       });
     },
   );
