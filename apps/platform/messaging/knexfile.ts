@@ -9,9 +9,6 @@ const config: Knex.Config = {
     schemaName: 'platform_messaging',
     tableName: 'knex_migrations',
   },
-  seeds: {
-    directory: './seeds',
-  },
 };
 
 export default config;
