@@ -118,3 +118,16 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - For proxy upload, create row as 'pending' first then update to 'ready' in same transaction (reuses createPending repo function)
   - `request.file()` returns the first file from multipart stream — fields must be sent before the file in the form data, or accessed via file.fields
 ---
+
+## 2026-04-03 - US-010
+- Implemented GET /media/:file_id and DELETE /media/:file_id routes with access control
+- Created src/routes/files.ts with fileRoutes(app, {knex}) pattern, registered in app.ts
+- GET returns full file metadata with URLs (CloudFront for public, presigned for private), includes variants
+- DELETE soft-deletes private files with matching location_id, returns 403 for public files or location_id mismatch
+- Files changed: src/routes/files.ts (new), src/app.ts
+- **Learnings for future iterations:**
+  - Access JWT location_id via `(request as any).user?.location_id` — same pattern as `.sub` for user identity
+  - `findById` already excludes deleted rows (WHERE deleted_at IS NULL), but AC also says return 404 for status='deleted' — belt-and-suspenders check
+  - Public files and files without location_id cannot be user-deleted (403) — only service token deletion (out of scope for this story)
+  - Route registration follows same pattern: `fileRoutes(app, { knex })` called directly in app.ts
+---
