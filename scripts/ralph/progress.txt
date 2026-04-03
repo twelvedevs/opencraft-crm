@@ -15,6 +15,9 @@ Started: Fri Apr  3 11:10:48 UTC 2026
 - Route registration pattern: `uploadRoutes(app, { knex })` called directly in app.ts (not via `app.register(import(...))`)
 - Access JWT user in routes via `(request as any).user.sub` — auth-middleware decorates `request.user`
 - Knex mock pattern for unit tests: `makeQueryBuilder()` with `vi.fn().mockReturnThis()` for chainable methods, `makeDb(qb)` wrapping as Knex type; mock `db.fn.now()` separately
+- Integration test pattern: `warnIfSkipped()` → `setTestEnv()` → `mockJwksFetch()` → `vi.hoisted()` + `vi.mock()` → dynamic import in `beforeAll`; `describe.skipIf(!process.env['DATABASE_URL'])`
+- After `vi.clearAllMocks()` in `beforeEach`, re-apply default mock implementations (clearAllMocks removes them)
+- Build multipart body for `app.inject()` manually with boundary-delimited `Buffer.concat()`
 
 ---
 
@@ -182,4 +185,20 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - `getSignedUrl` from s3-request-presigner receives the instantiated command object (not the raw params), so assert `expect.anything()` for the command arg and focus on TTL assertion
   - For service-auth tests, mock `env.js` to provide `SERVICE_AUTH_TOKEN` — the hook reads it at call time
   - Sharp mock: return a chainable object with `resize().webp().toBuffer()` — mock `toBuffer` to reject for corrupt file test
+---
+
+## 2026-04-03 - US-015
+- Created integration test helpers and upload flow integration tests
+- Files created: test/integration/helpers.ts, test/integration/upload.test.ts
+- 13 tests covering POST /media/upload-url (4 tests), POST /media/confirm/:upload_id (5 tests), POST /media/upload (4 tests)
+- Tests skip gracefully when DATABASE_URL is not set (describe.skipIf pattern)
+- **Learnings for future iterations:**
+  - Integration test pattern: `warnIfSkipped()` → `setTestEnv()` → `mockJwksFetch()` → `vi.hoisted()` mocks → `vi.mock()` → dynamic `import()` inside `beforeAll`
+  - Use `vi.hoisted()` for S3 mock store (Map) so it's accessible both in `vi.mock()` factory and in test bodies
+  - After `vi.clearAllMocks()` in `beforeEach`, re-apply default mock implementations (clearAllMocks wipes them)
+  - Sign test JWTs using Node's `crypto.createSign('RSA-SHA256')` with a test RSA key pair — no extra deps needed
+  - Mock `globalThis.fetch` to intercept JWKS URL for `@ortho/auth-middleware` auth validation
+  - Multipart body for `app.inject()`: manually build boundary-delimited buffer with `Buffer.concat()`
+  - For confirm flow: after `POST /media/upload-url`, query DB for `original_key` and put test data in S3 mock store at `{bucket}/{original_key}`
+  - Sharp works with the base64 1x1 PNG test image — produces real WebP variants
 ---
