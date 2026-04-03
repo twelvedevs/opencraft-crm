@@ -92,3 +92,16 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Use `knex.transaction(async (trx) => {...})` for multi-table inserts, pass `trx` to repo functions as the knex param
   - Extract file extension with `filename.substring(filename.lastIndexOf('.') + 1)` — handle no-extension case
 ---
+
+## 2026-04-03 - US-008
+- Implemented POST /media/confirm/:upload_id route for confirming uploads and processing image variants
+- Added `deleteById` function to upload-intents repository
+- Updated upload.ts imports to include downloadFromS3, createPresignedGetUrl, deriveVariantKey, mediaVariantsRepo, processImage, isImageMimeType
+- Files changed: src/routes/upload.ts, src/repositories/upload-intents.ts
+- **Learnings for future iterations:**
+  - Double-tap protection uses `WHERE status='pending'` in the UPDATE — if another call already set status='ready', the update returns 0 rows
+  - S3 download errors should return 502 (not 404) — wrapping downloadFromS3 in try/catch
+  - URL building: public tier uses `CLOUDFRONT_BASE_URL + '/' + key`, private tier uses presigned GET URL
+  - Variant URLs are only included in response when variants were actually produced (variantRows array from processImage)
+  - `deleteById` was added to upload-intents repo — wasn't needed before but confirm route needs to clean up the intent after success
+---
