@@ -43,3 +43,14 @@ Started: Fri Apr  3 11:10:48 UTC 2026
   - Use `.onConflict(['file_id', 'variant']).ignore()` for Knex ON CONFLICT DO NOTHING
   - `deleteExpired` returns the number of deleted rows (Knex `.del()` returns count)
 ---
+
+## 2026-04-03 - US-004
+- Implemented S3 service (upload, download, presigned PUT/GET), signed-URL service, and S3 key derivation helpers
+- Files created: src/lib/s3-key.ts, src/services/s3.ts, src/services/signed-url.ts
+- **Learnings for future iterations:**
+  - S3Client is instantiated once at module level using env.AWS_REGION
+  - `issuePrivateGetUrl` takes `(knex, file)` signature per AC even though knex is unused — keeps consistency with repo pattern
+  - `deriveVariantKey` replaces extension with `.webp` — important for image-processor to match
+  - Use `Object.assign(new Error(...), { statusCode: 400 })` for Fastify-compatible error throwing with @fastify/sensible
+  - `downloadFromS3` uses `response.Body!.transformToByteArray()` then `Buffer.from()` for AWS SDK v3 stream handling
+---
