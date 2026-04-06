@@ -124,3 +124,17 @@ Started: Mon Apr  6 14:06:40 UTC 2026
   - Same phone lookup pattern as message-delivered/message-failed but uses `from_number` instead of `to_number` (the lead is the sender for inbound messages)
   - Uses `payload.message_id` in fallback source_event_id, consistent with other message handlers
 ---
+
+## 2026-04-06 16:10 - US-011
+- Created three timeline-only handlers: `referral-converted.ts`, `sequence-step-completed.ts`, `workflow-triggered.ts`
+- Wired all three into event-worker.ts, replacing the last `noop` stubs; removed the now-unused `noop` handler
+- All three follow the simplest handler pattern: look up lead → insertActivity (no state or score changes)
+- `sequence-step-completed` and `workflow-triggered` check `entity_type !== 'lead'` and return early (no-op) for non-lead entities
+- `sequence-step-completed` and `workflow-triggered` use `actor_type: 'automation'` while `referral-converted` uses `actor_type: 'system'`
+- Files changed: `src/workers/handlers/referral-converted.ts` (new), `src/workers/handlers/sequence-step-completed.ts` (new), `src/workers/handlers/workflow-triggered.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - All 13 event handlers are now wired — `noop` stubs fully replaced
+  - Timeline-only handlers are the simplest pattern: findById → transaction → insertActivity
+  - `workflow.triggered` with non-lead entity_type returns silently (no warn log) per AC — this is expected behavior, not an error
+  - `sequence.step_completed` also returns silently for non-lead entities — consistent with workflow handler
+---
