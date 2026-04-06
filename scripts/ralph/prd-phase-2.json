@@ -1,0 +1,199 @@
+{
+  "project": "Ortho CRM — Lead Service (Phase 2: Dedup, Merge, Score, Events)",
+  "branchName": "feature/lead-service-phase-2",
+  "description": "Lead Service Phase 2 — adds deduplication on create, merge orchestration, score calculator, contact-status helper, event publishing for all HTTP mutations, and the dedup/merge route implementations",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "events/publisher.ts — 5 event publish functions + wire EventBus into app.ts and index.ts",
+      "description": "As a developer, I need the event publisher module and the EventBus instance wired into the Fastify app so that route handlers and services can publish events to EventBridge/Redis.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/events/publisher.ts created; imports EventBus from '@ortho/event-bus'",
+        "publishLeadCreated(bus: EventBus, payload: { lead_id: string, location_id: string, channel: string, current_pipeline: string, current_stage: string | null, referrer_id?: string, referrer_type?: string, referral_code?: string }): Promise<void> — calls bus.publish({ event_type: 'lead.created', entity_type: 'lead', entity_id: payload.lead_id, payload })",
+        "publishLeadUpdated(bus: EventBus, payload: { lead_id: string, location_id: string, changed_fields: string[] }): Promise<void> — calls bus.publish with event_type 'lead.updated'",
+        "publishLeadMerged(bus: EventBus, payload: { surviving_lead_id: string, merged_lead_id: string, location_id: string }): Promise<void> — entity_id: payload.surviving_lead_id",
+        "publishLeadArchived(bus: EventBus, payload: { lead_id: string, location_id: string }): Promise<void>",
+        "publishAppointmentUpdated(bus: EventBus, payload: { lead_id: string, appointment_id: string, appointment_type: string, scheduled_at: string, status: string, location_id: string }): Promise<void>",
+        "apps/crm/lead/src/app.ts updated: buildApp(db: Knex, eventBus: EventBus) now accepts eventBus as second param; decorates app with eventBus via app.decorate('eventBus', eventBus); passes { db, eventBus } as opts to all route plugins (leadsRoutes, appointmentRoutes, tagRoutes, activityRoutes)",
+        "apps/crm/lead/src/index.ts updated: imports createEventBus from '@ortho/event-bus'; const eventBus = createEventBus(); passes eventBus to buildApp; SIGTERM handler calls await eventBus.stop() before process.exit(0)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "scoring/score-calculator.ts — pure scoring function with all factors",
+      "description": "As a developer, I need a pure function that computes a lead's priority score (0–100) from the lead record and triggering event context, so that event handlers can recalculate score without any I/O.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/scoring/score-calculator.ts created",
+        "Exports STAGE_TIME_LIMITS constant: { new_lead: 2*60 (hours in minutes), contacted: 5*24*60, exam_scheduled: null (uses scheduled_at), exam_completed: 7*24*60, tx_presented: 14*24*60, lost: 30*24*60 } — times in minutes; in_treatment, in_retention stages have no urgency limit",
+        "Exports STAGE_VALUE_WEIGHTS constant: { tx_presented: 40, exam_completed: 30, exam_scheduled: 20, contacted: 10, new_lead: 5 } — base score contribution from stage",
+        "Exports ScoreParams type: { lead: { current_stage: string | null, current_pipeline: string, contact_status: string, last_activity_at: Date | null }, eventType: string, lastInboundAt?: Date | null, scheduledAt?: Date | null }",
+        "Exports calculateScore(params: ScoreParams): number — pure function, no I/O, no imports with side effects",
+        "Score starts at STAGE_VALUE_WEIGHTS[current_stage] ?? 0",
+        "Urgency boost: if stage has a time limit and time_remaining_minutes < 20% of limit_minutes → add 20 urgency points; for exam_scheduled: compare now() against scheduledAt (if past → boost)",
+        "Inbound engagement: if eventType === 'inbound_message.received' → add 15 points",
+        "Inbound age urgency: if lastInboundAt is provided and (now - lastInboundAt) > 3 days → add 10 points",
+        "contact_status penalties: 'sms_opted_out' → subtract 10; 'email_invalid' → subtract 10; 'fully_unreachable' → final score = Math.min(calculated, 5) (floor at 5)",
+        "Result clamped: Math.max(0, Math.min(100, score)) before fully_unreachable floor check",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "scoring/contact-status.ts — pure contact_status state machine",
+      "description": "As a developer, I need pure functions that compute contact_status transitions so that Phase 3 event handlers (opt_out, email bounce) can apply them without coupling the state machine to any specific handler.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/scoring/contact-status.ts created",
+        "Exports ContactStatus type: 'active' | 'sms_opted_out' | 'email_invalid' | 'fully_unreachable'",
+        "Exports applyOptOut(current: ContactStatus): ContactStatus — 'active' → 'sms_opted_out'; 'email_invalid' → 'fully_unreachable'; 'sms_opted_out' → 'sms_opted_out' (no-op); 'fully_unreachable' → 'fully_unreachable' (no-op)",
+        "Exports removeOptOut(current: ContactStatus): ContactStatus — 'sms_opted_out' → 'active'; 'fully_unreachable' → 'email_invalid'; 'active' → 'active' (no-op); 'email_invalid' → 'email_invalid' (no-op)",
+        "Exports applyHardBounce(current: ContactStatus): ContactStatus — 'active' → 'email_invalid'; 'sms_opted_out' → 'fully_unreachable'; 'email_invalid' → 'email_invalid' (no-op); 'fully_unreachable' → 'fully_unreachable' (no-op)",
+        "Soft bounces are NOT handled here — callers simply do not call applyHardBounce for soft bounces",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "lead-service.ts — add dedup check to createLead",
+      "description": "As a developer, I need createLead to check for phone, email, and ad_platform_lead_id duplicates before inserting, so that coordinators see flagged duplicates and ad platform leads are idempotent.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/services/lead-service.ts updated — createLead gains dedup logic before the insert call; no other functions changed in this story",
+        "Step 1 — ad_platform_lead_id idempotency: if data.ad_platform_lead_id is provided, call leadRepository.findByAdPlatformLeadId; if an existing lead is found, return it immediately without inserting (silently idempotent)",
+        "Step 2 — phone dedup: call leadRepository.findByPhone(db, normalizedPhone); collect all matches (non-archived, non-merged)",
+        "Step 3 — email dedup: if data.email is provided, call leadRepository.findByEmail(db, data.email); collect all matches",
+        "Step 4 — determine duplicate_status: if any phone or email matches found → set duplicate_status='flagged'; else duplicate_status='none'",
+        "Step 5 — determine duplicate_of_id: if flagged, find the oldest lead (by created_at) across all phone + email matches → set duplicate_of_id to that lead's id; if none, duplicate_of_id=null",
+        "Step 6 — insert lead with the determined duplicate_status and duplicate_of_id (lead is ALWAYS created, never blocked by dedup)",
+        "Note: even if duplicate_status='flagged', the lead is created and lead.created event will be published (in a later story)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Wire publisher + timeline entries into lead-service.ts and appointment-service.ts",
+      "description": "As a developer, I need all HTTP-originated mutations (lead create/update/archive, appointment create/update) to publish events and write timeline entries, so that downstream consumers and the activity feed reflect these operations.",
+      "acceptanceCriteria": [
+        "lead-service.ts: createLead, updateLead, archiveLead each accept eventBus: EventBus as an additional parameter",
+        "createLead: after successful insert → (a) call activityRepository.insertActivity with source_event_id='internal:lead.created:{lead.id}', event_type='lead.created', actor_type='staff', actor_id=createdBy (new param), payload=lead object, occurred_at=lead.created_at; (b) call publishLeadCreated with lead fields; both calls are fire-and-don't-block (await them, but DB failure in activity insert should not throw — wrap in try/catch + log warning)",
+        "updateLead: after successful update → (a) compute changed_fields array as the keys of the fields argument; (b) call activityRepository.insertActivity with source_event_id='internal:lead.updated:{lead.id}:{updated_at.toISOString()}', event_type='lead.updated', payload={ changed_fields }; (c) call publishLeadUpdated with { lead_id, location_id, changed_fields }",
+        "archiveLead: after successful update → (a) call activityRepository.insertActivity with source_event_id='internal:lead.archived:{lead.id}', event_type='lead.archived', actor_type='staff', payload={}; ON CONFLICT DO NOTHING is already on insertActivity so this is safe; (b) call publishLeadArchived with { lead_id, location_id }",
+        "appointment-service.ts: createAppointment and updateAppointment each accept eventBus: EventBus as additional parameter",
+        "createAppointment: after insert → call publishAppointmentUpdated with appointment fields and status='scheduled'",
+        "updateAppointment: after update → if status was included in the update fields, call publishAppointmentUpdated with new status; if status not changed, do not publish",
+        "Route handlers in routes/leads.ts and routes/appointments.ts updated to pass opts.eventBus to the service calls that now require it",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "merge-service.ts — full merge orchestration with Pipeline Engine call",
+      "description": "As a developer, I need the merge service that executes all 7 merge steps including the Pipeline Engine stage transition call, so that coordinators can merge duplicate leads atomically.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/services/merge-service.ts created",
+        "Exports mergeLeads(db: Knex, eventBus: EventBus, survivingLeadId: string, mergeLeadId: string, winningStage: string, mergedBy: string, userLocations: string[]): Promise<Lead>",
+        "Step 1 — validate: fetch both leads via leadRepository.findById; throw 404-tagged error if either not found; throw 400-tagged error if either has merged_into_id set (already merged); throw 403-tagged error if either lead's location_id is not in userLocations (unless userLocations is empty — super_admin bypass)",
+        "Step 2 — Pipeline Engine call: if winningStage !== survivingLead.current_stage → call Pipeline Engine via fetch: POST env.PIPELINE_ENGINE_URL + '/pipeline/leads/' + survivingLeadId + '/transition' with JSON body { stage: winningStage, reason: 'merge' } and Authorization: Bearer SERVICE_AUTH_TOKEN header; set fetch signal to AbortSignal.timeout(5000) (5s timeout); if fetch throws (network error or timeout) OR response.ok is false → throw a 503-tagged error with message 'pipeline engine unreachable or rejected transition'; NO DB state is written before this call succeeds",
+        "Steps 3–7 executed in a single knex.transaction: (3) copy all lead_activities rows from mergeLeadId to survivingLeadId — INSERT INTO lead_activities (id, lead_id, event_type, actor_type, actor_id, payload, occurred_at, source_event_id) SELECT gen_random_uuid(), $survivingLeadId, event_type, actor_type, actor_id, payload, occurred_at, source_event_id FROM lead_activities WHERE lead_id=$mergeLeadId ON CONFLICT (source_event_id) DO NOTHING; (4) copy lead_tags from merged lead not already on surviving lead — INSERT INTO lead_tags (lead_id, tag_id, applied_by, applied_at) SELECT $survivingLeadId, tag_id, applied_by, applied_at FROM lead_tags WHERE lead_id=$mergeLeadId ON CONFLICT DO NOTHING; (5) update merged lead: SET merged_into_id=$survivingLeadId, archived_at=now(), updated_at=now() WHERE id=$mergeLeadId; (6) insert lead_merges row with surviving_lead_id, merged_lead_id, merged_lead_location_id=mergedLead.location_id, merged_by, merged_at=now(), stage_chosen=winningStage; (7) insert activity for surviving lead: source_event_id='internal:lead.merged:{survivingLeadId}:{mergeLeadId}', event_type='lead.merged', actor_type='staff', actor_id=mergedBy, payload={ merged_lead_id: mergeLeadId }",
+        "After transaction: call publishLeadMerged(eventBus, { surviving_lead_id, merged_lead_id, location_id: survivingLead.location_id })",
+        "Returns the surviving lead (re-fetched after transaction via leadRepository.findById)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Routes: GET /leads/duplicates (real implementation) + PATCH /leads/:id/duplicate-status + lead-repository findFlaggedDuplicates",
+      "description": "As a coordinator, I want a paginated list of flagged duplicate leads scoped to my locations, and the ability to resolve a duplicate flag when I've confirmed two leads are different people.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/repositories/lead-repository.ts: add findFlaggedDuplicates(db: Knex, locationIds: string[], cursor?: string, limit?: number): Promise<{ leads: Lead[], nextCursor: string | null }> — WHERE duplicate_status='flagged' AND archived_at IS NULL AND merged_into_id IS NULL + location scoping (same pattern as listLeads); sorted created_at DESC, id DESC; keyset cursor encodes { lastSeenId, lastSeenCreatedAt }; default limit 50, max 200",
+        "apps/crm/lead/src/routes/leads.ts: replace the GET /leads/duplicates stub with real implementation — calls leadRepository.findFlaggedDuplicates(db, req.user.locations, cursor, limit); returns 200 { leads, nextCursor }",
+        "apps/crm/lead/src/routes/leads.ts: add PATCH /leads/:id/duplicate-status — TypeBox body schema { status: Type.Literal('resolved') }; fetches lead via leadRepository.findById (404 if not found); calls leadRepository.updateLead(db, id, { duplicate_status: 'resolved', duplicate_of_id: null }); returns 200 with updated lead",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Route: POST /leads/:id/merge",
+      "description": "As a coordinator, I want to merge a duplicate lead into a surviving lead, with the Pipeline Engine called when stage differs, so that lead history is consolidated and the stage is correct.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/routes/leads.ts: add POST /leads/:id/merge",
+        "TypeBox body schema: { merge_lead_id: Type.String({ format: 'uuid' }), winning_stage: Type.String() }",
+        "Route handler calls mergeService.mergeLeads(db, eventBus, req.params.id, body.merge_lead_id, body.winning_stage, req.user.id, req.user.locations)",
+        "On 404-tagged error from mergeService → reply 404 { error: 'lead not found' }",
+        "On 400-tagged error (already merged) → reply 400 { error: 'lead already merged' }",
+        "On 403-tagged error (location access) → reply 403 { error: 'access denied' }",
+        "On 503-tagged error (Pipeline Engine) → reply 503 { error: 'pipeline engine unreachable or rejected transition' }",
+        "On success → reply 200 with surviving lead object",
+        "mergeService imported and passed { db, eventBus } via route plugin opts",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Unit tests — score-calculator.test.ts + contact-status.test.ts",
+      "description": "As a developer, I want unit tests for the two pure scoring modules, so that the scoring logic and contact_status state machine are verified without any infrastructure dependencies.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/unit/score-calculator.test.ts: all tests use calculateScore with no mocking (pure function); test stage value weight applied correctly for tx_presented vs new_lead; test urgency boost when time remaining < 20% of stage limit; test no urgency boost when time remaining > 20%; test inbound_message.received event type adds 15 points; test lastInboundAt > 3 days ago adds 10 inbound-age urgency points; test sms_opted_out subtracts 10; test email_invalid subtracts 10; test fully_unreachable floors result at 5 regardless of other factors; test result never exceeds 100; test result never goes below 0 (fully_unreachable floor excepted)",
+        "apps/crm/lead/test/unit/contact-status.test.ts: tests all transitions for applyOptOut: active→sms_opted_out, email_invalid→fully_unreachable, sms_opted_out→sms_opted_out (no-op), fully_unreachable→fully_unreachable (no-op); tests all transitions for removeOptOut: sms_opted_out→active, fully_unreachable→email_invalid, active→active (no-op), email_invalid→email_invalid (no-op); tests all transitions for applyHardBounce: active→email_invalid, sms_opted_out→fully_unreachable, email_invalid→email_invalid (no-op), fully_unreachable→fully_unreachable (no-op)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Unit tests — dedup.test.ts + merge-service.test.ts",
+      "description": "As a developer, I want unit tests for the dedup logic and merge service with all dependencies mocked, so that these business-critical flows are verified in isolation.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/unit/dedup.test.ts: mock leadRepository via vi.mock; test: ad_platform_lead_id match returns existing lead and calls no insert; phone match creates new lead with duplicate_status='flagged' and duplicate_of_id pointing to oldest match; email match (case-insensitive) creates new lead with duplicate_status='flagged'; both phone and email match uses oldest lead across both sets as duplicate_of_id; no match creates lead with duplicate_status='none' and duplicate_of_id=null; lead is ALWAYS inserted even when flagged",
+        "apps/crm/lead/test/unit/merge-service.test.ts: mock leadRepository, activityRepository, publishLeadMerged, and global fetch via vi.fn(); test: Pipeline Engine called when winningStage !== current_stage; Pipeline Engine error → throws 503-tagged error, no DB writes executed; Pipeline Engine timeout (fetch AbortSignal) → throws 503-tagged error; Pipeline Engine not called when winningStage === current_stage; happy path — all 7 steps execute in transaction, publishLeadMerged called after commit; surviving lead not found → throws 404-tagged error; merge lead already merged (merged_into_id set) → throws 400-tagged error; location access denied (neither lead in userLocations) → throws 403-tagged error",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Integration tests — dedup scenarios + merge + duplicate-status routes",
+      "description": "As a developer, I want integration tests for all Phase 2 features running against a real PostgreSQL test database, so that deduplication, merge orchestration, and status resolution are verified end-to-end.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/integration/leads.test.ts extended (or new dedup.test.ts): POST /leads with phone matching existing lead → 201, response body has duplicate_status='flagged', duplicate_of_id set to oldest match id; POST /leads with same ad_platform_lead_id as existing lead → returns existing lead without duplicate insert (verify only 1 row in DB); POST /leads with no match → duplicate_status='none'",
+        "GET /leads/duplicates: after creating a flagged lead → returns it in the list; after resolving → does not return it; pagination cursor works correctly across pages of duplicates",
+        "PATCH /leads/:id/duplicate-status: body { status: 'resolved' } → 200 with duplicate_status='resolved' and duplicate_of_id=null; unknown id → 404; wrong body shape → 400 from TypeBox",
+        "POST /leads/:id/merge integration tests: set up two leads (lead A = surviving, lead B = merge); use nock (or native http mock via vi.spyOn on global fetch) to mock Pipeline Engine POST returning 200; call POST /leads/leadA.id/merge with { merge_lead_id: leadB.id, winning_stage: leadA.current_stage }; assert: response 200 with surviving lead; lead B has archived_at set and merged_into_id=leadA.id; lead_merges row exists; activities from lead B copied to lead A; POST /leads/:id/merge with Pipeline Engine mock returning 500 → response 503; POST /leads/:id/merge where merge_lead_id is already merged → response 400",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
