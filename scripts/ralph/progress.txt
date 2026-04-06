@@ -9,6 +9,7 @@
 - Handler pattern for stateful updates: findById → db.transaction → update fields → findLastInboundAt → calculateScore → update score → insertActivity
 - Phone lookup handler pattern: normalizePhone (warn+return on fail) → findByPhone (warn+return if empty) → take `leads[0]` → db.transaction with status/score/activity updates
 - Cast `lead.contact_status as ContactStatus` when passing to applyOptOut/removeOptOut/applyHardBounce
+- Handler unit test mock pattern: vi.mock repos + score-calculator, mockTrx with `.raw`/`.fn`, db with `{ transaction: cb => cb(mockTrx) }`, use `callOrder[]` array for verifying execution order
 
 # Ralph Progress Log
 Started: Mon Apr  6 14:06:40 UTC 2026
@@ -137,4 +138,15 @@ Started: Mon Apr  6 14:06:40 UTC 2026
   - Timeline-only handlers are the simplest pattern: findById → transaction → insertActivity
   - `workflow.triggered` with non-lead entity_type returns silently (no warn log) per AC — this is expected behavior, not an error
   - `sequence.step_completed` also returns silently for non-lead entities — consistent with workflow handler
+---
+
+## 2026-04-06 16:16 - US-012
+- Created unit tests for 4 complex handlers: ad-lead-received (8 tests), stage-changed (6 tests), lead-archived (6 tests), lead-converted (5 tests) — 25 tests total
+- Tests cover: idempotency (existing ad_platform_lead_id skips), invalid phone early return, lead-not-found early return, correct channel mapping (google/facebook/meta), duplicate_status flagging, score recalculation with updated values, transaction ordering (activity before state in lead-converted), ON CONFLICT skip tolerance, no calculateScore call in lead-converted
+- Files changed: `test/unit/handlers/ad-lead-received.test.ts` (new), `test/unit/handlers/stage-changed.test.ts` (new), `test/unit/handlers/lead-archived.test.ts` (new), `test/unit/handlers/lead-converted.test.ts` (new)
+- **Learnings for future iterations:**
+  - Mock pattern for handler tests: vi.mock repositories + score-calculator at top, create mockTrx with `.raw` and `.fn` properties, create db with `{ transaction: vi.fn().mockImplementation(cb => cb(mockTrx)) }`
+  - To test call order within transactions, use mock implementations that push to a shared `callOrder[]` array, then assert the array order
+  - `mockTrx.raw` is accessed as `(mockTrx as unknown as Record<string, unknown>).raw` due to TypeScript typing
+  - Handler tests don't need to mock `@ortho/logger` — the logger module works fine without mocking
 ---
