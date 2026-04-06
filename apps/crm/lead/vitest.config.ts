@@ -8,5 +8,6 @@ export default defineConfig({
         singleFork: true,
       },
     },
+    setupFiles: ['./test/integration/setup.ts'],
   },
 });

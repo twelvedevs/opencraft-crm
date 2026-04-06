@@ -25,6 +25,16 @@ Started: Mon Apr  6 09:30:41 UTC 2026
 - `requireRole(['role1', 'role2'])` from @ortho/auth-middleware for preHandler role checks; manager+ = `['call_center_manager', 'marketing_staff', 'marketing_manager', 'super_admin']`
 - Import bare `'@ortho/auth-middleware'` in route files to get `req.user` type augmentation
 - Register literal path routes BEFORE parameterized routes in Fastify (e.g., `/leads/duplicates` before `/leads/:id`)
+- For service-auth-only routes (no JWT), use `config: { skipAuth: true }` + `preHandler: [serviceAuthHook]`
+- JwtPayload uses `sub` for user ID — access via `req.user!.sub`
+- Unit test Knex mock: `makeQueryBuilder()` with `.mockReturnThis()` chains + `makeDb(qb)` wrapping as `vi.fn().mockReturnValue(qb)` + `db.fn.now()` mock
+- For repo functions using `.then(cb)`, mock as `vi.fn((_cb) => Promise.resolve(_cb(data)))`
+- Must `vi.mock` env.js before importing modules that use it at module level
+- libphonenumber-js rejects 555 numbers — use real area codes (e.g., 212) in tests
+- Integration test env: use vitest `setupFiles` to set `process.env` before ESM imports trigger env.ts
+- Integration test auth: generate RSA keypair, mock `global.fetch` for JWKS, sign with `createSigner` from fast-jwt
+- Integration test DB skip: `describe.skipIf(!HAS_DB)` to gracefully skip when no PostgreSQL available
+- Integration test isolation: `truncateTables()` with TRUNCATE CASCADE in `beforeEach`
 ---
 
 ## 2026-04-06 - US-001
@@ -156,4 +166,94 @@ Started: Mon Apr  6 09:30:41 UTC 2026
   - TypeBox array in querystring: `Type.Optional(Type.Array(Type.String()))` — Fastify parses repeated query params into arrays
   - For location scoping in list endpoints: prefer explicit `location_id` query param when provided, fall back to `req.user.locations`
   - Bulk lookup routes return `{ leads }` without `nextCursor` field — different shape from paginated response `{ leads, nextCursor }`
+---
+
+## 2026-04-06 - US-010
+- Created apps/crm/lead/src/routes/appointments.ts with POST, GET, PATCH, DELETE endpoints for lead appointments
+- Registered appointmentRoutes in app.ts
+- Added `skipAuth` route config support to @ortho/auth-middleware authPlugin for internal service-auth-only routes
+- DELETE /leads/:id/appointments/:appt_id uses `config: { skipAuth: true }` + serviceAuthHook preHandler (SERVICE_AUTH_TOKEN only, no JWT)
+- POST creates appointment via appointmentService, returns 201; 404 if lead not found
+- PATCH updates appointment fields, returns 200; 404 if not found or lead mismatch
+- DELETE checks appointment exists (404 if not), then hard deletes; 401 if service token missing/invalid
+- GET lists appointments for a lead
+- Files changed: 1 new file (routes/appointments.ts), 2 modified (app.ts, auth-middleware/plugin.ts)
+- **Learnings for future iterations:**
+  - JwtPayload has `sub` not `id` — use `req.user!.sub` for the user identifier
+  - The authPlugin onRequest hook runs before route preHandlers — service-auth-only routes need `config: { skipAuth: true }` to bypass JWT validation
+  - Added `skipAuth` support to auth-middleware via `req.routeOptions.config` check — cast through `unknown` to avoid TS overlap error
+  - DELETE endpoint for appointments checks existence via repository before calling service delete (repository delete is silent on missing rows)
+---
+
+## 2026-04-06 - US-011
+- Created apps/crm/lead/src/routes/tags.ts with GET /tags, POST /tags, DELETE /tags/:id, POST /leads/:id/tags, DELETE /leads/:id/tags/:tag_id
+- Registered tagRoutes in app.ts
+- POST /tags requires marketing_manager or super_admin role, catches PostgreSQL unique constraint error (code 23505) → 409
+- DELETE /tags/:id requires marketing_manager+ role, checks tag exists first → 404 if not found
+- POST /leads/:id/tags validates both lead and tag exist → 404 if either missing
+- Files changed: 1 new file (routes/tags.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - PostgreSQL unique constraint violation error code is '23505' — check `(err as { code: string }).code` after type narrowing
+  - Tag management roles are narrower than lead management: `['marketing_manager', 'super_admin']` vs the broader manager+ array
+  - For POST /leads/:id/tags, validate both lead and tag exist before applying — applyTagToLead would silently succeed even if tag doesn't exist (ON CONFLICT DO NOTHING)
+---
+
+## 2026-04-06 - US-012
+- Created apps/crm/lead/src/routes/activities.ts with GET /leads/:id/activities and GET /leads/:id/score-commentary
+- Registered activityRoutes in app.ts
+- GET /leads/:id/activities: validates lead exists (404), delegates to activityRepository.listActivities with eventTypes/cursor/limit params
+- GET /leads/:id/score-commentary: validates lead exists, calls AI Service POST /ai/complete with prompt_id + lead context, returns { score, commentary }; catches fetch errors and non-2xx → 503
+- Files changed: 1 new file (routes/activities.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - Node 24 has global `fetch` — no need to import from node-fetch or undici
+  - AI Service call pattern: POST `env.AI_SERVICE_URL + '/ai/complete'` with `{ prompt_id, context }` body
+  - For external service calls, wrap in try/catch and return 503 on any failure (network error or non-2xx)
+  - Cast `response.json()` with `as { commentary: string }` for the AI service response shape
+---
+
+## 2026-04-06 - US-013
+- Created unit tests for all 4 repository modules using mocked Knex query builders
+- 48 tests total: lead-repository (24), tag-repository (9), activity-repository (9), appointment-repository (6)
+- Files changed: 4 new files in test/unit/repositories/
+- **Learnings for future iterations:**
+  - Mock Knex pattern: `makeQueryBuilder()` returns chainable mock (`.mockReturnThis()` for chain methods, `.mockResolvedValue()` for terminal), `makeDb()` wraps as `vi.fn().mockReturnValue(qb)` with `db.fn.now()` mock
+  - For `.then()` callbacks (used by repository functions returning `query.then(cb)`), mock as `vi.fn((_cb) => Promise.resolve(_cb(data)))`
+  - For `where(function(this) {...})` pattern (tag-repository), mock `where` with `mockImplementation` that calls the callback with an inner builder
+  - Must `vi.mock('../../../src/env.js')` before importing lead-repository since it imports `env` at module level
+  - Cursor round-trip test: encode via `listLeads` with limit < rows, decode with `Buffer.from(cursor, 'base64')` and parse JSON
+---
+
+## 2026-04-06 - US-014
+- Created unit tests for all 3 service modules and service-auth middleware
+- lead-service.test.ts (16 tests): normalizePhone, createLead defaults, updateLead attribution rejection + phone normalization, archiveLead, listLeads location pass-through
+- appointment-service.test.ts (7 tests): createAppointment (lead exists / not found), updateAppointment (exists / not found / lead mismatch), deleteAppointment, listAppointments
+- tag-service.test.ts (6 tests): listTags, createTag, deleteTag, applyTagToLead, removeTagFromLead
+- service-auth.test.ts (5 tests): valid token passes, missing header 401, non-Bearer 401, wrong token 401, different-length token 401
+- 82 total tests passing (34 new + 48 existing)
+- Files changed: 4 new files in test/unit/services/ and test/unit/middleware/
+- **Learnings for future iterations:**
+  - libphonenumber-js rejects 555 area code numbers as invalid — use real area codes like 212 for test phone numbers
+  - libphonenumber-js throws 'NOT_A_NUMBER' (not 'invalid phone number') for completely non-numeric input — the service wraps this with its own error message
+  - Service mocking pattern: `vi.mock('../../../src/repositories/<repo>.js', () => ({ fn1: vi.fn(), fn2: vi.fn() }))` then `vi.mocked(repo.fn)` for type-safe mock setup
+  - service-auth.test.ts needs `vi.mock('../../../src/env.js')` to provide SERVICE_AUTH_TOKEN
+  - For middleware tests, minimal mock objects (`{ headers: { authorization } }` for request, `{ code, send }` for reply) are sufficient
+---
+
+## 2026-04-06 - US-015
+- Created integration test helpers (helpers.ts, setup.ts) and leads route integration tests (leads.test.ts)
+- helpers.ts: RSA keypair generation for test JWT signing, mock JWKS fetch, buildTestApp(), runMigrations(), cleanup(), truncateTables(), makeJwt()
+- setup.ts: vitest setup file that sets required env vars before any module imports
+- leads.test.ts: 22 tests covering POST/GET/PATCH/DELETE /leads, GET /leads list with filters, bulk lookups, pagination, trigram search
+- Tests use `describe.skipIf(!HAS_DB)` to gracefully skip when no PostgreSQL is available
+- Added fast-jwt ^6.1.0 as dev dependency for test JWT signing
+- Updated vitest.config.ts with setupFiles for integration test env vars
+- Files changed: 3 new files (test/integration/helpers.ts, setup.ts, leads.test.ts), 2 modified (vitest.config.ts, package.json)
+- **Learnings for future iterations:**
+  - ESM import hoisting means `process.env` must be set in a vitest `setupFiles` entry, not inline before imports
+  - Auth plugin integration test pattern: generate RSA keypair, mock global.fetch for JWKS endpoint, sign JWTs with createSigner from fast-jwt
+  - Use `describe.skipIf(!HAS_DB)` pattern for DB-dependent integration tests — allows tests to pass in CI without DB
+  - HAS_DB check: compare against dummy fallback URL to distinguish real DB from the setup default
+  - Fastify `app.inject()` is the preferred way to test routes without starting a real HTTP server
+  - `truncateTables()` in `beforeEach` ensures test isolation — TRUNCATE CASCADE handles FK dependencies
+  - Integration tests need the full app with all route plugins registered (not just the one under test) because shared middleware/hooks
 ---
