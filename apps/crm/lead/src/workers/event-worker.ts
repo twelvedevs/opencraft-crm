@@ -11,6 +11,9 @@ import { handleEmailBounced } from './handlers/email-bounced.js';
 import { handleMessageDelivered } from './handlers/message-delivered.js';
 import { handleMessageFailed } from './handlers/message-failed.js';
 import { handleInboundMessageReceived } from './handlers/inbound-message-received.js';
+import { handleReferralConverted } from './handlers/referral-converted.js';
+import { handleSequenceStepCompleted } from './handlers/sequence-step-completed.js';
+import { handleWorkflowTriggered } from './handlers/workflow-triggered.js';
 
 const log = createLogger('crm-lead');
 
@@ -35,9 +38,6 @@ function wrapHandler(
 export function createEventWorker(db: Knex): { start: () => Promise<void>; stop: () => Promise<void> } {
   const bus = createEventBus();
 
-  // Stub handlers — real implementations added in US-004 through US-011
-  const noop: Handler = async () => {};
-
   // 13 subscriptions in specified order
   // ad_lead.received is the only handler that receives bus as 3rd argument
   wrapHandler(bus, 'ad_lead.received', handleAdLeadReceived as Handler, db, bus);
@@ -50,9 +50,9 @@ export function createEventWorker(db: Knex): { start: () => Promise<void>; stop:
   wrapHandler(bus, 'message.delivered', handleMessageDelivered, db);
   wrapHandler(bus, 'message.failed', handleMessageFailed, db);
   wrapHandler(bus, 'inbound_message.received', handleInboundMessageReceived, db);
-  wrapHandler(bus, 'referral.converted', noop, db);
-  wrapHandler(bus, 'sequence.step_completed', noop, db);
-  wrapHandler(bus, 'workflow.triggered', noop, db);
+  wrapHandler(bus, 'referral.converted', handleReferralConverted, db);
+  wrapHandler(bus, 'sequence.step_completed', handleSequenceStepCompleted, db);
+  wrapHandler(bus, 'workflow.triggered', handleWorkflowTriggered, db);
 
   return {
     start: () => bus.start(),
