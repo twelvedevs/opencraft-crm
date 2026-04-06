@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import { createEventBus, type EventBus, type OrthoEvent } from '@ortho/event-bus';
 import { createLogger } from '@ortho/logger';
+import { handleAdLeadReceived } from './handlers/ad-lead-received.js';
 
 const log = createLogger('crm-lead');
 
@@ -25,12 +26,12 @@ function wrapHandler(
 export function createEventWorker(db: Knex): { start: () => Promise<void>; stop: () => Promise<void> } {
   const bus = createEventBus();
 
-  // Stub handlers — real implementations added in US-003 through US-011
+  // Stub handlers — real implementations added in US-004 through US-011
   const noop: Handler = async () => {};
 
   // 13 subscriptions in specified order
   // ad_lead.received is the only handler that receives bus as 3rd argument
-  wrapHandler(bus, 'ad_lead.received', noop, db, bus);
+  wrapHandler(bus, 'ad_lead.received', handleAdLeadReceived as Handler, db, bus);
   wrapHandler(bus, 'lead.stage_changed', noop, db);
   wrapHandler(bus, 'lead.archived', noop, db);
   wrapHandler(bus, 'lead.converted', noop, db);
