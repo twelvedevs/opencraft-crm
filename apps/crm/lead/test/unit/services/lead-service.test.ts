@@ -6,6 +6,9 @@ vi.mock('../../../src/repositories/lead-repository.js', () => ({
   updateLead: vi.fn(),
   archiveLead: vi.fn(),
   listLeads: vi.fn(),
+  findByPhone: vi.fn(),
+  findByEmail: vi.fn(),
+  findByAdPlatformLeadId: vi.fn(),
 }));
 
 import type { Knex } from 'knex';
@@ -81,6 +84,12 @@ describe('normalizePhone', () => {
 });
 
 describe('createLead', () => {
+  beforeEach(() => {
+    vi.mocked(leadRepository.findByPhone).mockResolvedValue([]);
+    vi.mocked(leadRepository.findByEmail).mockResolvedValue([]);
+    vi.mocked(leadRepository.findByAdPlatformLeadId).mockResolvedValue(null);
+  });
+
   it('sets score=0, contact_status=active, duplicate_status=none', async () => {
     vi.mocked(leadRepository.createLead).mockResolvedValue(fakeLead);
 

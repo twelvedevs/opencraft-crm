@@ -73,13 +73,47 @@ export function normalizePhone(phone: string): string {
 
 export async function createLead(db: Knex, data: CreateLeadInput): Promise<Lead> {
   const phone = normalizePhone(data.phone);
+
+  // Step 1 — ad_platform_lead_id idempotency
+  if (data.ad_platform_lead_id) {
+    const existing = await leadRepository.findByAdPlatformLeadId(db, data.ad_platform_lead_id);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  // Step 2 — phone dedup
+  const phoneMatches = await leadRepository.findByPhone(db, phone);
+
+  // Step 3 — email dedup
+  const emailMatches = data.email
+    ? await leadRepository.findByEmail(db, data.email)
+    : [];
+
+  // Step 4 — determine duplicate_status
+  const allMatches = [...phoneMatches, ...emailMatches];
+  const duplicate_status = allMatches.length > 0 ? 'flagged' : 'none';
+
+  // Step 5 — determine duplicate_of_id (oldest match by created_at)
+  let duplicate_of_id: string | null = null;
+  if (allMatches.length > 0) {
+    // Deduplicate by id in case same lead matched on both phone and email
+    const uniqueMatches = new Map(allMatches.map((l) => [l.id, l]));
+    const oldest = [...uniqueMatches.values()].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    )[0];
+    duplicate_of_id = oldest.id;
+  }
+
+  // Step 6 — insert lead with dedup fields
   return leadRepository.createLead(db, {
     ...data,
     phone,
     score: 0,
     current_pipeline: 'none',
     contact_status: 'active',
-    duplicate_status: 'none',
+    duplicate_status,
+    duplicate_of_id,
   });
 }
 
