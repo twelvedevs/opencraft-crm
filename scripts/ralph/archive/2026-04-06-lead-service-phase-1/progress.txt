@@ -1,0 +1,274 @@
+# Ralph Progress Log
+Started: Mon Apr  6 09:30:41 UTC 2026
+---
+
+## Codebase Patterns
+- Use `required()`/`optional()` helper pattern in env.ts for env var parsing
+- `buildApp()` is async, returns FastifyInstance; registers sensible + authPlugin
+- db.ts exports default knex instance + `destroy()` function
+- index.ts uses top-level await for `buildApp()` and `app.listen()`
+- SIGTERM handler: `app.close()` → `destroy()` → `process.exit(0)`
+- vitest.config.ts uses `pool: 'forks'` with `singleFork: true`
+- Schema searchPath pattern: `['<schema_name>', 'public']`
+- knexfile.ts: `migrations.directory = './migrations'`, `schemaName` for tracking table, `loadExtensions: ['.ts']`
+- Migrations: use `withSchema()` for table creation, `knex.raw()` for CHECK constraints and advanced indexes
+- GIN trigram: expression indexes need double parens `USING gin ((expr) gin_trgm_ops)`
+- Auth middleware: `authPlugin({ jwksUrl, allowedPaths })` — allowedPaths skip JWT validation
+- Logger: `createLogger('<service-name>')` returns pino instance, cast to `FastifyBaseLogger`
+- Repository functions: standalone exports (not class), `db: Knex` as first arg, use fully qualified table names (`crm_leads.leads`)
+- Cursor pagination: base64 JSON `{ lastSeenId, lastSeenSortValue }`, fetch `limit+1` rows, pop last to detect next page
+- Qualify columns with table prefix when JOINs are involved (e.g., `crm_leads.leads.id`)
+- Service functions: standalone exports, `db: Knex` first arg, wrap repository calls with business logic
+- parsePhoneNumber from libphonenumber-js: use 'US' default region, check `.isValid()`, format with `.format('E.164')`
+- `npm run test` exits code 1 when no test files found — typecheck is quality gate until test stories
+- Route plugin pattern: `async function(app, opts: { db: Knex })`, register in app.ts with `await app.register(fn, { db })`
+- `requireRole(['role1', 'role2'])` from @ortho/auth-middleware for preHandler role checks; manager+ = `['call_center_manager', 'marketing_staff', 'marketing_manager', 'super_admin']`
+- Import bare `'@ortho/auth-middleware'` in route files to get `req.user` type augmentation
+- Register literal path routes BEFORE parameterized routes in Fastify (e.g., `/leads/duplicates` before `/leads/:id`)
+- For service-auth-only routes (no JWT), use `config: { skipAuth: true }` + `preHandler: [serviceAuthHook]`
+- JwtPayload uses `sub` for user ID — access via `req.user!.sub`
+- Unit test Knex mock: `makeQueryBuilder()` with `.mockReturnThis()` chains + `makeDb(qb)` wrapping as `vi.fn().mockReturnValue(qb)` + `db.fn.now()` mock
+- For repo functions using `.then(cb)`, mock as `vi.fn((_cb) => Promise.resolve(_cb(data)))`
+- Must `vi.mock` env.js before importing modules that use it at module level
+- libphonenumber-js rejects 555 numbers — use real area codes (e.g., 212) in tests
+- Integration test env: use vitest `setupFiles` to set `process.env` before ESM imports trigger env.ts
+- Integration test auth: generate RSA keypair, mock `global.fetch` for JWKS, sign with `createSigner` from fast-jwt
+- Integration test DB skip: `describe.skipIf(!HAS_DB)` to gracefully skip when no PostgreSQL available
+- Integration test isolation: `truncateTables()` with TRUNCATE CASCADE in `beforeEach`
+---
+
+## 2026-04-06 - US-001
+- Scaffolded apps/crm/lead/ with package.json, tsconfig.json, Dockerfile, vitest.config.ts
+- Created src/env.ts with DATABASE_URL, PORT, IDENTITY_JWKS_URL, PIPELINE_ENGINE_URL, AI_SERVICE_URL, SERVICE_AUTH_TOKEN, LOG_LEVEL, SEARCH_SIMILARITY_THRESHOLD, EVENT_BUS_DRIVER + conditional vars
+- Created src/db.ts exporting knex instance with crm_leads schema
+- Created src/app.ts with buildApp() — Fastify + sensible + authPlugin + /health
+- Created src/index.ts with top-level await startup and SIGTERM handler
+- Files changed: 9 new files
+- **Learnings for future iterations:**
+  - Media service pattern is the reference for all service scaffolding
+  - @ortho/auth-middleware exports `authPlugin` with `{ jwksUrl, allowedPaths }` options
+  - @ortho/logger exports `createLogger(serviceName)` returning pino Logger
+  - Cast logger to `FastifyBaseLogger` when passing to Fastify constructor
+  - env.ts conditional pattern: check EVENT_BUS_DRIVER value, then require driver-specific vars
+---
+
+## 2026-04-06 - US-002
+- Created knexfile.ts with crm_leads schema config, migrations dir ./migrations
+- Created 6 migration files:
+  - 001: CREATE SCHEMA crm_leads + CREATE EXTENSION pg_trgm
+  - 002: leads table with all columns, CHECK constraints, B-tree + GIN trigram indexes
+  - 003: appointments table with type/status CHECK constraints, composite indexes
+  - 004: lead_activities table with actor_type CHECK, composite + unique indexes
+  - 005: tags + lead_tags tables with UNIQUE(name, location_id) + partial unique index for global tags
+  - 006: lead_merges table with FK references to leads
+- Files changed: 7 new files (knexfile.ts + 6 migrations)
+- **Learnings for future iterations:**
+  - knexfile.ts pattern: migrations.directory = './migrations' (not '.'), schemaName and tableName for knex_migrations tracking
+  - Use `withSchema('crm_leads')` for all table creation, `knex.raw` for CHECK constraints and advanced indexes
+  - GIN trigram index syntax: `USING gin (column gin_trgm_ops)` — expression indexes need parens: `USING gin ((expr) gin_trgm_ops)`
+  - Partial unique index for nullable columns: `CREATE UNIQUE INDEX ... WHERE location_id IS NULL`
+  - Drop tables in reverse FK order in down() migrations (lead_tags before tags)
+---
+
+## 2026-04-06 - US-003
+- Created apps/crm/lead/src/repositories/lead-repository.ts with full CRUD, list/search/pagination, bulk lookups
+- Exports: Lead type, CreateLeadData, UpdateableLeadFields, ListLeadsParams
+- Functions: createLead, findById, findByPhone, findByEmail, findByAdPlatformLeadId, updateLead, archiveLead, listLeads, findByPhones, findByEmails, findByIds
+- listLeads supports: locationIds scoping, pipeline/stage/status/contactStatus/channel filters, tagIds join filter, trigram search (q), cursor pagination (score/created_at/last_activity_at), includeArchived
+- Cursor pagination: base64-encoded JSON { lastSeenId, lastSeenSortValue }, fetch limit+1 rows pattern
+- Files changed: 1 new file (lead-repository.ts)
+- **Learnings for future iterations:**
+  - Repository functions are standalone exports (not class methods), receiving `db: Knex` as first arg
+  - Use `crm_leads.leads` fully qualified table name for all queries
+  - Qualify column names with `crm_leads.leads.` prefix when using JOINs (e.g., tag filter)
+  - Cursor pagination pattern: base64 JSON with composite key (sortValue, id), WHERE (col, id) < (?, ?) for DESC ordering
+  - For trigram search, use `similarity()` function with threshold from env, GREATEST() for ordering by best match
+  - `findByEmails` uses `LOWER(email) = ANY(?)` with pre-lowered array for case-insensitive bulk lookup
+  - `findByIds` has no archived filter per spec (batch fetch by PK returns whatever exists)
+---
+
+## 2026-04-06 - US-004
+- Created appointment-repository.ts: Appointment type, createAppointment, findById, findByLeadId (ordered scheduled_at ASC), updateAppointment, deleteAppointment
+- Created tag-repository.ts: Tag/LeadTag types, findTagsByLocation (location + global), findTagById, createTag, deleteTag, applyTagToLead (ON CONFLICT DO NOTHING), removeTagFromLead, findTagsByLeadId (JOIN lead_tags)
+- Created activity-repository.ts: Activity type, insertActivity (ON CONFLICT source_event_id DO NOTHING), listActivities (cursor pagination, occurred_at DESC), findBySourceEventId
+- Files changed: 3 new files
+- **Learnings for future iterations:**
+  - applyTagToLead uses `.onConflict(['lead_id', 'tag_id']).ignore()` for idempotent tag application
+  - findTagsByLocation returns both location-specific and global (location_id IS NULL) tags when locationId is provided
+  - Activity cursor pagination uses { lastSeenOccurredAt, lastSeenId } compound cursor (same pattern as lead-repository but different fields)
+  - insertActivity uses `.onConflict('source_event_id').ignore()` for idempotent event ingestion
+---
+
+## 2026-04-06 - US-005
+- Created apps/crm/lead/src/middleware/service-auth.ts
+- Exports `serviceAuthHook` — Fastify preHandler that validates `Authorization: Bearer <SERVICE_AUTH_TOKEN>`
+- Uses `crypto.timingSafeEqual` with Buffer.from on both sides, checks lengths first
+- Returns 401 `{ error: 'Unauthorized' }` if missing, not Bearer-prefixed, or token mismatch
+- Files changed: 1 new file (service-auth.ts)
+- **Learnings for future iterations:**
+  - Service auth middleware is separate from JWT authPlugin — used for internal service-to-service calls only
+  - Pattern: `reply.code(401).send(...)` then `return` in preHandler to short-circuit
+  - Import env.js with `.js` extension (ESM module resolution)
+---
+
+## 2026-04-06 - US-006
+- Created apps/crm/lead/src/services/lead-service.ts with phone normalization and attribution field immutability
+- Exports: normalizePhone, createLead, getLead, updateLead, archiveLead, listLeads
+- CreateLeadInput type omits score/current_pipeline/contact_status/duplicate_status (set by service)
+- UpdateLeadInput includes all fields including attribution (checked at runtime, rejected with error)
+- ATTRIBUTION_FIELDS const array used to check immutable fields in updateLead
+- listLeads accepts userLocations param, passes as locationIds to repository
+- Files changed: 1 new file (lead-service.ts)
+- **Learnings for future iterations:**
+  - Service functions are standalone exports like repositories, db: Knex as first arg
+  - parsePhoneNumber from libphonenumber-js needs 'US' as default region, check .isValid(), format with .format('E.164')
+  - Attribution field immutability is enforced at service layer using `key in fields` check
+  - createLead sets defaults: score=0, current_pipeline='none', contact_status='active', duplicate_status='none'
+  - No tests exist yet — `npm run test` exits with code 1 when no test files found; typecheck is the quality gate until US-013+
+---
+
+## 2026-04-06 - US-007
+- Created apps/crm/lead/src/services/appointment-service.ts: createAppointment (validates lead exists, sets status='scheduled'), updateAppointment (validates appointment belongs to leadId), deleteAppointment (hard delete), listAppointments
+- Created apps/crm/lead/src/services/tag-service.ts: listTags, createTag (lets unique constraint bubble), deleteTag, applyTagToLead, removeTagFromLead
+- Files changed: 2 new files
+- **Learnings for future iterations:**
+  - appointment-service.createAppointment pulls location_id from the lead record (no need for caller to provide it)
+  - appointment-service.updateAppointment checks appointment.lead_id !== leadId to ensure appointment belongs to the lead
+  - tag-service.createTag intentionally does not catch unique constraint errors — caller (route handler) is responsible for catching and returning 409
+  - tag-service.listTags converts undefined locationId to null before passing to repository
+---
+
+## 2026-04-06 - US-008
+- Created apps/crm/lead/src/routes/leads.ts with POST /leads, GET /leads/:id, PATCH /leads/:id, DELETE /leads/:id
+- Updated apps/crm/lead/src/app.ts to import db and register leadsRoutes plugin with { db }
+- POST /leads: TypeBox body validation, catches phone normalization errors → 400
+- GET /leads/:id: returns lead + tags + appointments via Promise.all; 404 if not found
+- PATCH /leads/:id: inline role check for location_id reassignment (manager+); catches attribution/phone errors
+- DELETE /leads/:id: uses requireRole preHandler for manager+; checks lead exists and not already archived
+- Files changed: 1 new file (routes/leads.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - `requireRole` from @ortho/auth-middleware takes string[] of allowed roles, returns preHandlerHookHandler
+  - Import `'@ortho/auth-middleware'` (bare) alongside named imports to get the `req.user` augmentation in scope
+  - Manager+ roles: `['call_center_manager', 'marketing_staff', 'marketing_manager', 'super_admin']`
+  - TypeBox enum from array: `Type.Enum(Object.fromEntries(arr.map(c => [c, c])))`
+  - Route plugin signature: `async function(app: FastifyInstance, opts: { db: Knex }): Promise<void>`
+  - Register routes in app.ts: `await app.register(leadsRoutes, { db })` — import db from './db.js'
+---
+
+## 2026-04-06 - US-009
+- Added GET /leads with TypeBox querystring schema supporting all filters, bulk lookup (phones/emails/ids), trigram search (q), and cursor pagination
+- Added GET /leads/duplicates stub returning `{ leads: [], nextCursor: null }` — registered BEFORE GET /leads/:id to avoid Fastify treating 'duplicates' as :id
+- Bulk lookup mode: phones (≤100), emails (≤100), ids (≤500) bypass pagination, return `{ leads }` directly via leadRepository
+- Normal list mode: delegates to leadService.listLeads with location scoping from req.user.locations or explicit location_id query param
+- Files changed: 1 modified file (routes/leads.ts)
+- **Learnings for future iterations:**
+  - Register literal path routes (e.g., `/leads/duplicates`) BEFORE parameterized routes (e.g., `/leads/:id`) in Fastify to avoid param capture
+  - TypeBox array in querystring: `Type.Optional(Type.Array(Type.String()))` — Fastify parses repeated query params into arrays
+  - For location scoping in list endpoints: prefer explicit `location_id` query param when provided, fall back to `req.user.locations`
+  - Bulk lookup routes return `{ leads }` without `nextCursor` field — different shape from paginated response `{ leads, nextCursor }`
+---
+
+## 2026-04-06 - US-010
+- Created apps/crm/lead/src/routes/appointments.ts with POST, GET, PATCH, DELETE endpoints for lead appointments
+- Registered appointmentRoutes in app.ts
+- Added `skipAuth` route config support to @ortho/auth-middleware authPlugin for internal service-auth-only routes
+- DELETE /leads/:id/appointments/:appt_id uses `config: { skipAuth: true }` + serviceAuthHook preHandler (SERVICE_AUTH_TOKEN only, no JWT)
+- POST creates appointment via appointmentService, returns 201; 404 if lead not found
+- PATCH updates appointment fields, returns 200; 404 if not found or lead mismatch
+- DELETE checks appointment exists (404 if not), then hard deletes; 401 if service token missing/invalid
+- GET lists appointments for a lead
+- Files changed: 1 new file (routes/appointments.ts), 2 modified (app.ts, auth-middleware/plugin.ts)
+- **Learnings for future iterations:**
+  - JwtPayload has `sub` not `id` — use `req.user!.sub` for the user identifier
+  - The authPlugin onRequest hook runs before route preHandlers — service-auth-only routes need `config: { skipAuth: true }` to bypass JWT validation
+  - Added `skipAuth` support to auth-middleware via `req.routeOptions.config` check — cast through `unknown` to avoid TS overlap error
+  - DELETE endpoint for appointments checks existence via repository before calling service delete (repository delete is silent on missing rows)
+---
+
+## 2026-04-06 - US-011
+- Created apps/crm/lead/src/routes/tags.ts with GET /tags, POST /tags, DELETE /tags/:id, POST /leads/:id/tags, DELETE /leads/:id/tags/:tag_id
+- Registered tagRoutes in app.ts
+- POST /tags requires marketing_manager or super_admin role, catches PostgreSQL unique constraint error (code 23505) → 409
+- DELETE /tags/:id requires marketing_manager+ role, checks tag exists first → 404 if not found
+- POST /leads/:id/tags validates both lead and tag exist → 404 if either missing
+- Files changed: 1 new file (routes/tags.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - PostgreSQL unique constraint violation error code is '23505' — check `(err as { code: string }).code` after type narrowing
+  - Tag management roles are narrower than lead management: `['marketing_manager', 'super_admin']` vs the broader manager+ array
+  - For POST /leads/:id/tags, validate both lead and tag exist before applying — applyTagToLead would silently succeed even if tag doesn't exist (ON CONFLICT DO NOTHING)
+---
+
+## 2026-04-06 - US-012
+- Created apps/crm/lead/src/routes/activities.ts with GET /leads/:id/activities and GET /leads/:id/score-commentary
+- Registered activityRoutes in app.ts
+- GET /leads/:id/activities: validates lead exists (404), delegates to activityRepository.listActivities with eventTypes/cursor/limit params
+- GET /leads/:id/score-commentary: validates lead exists, calls AI Service POST /ai/complete with prompt_id + lead context, returns { score, commentary }; catches fetch errors and non-2xx → 503
+- Files changed: 1 new file (routes/activities.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - Node 24 has global `fetch` — no need to import from node-fetch or undici
+  - AI Service call pattern: POST `env.AI_SERVICE_URL + '/ai/complete'` with `{ prompt_id, context }` body
+  - For external service calls, wrap in try/catch and return 503 on any failure (network error or non-2xx)
+  - Cast `response.json()` with `as { commentary: string }` for the AI service response shape
+---
+
+## 2026-04-06 - US-013
+- Created unit tests for all 4 repository modules using mocked Knex query builders
+- 48 tests total: lead-repository (24), tag-repository (9), activity-repository (9), appointment-repository (6)
+- Files changed: 4 new files in test/unit/repositories/
+- **Learnings for future iterations:**
+  - Mock Knex pattern: `makeQueryBuilder()` returns chainable mock (`.mockReturnThis()` for chain methods, `.mockResolvedValue()` for terminal), `makeDb()` wraps as `vi.fn().mockReturnValue(qb)` with `db.fn.now()` mock
+  - For `.then()` callbacks (used by repository functions returning `query.then(cb)`), mock as `vi.fn((_cb) => Promise.resolve(_cb(data)))`
+  - For `where(function(this) {...})` pattern (tag-repository), mock `where` with `mockImplementation` that calls the callback with an inner builder
+  - Must `vi.mock('../../../src/env.js')` before importing lead-repository since it imports `env` at module level
+  - Cursor round-trip test: encode via `listLeads` with limit < rows, decode with `Buffer.from(cursor, 'base64')` and parse JSON
+---
+
+## 2026-04-06 - US-014
+- Created unit tests for all 3 service modules and service-auth middleware
+- lead-service.test.ts (16 tests): normalizePhone, createLead defaults, updateLead attribution rejection + phone normalization, archiveLead, listLeads location pass-through
+- appointment-service.test.ts (7 tests): createAppointment (lead exists / not found), updateAppointment (exists / not found / lead mismatch), deleteAppointment, listAppointments
+- tag-service.test.ts (6 tests): listTags, createTag, deleteTag, applyTagToLead, removeTagFromLead
+- service-auth.test.ts (5 tests): valid token passes, missing header 401, non-Bearer 401, wrong token 401, different-length token 401
+- 82 total tests passing (34 new + 48 existing)
+- Files changed: 4 new files in test/unit/services/ and test/unit/middleware/
+- **Learnings for future iterations:**
+  - libphonenumber-js rejects 555 area code numbers as invalid — use real area codes like 212 for test phone numbers
+  - libphonenumber-js throws 'NOT_A_NUMBER' (not 'invalid phone number') for completely non-numeric input — the service wraps this with its own error message
+  - Service mocking pattern: `vi.mock('../../../src/repositories/<repo>.js', () => ({ fn1: vi.fn(), fn2: vi.fn() }))` then `vi.mocked(repo.fn)` for type-safe mock setup
+  - service-auth.test.ts needs `vi.mock('../../../src/env.js')` to provide SERVICE_AUTH_TOKEN
+  - For middleware tests, minimal mock objects (`{ headers: { authorization } }` for request, `{ code, send }` for reply) are sufficient
+---
+
+## 2026-04-06 - US-015
+- Created integration test helpers (helpers.ts, setup.ts) and leads route integration tests (leads.test.ts)
+- helpers.ts: RSA keypair generation for test JWT signing, mock JWKS fetch, buildTestApp(), runMigrations(), cleanup(), truncateTables(), makeJwt()
+- setup.ts: vitest setup file that sets required env vars before any module imports
+- leads.test.ts: 22 tests covering POST/GET/PATCH/DELETE /leads, GET /leads list with filters, bulk lookups, pagination, trigram search
+- Tests use `describe.skipIf(!HAS_DB)` to gracefully skip when no PostgreSQL is available
+- Added fast-jwt ^6.1.0 as dev dependency for test JWT signing
+- Updated vitest.config.ts with setupFiles for integration test env vars
+- Files changed: 3 new files (test/integration/helpers.ts, setup.ts, leads.test.ts), 2 modified (vitest.config.ts, package.json)
+- **Learnings for future iterations:**
+  - ESM import hoisting means `process.env` must be set in a vitest `setupFiles` entry, not inline before imports
+  - Auth plugin integration test pattern: generate RSA keypair, mock global.fetch for JWKS endpoint, sign JWTs with createSigner from fast-jwt
+  - Use `describe.skipIf(!HAS_DB)` pattern for DB-dependent integration tests — allows tests to pass in CI without DB
+  - HAS_DB check: compare against dummy fallback URL to distinguish real DB from the setup default
+  - Fastify `app.inject()` is the preferred way to test routes without starting a real HTTP server
+  - `truncateTables()` in `beforeEach` ensures test isolation — TRUNCATE CASCADE handles FK dependencies
+  - Integration tests need the full app with all route plugins registered (not just the one under test) because shared middleware/hooks
+---
+
+## 2026-04-06 - US-016
+- Created 4 integration test files for remaining route groups:
+  - appointments.test.ts (6 tests): POST creates with status 'scheduled', POST 404 for missing lead, PATCH updates status, DELETE with SERVICE_AUTH_TOKEN 204, DELETE without token 401, GET returns array
+  - tags.test.ts (7 tests): POST global tag 201, POST duplicate 409, POST location-scoped tag, GET returns location + global tags, POST /leads/:id/tags applies tag, DELETE /leads/:id/tags removes tag, DELETE /tags/:id removes from system
+  - activities.test.ts (5 tests): empty array for fresh lead, ordered DESC after insert, event_type filter, cursor pagination, 404 for unknown lead
+  - score-commentary.test.ts (3 tests): 200 with mocked AI success, 503 on AI non-2xx, 404 for unknown lead
+- 125 total tests (82 unit passing + 43 integration skipped without DB)
+- Files changed: 4 new files in test/integration/
+- **Learnings for future iterations:**
+  - To mock AI service fetch in integration tests while keeping JWKS mock: capture the helpers' mockFetch as `originalFetch`, then wrap it in a new function that intercepts AI URLs and delegates the rest
+  - For score-commentary tests, restore `globalThis.fetch` in `beforeEach` to avoid test pollution
+  - Insert activities directly via `db('crm_leads.lead_activities').insert(...)` rather than going through routes (no activity creation route exists)
+  - Tag integration tests need marketing_manager role for POST/DELETE /tags (narrower than general manager+ role)
+---

@@ -110,6 +110,10 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
       return;
     }
 
+    if ((req.routeOptions?.config as unknown as Record<string, unknown>)?.skipAuth === true) {
+      return;
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return reply.code(401).send({ error: 'invalid_token' });

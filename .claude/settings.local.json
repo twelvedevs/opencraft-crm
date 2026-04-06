@@ -38,7 +38,9 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); stories=d.get\\('userStories',[]\\); [print\\(s.get\\('id'\\), '|', s.get\\('title'\\), '| passes:', s.get\\('passes'\\)\\) for s in stories]\")",
       "Bash(grep:*)",
       "Bash(python3:*)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(git -C /Users/andrey/dev/pre-sale/ortho diff --stat ec3e25913d0ee2e2316d1fedff5afc0015e3bcd8..6803db91515291189a3952d782a59ae1bfee03af)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

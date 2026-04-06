@@ -1,0 +1,164 @@
+# Ralph Progress Log
+Started: Mon Apr  6 13:11:09 UTC 2026
+---
+
+## Codebase Patterns
+- Route plugins accept `opts: { db: Knex; eventBus: EventBus }` — always destructure and pass both
+- When adding new repository calls to a service, update the vi.mock() block in existing unit tests to include the new exports
+- Integration tests use `EventBusImpl(new MockDriver())` from `@ortho/event-bus` (factory doesn't support 'memory' driver)
+- `buildTestApp()` in `test/integration/helpers.ts` constructs its own Fastify app (doesn't use `buildApp` from src)
+- All route signatures updated to `{ db, eventBus }` opts even if eventBus is unused in that route currently
+- Publisher functions follow pattern: `bus.publish({ event_type, entity_type: 'lead', entity_id, payload })`
+- Service functions that mutate state accept `eventBus: EventBus` param — routes destructure from opts and pass it through
+- Activity inserts wrapped in try/catch + console.warn to avoid blocking the main operation on timeline failures
+- Merge service uses `MergeError` class with `statusCode` property for tagged errors (404/400/403/503) — routes check `instanceof MergeError` and use `err.statusCode`
+- Use `knex.transaction(async (trx) => {...})` for multi-step DB operations; pass `trx` instead of `db` to repository functions inside transactions
+- Pipeline Engine URL is in `env.PIPELINE_ENGINE_URL`; auth via `Bearer ${env.SERVICE_AUTH_TOKEN}`
+- `AbortSignal.timeout(5000)` for external service calls with 5s timeout
+- Mocking Knex transactions: `trx` must be a callable `vi.fn()` (for table access) with `.raw()` and `.fn` properties attached
+- Use `vi.stubGlobal('fetch', vi.fn())` to mock native fetch in unit tests; `vi.mock('../../src/env.js')` to mock env vars
+- Phone numbers in tests must be valid US numbers — use real area codes (212, 310, etc.), not 555 prefix
+
+---
+
+## 2026-04-06 - US-001
+- Created `apps/crm/lead/src/events/publisher.ts` with 5 publish functions: publishLeadCreated, publishLeadUpdated, publishLeadMerged, publishLeadArchived, publishAppointmentUpdated
+- Updated `apps/crm/lead/src/app.ts`: buildApp now accepts (db: Knex, eventBus: EventBus); decorates app with eventBus; passes { db, eventBus } to all 4 route plugins
+- Updated `apps/crm/lead/src/index.ts`: imports createEventBus; creates eventBus; passes to buildApp; SIGTERM calls eventBus.stop()
+- Updated all 4 route plugins (leads, appointments, tags, activities) to accept `{ db: Knex; eventBus: EventBus }` opts
+- Updated `test/integration/helpers.ts` to create MockDriver-backed EventBus and pass to route plugins
+- Files changed: src/events/publisher.ts (new), src/app.ts, src/index.ts, src/routes/leads.ts, src/routes/appointments.ts, src/routes/tags.ts, src/routes/activities.ts, test/integration/helpers.ts
+- **Learnings for future iterations:**
+  - createEventBus() factory only supports 'eventbridge' and 'redis' drivers — tests must use EventBusImpl(new MockDriver()) directly
+  - buildTestApp() in helpers.ts is separate from src/app.ts buildApp() — both need to be kept in sync
+  - The `app.decorate('eventBus', eventBus)` call makes eventBus accessible via Fastify instance, but routes receive it via opts
+---
+
+## 2026-04-06 - US-002
+- Created `apps/crm/lead/src/scoring/score-calculator.ts` with pure `calculateScore` function
+- Exports: `STAGE_TIME_LIMITS`, `STAGE_VALUE_WEIGHTS`, `ScoreParams` type, `calculateScore` function
+- Scoring factors: stage weight base, urgency boost (time-based + exam_scheduled past check), inbound engagement (+15), inbound age urgency (+10 if >3 days), contact_status penalties (sms_opted_out -10, email_invalid -10, fully_unreachable floors at 5), clamped 0-100
+- Files changed: src/scoring/score-calculator.ts (new)
+- **Learnings for future iterations:**
+  - The scoring module is in `src/scoring/` directory (new directory created for Phase 2)
+  - `calculateScore` is pure — no Date mocking needed if tests pass `last_activity_at` and use deterministic time comparisons; however urgency tests may need `vi.useFakeTimers()` since `new Date()` is called internally
+  - `fully_unreachable` floor check happens AFTER the 0-100 clamp, so the floor at 5 is applied last
+---
+
+## 2026-04-06 - US-003
+- Created `apps/crm/lead/src/scoring/contact-status.ts` with pure state machine functions
+- Exports: `ContactStatus` type, `applyOptOut`, `removeOptOut`, `applyHardBounce`
+- State machine tracks SMS opt-out and email hard-bounce independently: active ↔ sms_opted_out, active ↔ email_invalid, both flags → fully_unreachable
+- Files changed: src/scoring/contact-status.ts (new)
+- **Learnings for future iterations:**
+  - The contact_status state machine is a 2-bit flag system (sms_opted_out + email_invalid); fully_unreachable = both flags set
+  - Switch statements with exhaustive cases give full type safety — no default needed when all union members are covered
+  - Soft bounces are intentionally excluded — callers decide whether to escalate
+---
+
+## 2026-04-06 - US-004
+- Added dedup logic to `createLead` in `apps/crm/lead/src/services/lead-service.ts`
+- Step 1: ad_platform_lead_id idempotency (return existing lead if found)
+- Steps 2-3: phone and email dedup via existing repository methods
+- Steps 4-6: determine duplicate_status/duplicate_of_id, always insert the lead
+- Updated test mock in `test/unit/services/lead-service.test.ts` to include findByPhone, findByEmail, findByAdPlatformLeadId
+- Files changed: src/services/lead-service.ts, test/unit/services/lead-service.test.ts
+- **Learnings for future iterations:**
+  - When adding new repository calls to a service function, existing unit tests will break if the mock doesn't include the new repository exports — always update vi.mock() block
+  - The dedup functions (findByPhone, findByEmail) already filter out archived and merged leads (whereNull('archived_at').whereNull('merged_into_id'))
+  - duplicate_of_id is part of CreateLeadData (not omitted) so it can be set directly in the insert
+---
+
+## 2026-04-06 - US-005
+- Wired event publishing and timeline entries into lead-service.ts (createLead, updateLead, archiveLead) and appointment-service.ts (createAppointment, updateAppointment)
+- createLead now accepts `eventBus: EventBus` and `createdBy: string` params; inserts lead.created activity + publishes lead.created event
+- updateLead now accepts `eventBus: EventBus`; computes changed_fields, inserts lead.updated activity + publishes lead.updated event
+- archiveLead now accepts `eventBus: EventBus`; inserts lead.archived activity + publishes lead.archived event
+- createAppointment now accepts `eventBus: EventBus`; publishes appointment.updated event after insert
+- updateAppointment now accepts `eventBus: EventBus`; publishes appointment.updated event only when status field is changed
+- Route handlers in leads.ts and appointments.ts updated to destructure eventBus from opts and pass to service calls
+- Unit tests updated with mocks for activity-repository and publisher modules, and new eventBus param
+- Files changed: src/services/lead-service.ts, src/services/appointment-service.ts, src/routes/leads.ts, src/routes/appointments.ts, test/unit/services/lead-service.test.ts, test/unit/services/appointment-service.test.ts
+- **Learnings for future iterations:**
+  - When adding eventBus param to service functions, also update ALL unit tests that call those functions — the tests will fail with wrong arg count
+  - Activity insert uses try/catch + console.warn so timeline failures don't block the main operation
+  - publishAppointmentUpdated is only called when status changes — non-status appointment updates (notes, scheduled_at only) do not trigger events
+---
+
+## 2026-04-06 - US-006
+- Created `apps/crm/lead/src/services/merge-service.ts` with full 7-step merge orchestration
+- Exports `MergeError` class (extends Error with `statusCode` property) and `mergeLeads` function
+- Step 1: validate both leads exist, not already merged, location access check
+- Step 2: Pipeline Engine POST call with 5s timeout (only if stage differs)
+- Steps 3-7: single Knex transaction — copy activities, copy tags, update merged lead, insert lead_merges row, insert merge activity
+- After transaction: publish lead.merged event, re-fetch and return surviving lead
+- Files changed: src/services/merge-service.ts (new)
+- **Learnings for future iterations:**
+  - Used `MergeError` with `statusCode` for tagged errors — routes can check `instanceof MergeError` and use `err.statusCode` for HTTP responses
+  - `AbortSignal.timeout(5000)` works with native fetch for timeouts — catch block handles both network errors and timeouts
+  - `trx.raw()` is needed for complex INSERT...SELECT...ON CONFLICT queries; Knex's query builder doesn't support this pattern
+  - Activity insertions inside transactions use `trx` instead of `db` to participate in the transaction
+  - `env.PIPELINE_ENGINE_URL` and `env.SERVICE_AUTH_TOKEN` are already defined in env.ts
+---
+
+## 2026-04-06 - US-007
+- Implemented `findFlaggedDuplicates` in lead-repository.ts with keyset cursor pagination (created_at DESC, id DESC)
+- Replaced GET /leads/duplicates stub with real implementation calling findFlaggedDuplicates scoped to user locations
+- Added PATCH /leads/:id/duplicate-status route with TypeBox body schema `{ status: 'resolved' }` — updates duplicate_status to 'resolved' and clears duplicate_of_id
+- Files changed: src/repositories/lead-repository.ts, src/routes/leads.ts
+- **Learnings for future iterations:**
+  - `decodeCursor`/`encodeCursor` are private helpers in lead-repository.ts — reuse them for any new paginated query in that file
+  - The findFlaggedDuplicates function reuses the same cursor pattern as listLeads (lastSeenId + lastSeenSortValue)
+  - PATCH /leads/:id/duplicate-status calls leadRepository.updateLead directly (no service layer needed for simple field updates)
+---
+
+## 2026-04-06 - US-008
+- Added POST /leads/:id/merge route in `apps/crm/lead/src/routes/leads.ts`
+- TypeBox body schema with `merge_lead_id` (uuid format) and `winning_stage` (string)
+- Route handler calls `mergeLeads` from merge-service.ts, catches `MergeError` instances and maps statusCode to HTTP response
+- Imported `mergeLeads` and `MergeError` from merge-service.ts
+- Passes `req.user.sub` as mergedBy and `req.user.locations` as userLocations (empty array = super_admin bypass)
+- Files changed: src/routes/leads.ts
+- **Learnings for future iterations:**
+  - MergeError with statusCode property makes route error handling clean — just `reply.status(err.statusCode).send({ error: err.message })`
+  - The merge route was straightforward since merge-service.ts already handles all validation and orchestration
+  - Route placement matters — POST /leads/:id/merge must be registered before GET /leads/:id to avoid param conflicts (placed after duplicate-status routes)
+---
+
+## 2026-04-06 - US-009
+- Created `apps/crm/lead/test/unit/score-calculator.test.ts` with 18 tests covering all scoring factors
+- Created `apps/crm/lead/test/unit/contact-status.test.ts` with 12 tests covering all state transitions
+- 30 tests total, all passing; typecheck clean
+- Files changed: test/unit/score-calculator.test.ts (new), test/unit/contact-status.test.ts (new)
+- **Learnings for future iterations:**
+  - Pure function tests for score-calculator need `vi.useFakeTimers()` + `vi.setSystemTime()` since `calculateScore` calls `new Date()` internally for urgency calculations
+  - contact-status tests are fully deterministic — no timer mocking needed since the functions are pure state machines with no time dependency
+  - Test files can live directly in `test/unit/` (not in a subdirectory) for standalone modules like scoring
+---
+
+## 2026-04-06 - US-010
+- Created `apps/crm/lead/test/unit/dedup.test.ts` with 6 tests covering dedup logic in createLead
+- Created `apps/crm/lead/test/unit/merge-service.test.ts` with 11 tests covering merge-service validation, Pipeline Engine calls, transaction steps, and event publishing
+- 17 tests total, all passing; typecheck clean
+- Files changed: test/unit/dedup.test.ts (new), test/unit/merge-service.test.ts (new)
+- **Learnings for future iterations:**
+  - Phone numbers in dedup tests must be valid US numbers (libphonenumber-js validates them) — use area codes like 212, not 555
+  - Mocking Knex transactions requires the `trx` mock to be callable as a function (returns query builder) AND have `.raw()` and `.fn` properties — use a `vi.fn()` with properties assigned
+  - For merge-service tests, mock `env.js` module to provide PIPELINE_ENGINE_URL and SERVICE_AUTH_TOKEN without requiring real env vars
+  - Use `vi.stubGlobal('fetch', ...)` to mock native fetch for Pipeline Engine calls
+  - Integration tests mock Pipeline Engine by overriding globalThis.fetch with a function that intercepts `/pipeline/leads/.../transition` URLs and delegates all other requests (including JWKS) to the real fetch
+---
+
+## 2026-04-06 - US-011
+- Created `apps/crm/lead/test/integration/dedup-merge.test.ts` with 13 integration tests covering all Phase 2 features
+- Dedup tests: phone match → flagged with duplicate_of_id, ad_platform_lead_id idempotency (single row), no match → none
+- GET /leads/duplicates: flagged leads appear, resolved leads excluded, cursor pagination works
+- PATCH /leads/:id/duplicate-status: resolves to 'resolved' + clears duplicate_of_id, 404 for unknown id, 400 for wrong body
+- POST /leads/:id/merge: happy path merge (activities copied, lead_merges row, merged lead archived), pipeline engine 500 → 503, already merged → 400, non-existent → 404, location access denied → 403
+- Files changed: test/integration/dedup-merge.test.ts (new)
+- **Learnings for future iterations:**
+  - Integration tests that need to mock Pipeline Engine must preserve the JWKS fetch mock from helpers.ts — override globalThis.fetch with a function that intercepts pipeline URLs and delegates everything else to the existing fetch
+  - Integration tests are skipped when DATABASE_URL points to the default dummy URL — they require a real PostgreSQL instance
+  - The afterAll in nested describe blocks that restore globalThis.fetch must be careful not to clobber the JWKS mock used by the auth plugin
+  - Leads created with default values have current_stage=null — merging with any non-null winning_stage triggers the Pipeline Engine call
+---

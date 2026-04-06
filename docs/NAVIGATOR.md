@@ -45,7 +45,8 @@ All specs are **Approved** unless noted otherwise.
 
 | Spec | Memory |
 |------|--------|
-| [lead-service-design.md](superpowers/specs/2026-03-25-lead-service-design.md) | [memories/lead-service.md](memories/lead-service.md) |
+| [lead-service-design.md](superpowers/specs/2026-03-25-lead-service-design.md) _(superseded)_ | [memories/lead-service.md](memories/lead-service.md) |
+| [lead-service-updated-design.md](superpowers/specs/2026-04-06-lead-service-updated-design.md) _(supersedes above)_ | [memories/lead-service.md](memories/lead-service.md) |
 | [pipeline-engine-design.md](superpowers/specs/2026-03-25-pipeline-engine-design.md) | [memories/pipeline-engine.md](memories/pipeline-engine.md) |
 | [conversation-service-design.md](superpowers/specs/2026-03-25-conversation-service-design.md) | [memories/conversation-service.md](memories/conversation-service.md) |
 | [campaign-service-design.md](superpowers/specs/2026-03-25-campaign-service-design.md) | [memories/campaign-service.md](memories/campaign-service.md) |
