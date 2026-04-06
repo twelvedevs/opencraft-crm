@@ -162,3 +162,17 @@ Started: Mon Apr  6 14:06:40 UTC 2026
   - For handlers that only insert activity (no score/state update), assert `trx.raw` was NOT called to verify no score update
   - Timeline-only handler tests (referral, sequence, workflow) are the simplest — just mock findById + insertActivity
 ---
+
+## 2026-04-06 18:44 - US-014
+- Created integration test file `test/integration/event-worker.test.ts` with 11 tests covering all key event handler scenarios against a real DB
+- Tests use a custom `DispatchDriver` that dispatches events to handlers synchronously on publish (no Redis needed)
+- Test helper `buildTestWorker()` wires all 13 handlers with the same pattern as event-worker.ts, using a separate MockDriver-backed publish bus for ad_lead.received's publishLeadCreated
+- Tests: ad_lead.received (create + idempotency), lead.stage_changed (pipeline/stage/score), lead.archived (clear state + ON CONFLICT idempotency + cross-path idempotency with HTTP), opt_out.received (contact_status transition + activity), email.bounced soft (no-op), email.bounced hard (status change), inbound_message.received (score recalc), workflow.triggered non-lead (no activity)
+- Files changed: `test/integration/event-worker.test.ts` (new)
+- **Learnings for future iterations:**
+  - Integration tests for event workers can use a custom DispatchDriver (stores subscriptions on start, dispatches on publish) to avoid needing Redis while still testing full handler flows against a real DB
+  - The `describe.skipIf(!HAS_DB)` pattern from existing integration tests works well — tests are skipped when no real DB is available
+  - Worker integration tests wire handlers directly (importing from handler modules) rather than using `createEventWorker` which creates its own internal bus via `createEventBus()` factory
+  - For ad_lead.received, a separate MockDriver-backed publish bus is needed so we can assert `lead.created` events were published without a second dispatch loop
+  - `DispatchDriver.published` array and `MockDriver.published` array both need clearing in `beforeEach` to avoid cross-test contamination
+---
