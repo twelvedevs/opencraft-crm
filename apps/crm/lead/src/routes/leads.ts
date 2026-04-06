@@ -4,6 +4,7 @@ import { Type } from '@sinclair/typebox';
 import { requireRole } from '@ortho/auth-middleware';
 import '@ortho/auth-middleware';
 import * as leadService from '../services/lead-service.js';
+import * as leadRepository from '../repositories/lead-repository.js';
 import * as tagRepository from '../repositories/tag-repository.js';
 import * as appointmentRepository from '../repositories/appointment-repository.js';
 
@@ -57,6 +58,28 @@ const PatchLeadBody = Type.Object({
   location_id: Type.Optional(Type.String()),
 });
 
+const ListLeadsQuery = Type.Object({
+  location_id: Type.Optional(Type.String()),
+  pipeline: Type.Optional(Type.String()),
+  stage: Type.Optional(Type.String()),
+  status: Type.Optional(Type.Union([Type.Literal('active'), Type.Literal('archived')])),
+  contact_status: Type.Optional(Type.String()),
+  channel: Type.Optional(Type.String()),
+  tag_id: Type.Optional(Type.Array(Type.String())),
+  q: Type.Optional(Type.String()),
+  include_archived: Type.Optional(Type.Boolean()),
+  sort: Type.Optional(Type.Union([
+    Type.Literal('score'),
+    Type.Literal('created_at'),
+    Type.Literal('last_activity_at'),
+  ])),
+  cursor: Type.Optional(Type.String()),
+  limit: Type.Optional(Type.Integer({ default: 50, maximum: 200 })),
+  phones: Type.Optional(Type.Array(Type.String())),
+  emails: Type.Optional(Type.Array(Type.String())),
+  ids: Type.Optional(Type.Array(Type.String())),
+});
+
 const MANAGER_ROLES = ['call_center_manager', 'marketing_staff', 'marketing_manager', 'super_admin'];
 const managerOnly = requireRole(MANAGER_ROLES);
 
@@ -104,6 +127,82 @@ export async function leadsRoutes(
       }
       throw err;
     }
+  });
+
+  // GET /leads/duplicates — stub (full implementation in Phase 2)
+  app.get('/leads/duplicates', async (_req, reply) => {
+    return reply.status(200).send({ leads: [], nextCursor: null });
+  });
+
+  // GET /leads — list with filters, bulk lookup, search, cursor pagination
+  app.get('/leads', {
+    schema: { querystring: ListLeadsQuery },
+  }, async (req, reply) => {
+    const query = req.query as {
+      location_id?: string;
+      pipeline?: string;
+      stage?: string;
+      status?: 'active' | 'archived';
+      contact_status?: string;
+      channel?: string;
+      tag_id?: string[];
+      q?: string;
+      include_archived?: boolean;
+      sort?: 'score' | 'created_at' | 'last_activity_at';
+      cursor?: string;
+      limit?: number;
+      phones?: string[];
+      emails?: string[];
+      ids?: string[];
+    };
+
+    const userLocations = req.user?.locations ?? [];
+
+    // Bulk lookup limit validation
+    if (query.phones && query.phones.length > 100) {
+      return reply.status(400).send({ error: 'bulk lookup limit exceeded' });
+    }
+    if (query.emails && query.emails.length > 100) {
+      return reply.status(400).send({ error: 'bulk lookup limit exceeded' });
+    }
+    if (query.ids && query.ids.length > 500) {
+      return reply.status(400).send({ error: 'bulk lookup limit exceeded' });
+    }
+
+    // Bulk lookup mode — bypass pagination
+    if (query.phones) {
+      const leads = await leadRepository.findByPhones(db, query.phones, userLocations);
+      return reply.status(200).send({ leads });
+    }
+    if (query.emails) {
+      const leads = await leadRepository.findByEmails(db, query.emails, userLocations);
+      return reply.status(200).send({ leads });
+    }
+    if (query.ids) {
+      const leads = await leadRepository.findByIds(db, query.ids, userLocations);
+      return reply.status(200).send({ leads });
+    }
+
+    // Normal list mode
+    const result = await leadService.listLeads(
+      db,
+      {
+        pipeline: query.pipeline,
+        stage: query.stage,
+        status: query.status,
+        contactStatus: query.contact_status,
+        channel: query.channel,
+        tagIds: query.tag_id,
+        q: query.q,
+        includeArchived: query.include_archived,
+        sort: query.sort,
+        cursor: query.cursor,
+        limit: query.limit,
+      },
+      query.location_id ? [query.location_id] : userLocations,
+    );
+
+    return reply.status(200).send(result);
   });
 
   // GET /leads/:id
