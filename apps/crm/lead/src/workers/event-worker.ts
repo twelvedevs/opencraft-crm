@@ -8,6 +8,8 @@ import { handleLeadConverted } from './handlers/lead-converted.js';
 import { handleOptOutReceived } from './handlers/opt-out-received.js';
 import { handleOptOutRemoved } from './handlers/opt-out-removed.js';
 import { handleEmailBounced } from './handlers/email-bounced.js';
+import { handleMessageDelivered } from './handlers/message-delivered.js';
+import { handleMessageFailed } from './handlers/message-failed.js';
 
 const log = createLogger('crm-lead');
 
@@ -44,8 +46,8 @@ export function createEventWorker(db: Knex): { start: () => Promise<void>; stop:
   wrapHandler(bus, 'opt_out.received', handleOptOutReceived, db);
   wrapHandler(bus, 'opt_out.removed', handleOptOutRemoved, db);
   wrapHandler(bus, 'email.bounced', handleEmailBounced, db);
-  wrapHandler(bus, 'message.delivered', noop, db);
-  wrapHandler(bus, 'message.failed', noop, db);
+  wrapHandler(bus, 'message.delivered', handleMessageDelivered, db);
+  wrapHandler(bus, 'message.failed', handleMessageFailed, db);
   wrapHandler(bus, 'inbound_message.received', noop, db);
   wrapHandler(bus, 'referral.converted', noop, db);
   wrapHandler(bus, 'sequence.step_completed', noop, db);
