@@ -135,9 +135,47 @@ export async function leadsRoutes(
     }
   });
 
-  // GET /leads/duplicates — stub (full implementation in Phase 2)
-  app.get('/leads/duplicates', async (_req, reply) => {
-    return reply.status(200).send({ leads: [], nextCursor: null });
+  // GET /leads/duplicates — paginated list of flagged duplicates
+  app.get('/leads/duplicates', {
+    schema: {
+      querystring: Type.Object({
+        cursor: Type.Optional(Type.String()),
+        limit: Type.Optional(Type.Integer({ default: 50, maximum: 200 })),
+      }),
+    },
+  }, async (req, reply) => {
+    const query = req.query as { cursor?: string; limit?: number };
+    const userLocations = req.user?.locations ?? [];
+    const result = await leadRepository.findFlaggedDuplicates(
+      db,
+      userLocations,
+      query.cursor,
+      query.limit,
+    );
+    return reply.status(200).send(result);
+  });
+
+  // PATCH /leads/:id/duplicate-status
+  app.patch('/leads/:id/duplicate-status', {
+    schema: {
+      params: IdParams,
+      body: Type.Object({
+        status: Type.Literal('resolved'),
+      }),
+    },
+  }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+
+    const lead = await leadRepository.findById(db, id);
+    if (!lead) {
+      return reply.status(404).send({ error: 'not found' });
+    }
+
+    const updated = await leadRepository.updateLead(db, id, {
+      duplicate_status: 'resolved',
+      duplicate_of_id: null,
+    });
+    return reply.status(200).send(updated);
   });
 
   // GET /leads — list with filters, bulk lookup, search, cursor pagination

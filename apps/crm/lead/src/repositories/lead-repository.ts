@@ -311,6 +311,51 @@ export function findByEmails(db: Knex, emails: string[], locationIds: string[]):
   return query.then((rows) => rows as Lead[]);
 }
 
+export async function findFlaggedDuplicates(
+  db: Knex,
+  locationIds: string[],
+  cursor?: string,
+  limit?: number,
+): Promise<{ leads: Lead[]; nextCursor: string | null }> {
+  const effectiveLimit = Math.min(limit ?? 50, 200);
+
+  let query = db(TABLE)
+    .where({ duplicate_status: 'flagged' })
+    .whereNull('archived_at')
+    .whereNull('merged_into_id');
+
+  if (locationIds.length > 0) {
+    query = query.whereIn('location_id', locationIds);
+  }
+
+  if (cursor) {
+    const decoded = decodeCursor(cursor);
+    query = query.whereRaw(
+      `(created_at, id) < (?, ?)`,
+      [decoded.lastSeenSortValue, decoded.lastSeenId],
+    );
+  }
+
+  query = query
+    .orderBy('created_at', 'desc')
+    .orderBy('id', 'desc')
+    .limit(effectiveLimit + 1);
+
+  const rows = (await query) as Lead[];
+
+  let nextCursor: string | null = null;
+  if (rows.length > effectiveLimit) {
+    rows.pop();
+    const lastRow = rows[rows.length - 1];
+    nextCursor = encodeCursor({
+      lastSeenId: lastRow.id,
+      lastSeenSortValue: lastRow.created_at,
+    });
+  }
+
+  return { leads: rows, nextCursor };
+}
+
 export function findByIds(db: Knex, ids: string[], locationIds: string[]): Promise<Lead[]> {
   let query = db(TABLE).whereIn('id', ids);
   if (locationIds.length > 0) {
