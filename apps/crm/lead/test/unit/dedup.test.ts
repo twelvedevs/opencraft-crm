@@ -12,7 +12,7 @@ vi.mock('../../src/repositories/lead-repository.js', () => ({
 }));
 
 vi.mock('../../src/repositories/activity-repository.js', () => ({
-  insertActivity: vi.fn(),
+  insertActivity: vi.fn().mockResolvedValue('activity-1'),
 }));
 
 vi.mock('../../src/events/publisher.js', () => ({
@@ -26,7 +26,7 @@ import type { EventBus } from '@ortho/event-bus';
 import { createLead } from '../../src/services/lead-service.js';
 import * as leadRepository from '../../src/repositories/lead-repository.js';
 
-const db = {} as Knex;
+let db: Knex;
 const eventBus = { publish: vi.fn(), stop: vi.fn() } as unknown as EventBus;
 
 const baseLead = {
@@ -77,6 +77,10 @@ const input = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  const mockTrx = {} as Knex;
+  db = {
+    transaction: vi.fn().mockImplementation(async (cb: (trx: Knex) => Promise<unknown>) => cb(mockTrx)),
+  } as unknown as Knex;
   vi.mocked(leadRepository.findByPhone).mockResolvedValue([]);
   vi.mocked(leadRepository.findByEmail).mockResolvedValue([]);
   vi.mocked(leadRepository.findByAdPlatformLeadId).mockResolvedValue(null);
@@ -109,7 +113,7 @@ describe('dedup logic in createLead', () => {
     await createLead(db, input, eventBus, 'user-1');
 
     expect(leadRepository.createLead).toHaveBeenCalledWith(
-      db,
+      expect.anything(),
       expect.objectContaining({
         duplicate_status: 'flagged',
         duplicate_of_id: 'older-id',
@@ -127,7 +131,7 @@ describe('dedup logic in createLead', () => {
     await createLead(db, input, eventBus, 'user-1');
 
     expect(leadRepository.createLead).toHaveBeenCalledWith(
-      db,
+      expect.anything(),
       expect.objectContaining({
         duplicate_status: 'flagged',
         duplicate_of_id: 'email-match-id',
@@ -147,7 +151,7 @@ describe('dedup logic in createLead', () => {
     await createLead(db, input, eventBus, 'user-1');
 
     expect(leadRepository.createLead).toHaveBeenCalledWith(
-      db,
+      expect.anything(),
       expect.objectContaining({
         duplicate_status: 'flagged',
         duplicate_of_id: 'email-id',
@@ -161,7 +165,7 @@ describe('dedup logic in createLead', () => {
     await createLead(db, input, eventBus, 'user-1');
 
     expect(leadRepository.createLead).toHaveBeenCalledWith(
-      db,
+      expect.anything(),
       expect.objectContaining({
         duplicate_status: 'none',
         duplicate_of_id: null,

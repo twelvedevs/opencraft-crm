@@ -32,8 +32,12 @@ import {
   listLeads,
 } from '../../../src/services/lead-service.js';
 import * as leadRepository from '../../../src/repositories/lead-repository.js';
+import * as activityRepository from '../../../src/repositories/activity-repository.js';
 
-const db = {} as Knex;
+// Build a mock db whose .transaction() executes the callback with a mock trx.
+let mockTrx: Knex;
+let db: Knex;
+
 const eventBus = { publish: vi.fn(), stop: vi.fn() } as unknown as EventBus;
 
 const fakeLead = {
@@ -75,6 +79,12 @@ const fakeLead = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockTrx = {} as Knex;
+  db = {
+    transaction: vi.fn().mockImplementation(async (cb: (trx: Knex) => Promise<unknown>) => cb(mockTrx)),
+  } as unknown as Knex;
+
+  vi.mocked(activityRepository.insertActivity).mockResolvedValue('activity-1');
 });
 
 describe('normalizePhone', () => {
@@ -100,22 +110,19 @@ describe('createLead', () => {
     vi.mocked(leadRepository.findByPhone).mockResolvedValue([]);
     vi.mocked(leadRepository.findByEmail).mockResolvedValue([]);
     vi.mocked(leadRepository.findByAdPlatformLeadId).mockResolvedValue(null);
+    vi.mocked(leadRepository.createLead).mockResolvedValue(fakeLead);
   });
 
   it('sets score=0, contact_status=active, duplicate_status=none', async () => {
-    vi.mocked(leadRepository.createLead).mockResolvedValue(fakeLead);
-
-    const input = {
+    await createLead(db, {
       first_name: 'John',
       last_name: 'Doe',
       phone: '2125551234',
       channel: 'website_form',
       location_id: 'loc-1',
-    };
+    }, eventBus, 'user-1');
 
-    await createLead(db, input, eventBus, 'user-1');
-
-    expect(leadRepository.createLead).toHaveBeenCalledWith(db, expect.objectContaining({
+    expect(leadRepository.createLead).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       score: 0,
       current_pipeline: 'none',
       contact_status: 'active',
@@ -124,8 +131,6 @@ describe('createLead', () => {
   });
 
   it('normalizes phone before inserting', async () => {
-    vi.mocked(leadRepository.createLead).mockResolvedValue(fakeLead);
-
     await createLead(db, {
       first_name: 'John',
       last_name: 'Doe',
@@ -134,9 +139,23 @@ describe('createLead', () => {
       location_id: 'loc-1',
     }, eventBus, 'user-1');
 
-    expect(leadRepository.createLead).toHaveBeenCalledWith(db, expect.objectContaining({
+    expect(leadRepository.createLead).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       phone: '+12125551234',
     }));
+  });
+
+  it('inserts lead and activity in the same transaction', async () => {
+    await createLead(db, {
+      first_name: 'John',
+      last_name: 'Doe',
+      phone: '2125551234',
+      channel: 'website_form',
+      location_id: 'loc-1',
+    }, eventBus, 'user-1');
+
+    // Both repository calls must receive the transaction object, not the outer db
+    expect(leadRepository.createLead).toHaveBeenCalledWith(mockTrx, expect.anything());
+    expect(activityRepository.insertActivity).toHaveBeenCalledWith(mockTrx, expect.anything());
   });
 
   it('throws on invalid phone', async () => {
@@ -176,7 +195,7 @@ describe('updateLead', () => {
 
     await updateLead(db, fakeLead.id, { phone: '(212) 555-9876' }, eventBus);
 
-    expect(leadRepository.updateLead).toHaveBeenCalledWith(db, fakeLead.id, {
+    expect(leadRepository.updateLead).toHaveBeenCalledWith(expect.anything(), fakeLead.id, {
       phone: '+12125559876',
     });
   });
@@ -186,7 +205,23 @@ describe('updateLead', () => {
 
     await updateLead(db, fakeLead.id, { first_name: 'Jane' }, eventBus);
 
-    expect(leadRepository.updateLead).toHaveBeenCalledWith(db, fakeLead.id, { first_name: 'Jane' });
+    expect(leadRepository.updateLead).toHaveBeenCalledWith(expect.anything(), fakeLead.id, { first_name: 'Jane' });
+  });
+
+  it('throws lead not found when repository returns null', async () => {
+    vi.mocked(leadRepository.updateLead).mockResolvedValue(null as unknown as typeof fakeLead);
+
+    await expect(updateLead(db, '00000000-0000-0000-0000-000000000000', {}, eventBus))
+      .rejects.toThrow('lead not found');
+  });
+
+  it('updates lead and inserts activity in the same transaction', async () => {
+    vi.mocked(leadRepository.updateLead).mockResolvedValue(fakeLead);
+
+    await updateLead(db, fakeLead.id, { first_name: 'Jane' }, eventBus);
+
+    expect(leadRepository.updateLead).toHaveBeenCalledWith(mockTrx, expect.anything(), expect.anything());
+    expect(activityRepository.insertActivity).toHaveBeenCalledWith(mockTrx, expect.anything());
   });
 });
 
@@ -196,8 +231,17 @@ describe('archiveLead', () => {
 
     const result = await archiveLead(db, fakeLead.id, eventBus);
 
-    expect(leadRepository.archiveLead).toHaveBeenCalledWith(db, fakeLead.id);
+    expect(leadRepository.archiveLead).toHaveBeenCalledWith(expect.anything(), fakeLead.id);
     expect(result.archived_at).toBe('2026-04-06');
+  });
+
+  it('archives lead and inserts activity in the same transaction', async () => {
+    vi.mocked(leadRepository.archiveLead).mockResolvedValue({ ...fakeLead, archived_at: '2026-04-06' });
+
+    await archiveLead(db, fakeLead.id, eventBus);
+
+    expect(leadRepository.archiveLead).toHaveBeenCalledWith(mockTrx, expect.anything());
+    expect(activityRepository.insertActivity).toHaveBeenCalledWith(mockTrx, expect.anything());
   });
 });
 

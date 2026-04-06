@@ -248,7 +248,15 @@ export async function leadsRoutes(
 
     // Bulk lookup mode — bypass pagination
     if (query.phones) {
-      const leads = await leadRepository.findByPhones(db, query.phones, userLocations);
+      const normalizedPhones: string[] = [];
+      for (const raw of query.phones) {
+        try {
+          normalizedPhones.push(leadService.normalizePhone(raw));
+        } catch {
+          return reply.status(400).send({ error: `invalid phone number: ${raw}` });
+        }
+      }
+      const leads = await leadRepository.findByPhones(db, normalizedPhones, userLocations);
       return reply.status(200).send({ leads });
     }
     if (query.emails) {
@@ -328,6 +336,9 @@ export async function leadsRoutes(
       return reply.status(200).send(lead);
     } catch (err) {
       if (err instanceof Error) {
+        if (err.message === 'lead not found') {
+          return reply.status(404).send({ error: 'not found' });
+        }
         if (err.message === 'attribution fields are immutable') {
           return reply.status(400).send({ error: 'attribution fields are immutable' });
         }

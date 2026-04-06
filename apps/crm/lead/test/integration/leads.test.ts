@@ -212,6 +212,17 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
       expect(res.json().error).toBe('attribution fields are immutable');
     });
 
+    it('returns 404 when lead does not exist', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/leads/00000000-0000-0000-0000-000000000099',
+        headers: { authorization: `Bearer ${agentToken}` },
+        payload: { first_name: 'Ghost' },
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+
     it('returns 403 for location_id update by non-manager', async () => {
       const create = await app.inject({
         method: 'POST',

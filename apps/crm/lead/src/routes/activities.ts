@@ -62,7 +62,10 @@ export async function activityRoutes(
     try {
       const response = await fetch(env.AI_SERVICE_URL + '/ai/complete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${env.SERVICE_AUTH_TOKEN}`,
+        },
         body: JSON.stringify({
           prompt_id: 'lead_score_commentary',
           context: {

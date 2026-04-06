@@ -122,12 +122,12 @@ export function findByAdPlatformLeadId(db: Knex, adPlatformLeadId: string): Prom
     .then((row) => (row as Lead) ?? null);
 }
 
-export function updateLead(db: Knex, id: string, fields: Partial<UpdateableLeadFields>): Promise<Lead> {
+export function updateLead(db: Knex, id: string, fields: Partial<UpdateableLeadFields>): Promise<Lead | null> {
   return db(TABLE)
     .where({ id })
     .update({ ...fields, updated_at: db.fn.now() })
     .returning('*')
-    .then((rows) => rows[0] as Lead);
+    .then((rows) => (rows[0] as Lead) ?? null);
 }
 
 export function archiveLead(db: Knex, id: string): Promise<Lead> {
@@ -331,14 +331,14 @@ export async function findFlaggedDuplicates(
   if (cursor) {
     const decoded = decodeCursor(cursor);
     query = query.whereRaw(
-      `(created_at, id) < (?, ?)`,
+      `(crm_leads.leads.created_at, crm_leads.leads.id) < (?, ?)`,
       [decoded.lastSeenSortValue, decoded.lastSeenId],
     );
   }
 
   query = query
-    .orderBy('created_at', 'desc')
-    .orderBy('id', 'desc')
+    .orderBy('crm_leads.leads.created_at', 'desc')
+    .orderBy('crm_leads.leads.id', 'desc')
     .limit(effectiveLimit + 1);
 
   const rows = (await query) as Lead[];

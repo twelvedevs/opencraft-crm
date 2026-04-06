@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import type { EventBus } from '@ortho/event-bus';
 import { parsePhoneNumber } from 'libphonenumber-js';
+import { createLogger } from '@ortho/logger';
 import * as leadRepository from '../repositories/lead-repository.js';
 import * as activityRepository from '../repositories/activity-repository.js';
 import type { Lead, CreateLeadData, ListLeadsParams } from '../repositories/lead-repository.js';
@@ -10,6 +11,8 @@ import {
   publishLeadArchived,
 } from '../events/publisher.js';
 
+const log = createLogger('crm-lead');
+
 export type { Lead };
 
 export type CreateLeadInput = Omit<
@@ -17,6 +20,8 @@ export type CreateLeadInput = Omit<
   'score' | 'current_pipeline' | 'contact_status' | 'duplicate_status'
 >;
 
+// Only user-mutable fields are exposed — internal fields (score, current_pipeline,
+// pipeline/stage cache, merge/archive state, attribution) must not be set via this type.
 export type UpdateLeadInput = Partial<{
   first_name: string;
   last_name: string;
@@ -25,31 +30,6 @@ export type UpdateLeadInput = Partial<{
   treatment_interest: string | null;
   date_of_birth: string | null;
   location_id: string;
-  contact_status: string;
-  current_pipeline: string;
-  current_stage: string | null;
-  last_activity_at: string | null;
-  score: number;
-  duplicate_status: string;
-  duplicate_of_id: string | null;
-  merged_into_id: string | null;
-  archived_at: string | null;
-  // Attribution fields (immutable — will be rejected)
-  first_touch_source: string | null;
-  first_touch_medium: string | null;
-  first_touch_campaign: string | null;
-  first_touch_ad: string | null;
-  first_touch_keyword: string | null;
-  first_touch_landing_page: string | null;
-  first_touch_referring_url: string | null;
-  first_touch_device: string | null;
-  call_tracking_number: string | null;
-  referrer_id: string | null;
-  referrer_type: string | null;
-  referral_code: string | null;
-  ad_platform_lead_id: string | null;
-  created_by_location: string | null;
-  channel: string;
 }>;
 
 const ATTRIBUTION_FIELDS = [
@@ -117,31 +97,30 @@ export async function createLead(
     duplicate_of_id = oldest.id;
   }
 
-  // Step 6 — insert lead with dedup fields
-  const lead = await leadRepository.createLead(db, {
-    ...data,
-    phone,
-    score: 0,
-    current_pipeline: 'none',
-    contact_status: 'active',
-    duplicate_status,
-    duplicate_of_id,
-  });
+  // Steps 6-7 — insert lead + activity atomically
+  const lead = await db.transaction(async (trx) => {
+    const created = await leadRepository.createLead(trx, {
+      ...data,
+      phone,
+      score: 0,
+      current_pipeline: 'none',
+      contact_status: 'active',
+      duplicate_status,
+      duplicate_of_id,
+    });
 
-  // Timeline entry — fire-and-don't-block
-  try {
-    await activityRepository.insertActivity(db, {
-      lead_id: lead.id,
+    await activityRepository.insertActivity(trx, {
+      lead_id: created.id,
       event_type: 'lead.created',
       actor_type: 'staff',
       actor_id: createdBy,
-      payload: lead as unknown as Record<string, unknown>,
-      occurred_at: lead.created_at,
-      source_event_id: `internal:lead.created:${lead.id}`,
+      payload: created as unknown as Record<string, unknown>,
+      occurred_at: created.created_at,
+      source_event_id: `internal:lead.created:${created.id}`,
     });
-  } catch (err) {
-    console.warn('Failed to insert lead.created activity', err);
-  }
+
+    return created;
+  });
 
   // Publish event
   await publishLeadCreated(eventBus, {
@@ -180,24 +159,29 @@ export async function updateLead(
     fields.phone = normalizePhone(fields.phone);
   }
 
-  const lead = await leadRepository.updateLead(db, id, fields);
+  // Update lead + insert activity atomically
+  const lead = await db.transaction(async (trx) => {
+    const updated = await leadRepository.updateLead(trx, id, fields);
+    if (!updated) {
+      throw new Error('lead not found');
+    }
 
-  const changed_fields = Object.keys(fields);
+    const changed_fields = Object.keys(fields);
 
-  // Timeline entry — fire-and-don't-block
-  try {
-    await activityRepository.insertActivity(db, {
-      lead_id: lead.id,
+    await activityRepository.insertActivity(trx, {
+      lead_id: updated.id,
       event_type: 'lead.updated',
       actor_type: 'staff',
       actor_id: null,
       payload: { changed_fields },
-      occurred_at: lead.updated_at,
-      source_event_id: `internal:lead.updated:${lead.id}:${lead.updated_at}`,
+      occurred_at: updated.updated_at,
+      source_event_id: `internal:lead.updated:${updated.id}:${updated.updated_at}`,
     });
-  } catch (err) {
-    console.warn('Failed to insert lead.updated activity', err);
-  }
+
+    return updated;
+  });
+
+  const changed_fields = Object.keys(fields);
 
   // Publish event
   await publishLeadUpdated(eventBus, {
@@ -210,22 +194,22 @@ export async function updateLead(
 }
 
 export async function archiveLead(db: Knex, id: string, eventBus: EventBus): Promise<Lead> {
-  const lead = await leadRepository.archiveLead(db, id);
+  // Archive lead + insert activity atomically
+  const lead = await db.transaction(async (trx) => {
+    const archived = await leadRepository.archiveLead(trx, id);
 
-  // Timeline entry — fire-and-don't-block
-  try {
-    await activityRepository.insertActivity(db, {
-      lead_id: lead.id,
+    await activityRepository.insertActivity(trx, {
+      lead_id: archived.id,
       event_type: 'lead.archived',
       actor_type: 'staff',
       actor_id: null,
       payload: {},
-      occurred_at: lead.updated_at,
-      source_event_id: `internal:lead.archived:${lead.id}`,
+      occurred_at: archived.updated_at,
+      source_event_id: `internal:lead.archived:${archived.id}`,
     });
-  } catch (err) {
-    console.warn('Failed to insert lead.archived activity', err);
-  }
+
+    return archived;
+  });
 
   // Publish event
   await publishLeadArchived(eventBus, {

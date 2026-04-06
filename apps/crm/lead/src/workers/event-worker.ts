@@ -31,6 +31,7 @@ function wrapHandler(
       await handler(event, db, passBus);
     } catch (err) {
       log.error({ err, event_id: event.event_id }, 'handler error');
+      throw err;
     }
   });
 }

@@ -27,7 +27,7 @@ export async function handleLeadArchived(
   await db.transaction(async (trx) => {
     // 1. Clear pipeline cache
     await trx.raw(
-      `UPDATE crm_leads.leads SET current_pipeline = NULL, current_stage = NULL, updated_at = now() WHERE id = ?`,
+      `UPDATE crm_leads.leads SET current_pipeline = 'none', current_stage = NULL, updated_at = now() WHERE id = ?`,
       [lead_id],
     );
 

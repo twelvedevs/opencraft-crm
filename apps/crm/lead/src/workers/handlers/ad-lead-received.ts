@@ -32,6 +32,7 @@ export async function handleAdLeadReceived(
   } else if (platformLower.includes('facebook') || platformLower.includes('meta')) {
     channel = 'facebook_ads';
   } else {
+    log.warn({ platform }, 'ad_lead.received: unrecognized platform, defaulting to google_ads');
     channel = 'google_ads';
   }
 

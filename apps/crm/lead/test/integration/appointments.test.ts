@@ -156,6 +156,16 @@ describe.skipIf(!HAS_DB)('appointment routes (integration)', () => {
 
   // ─── GET /leads/:id/appointments ───────────────────────────
 
+  it('GET returns 404 when lead does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/leads/00000000-0000-0000-0000-000000000099/appointments',
+      headers: { authorization: `Bearer ${agentToken}` },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+
   it('GET returns array including the created appointment', async () => {
     const leadId = await createLead();
 

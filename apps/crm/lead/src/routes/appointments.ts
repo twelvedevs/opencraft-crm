@@ -3,6 +3,7 @@ import type { Knex } from 'knex';
 import type { EventBus } from '@ortho/event-bus';
 import { Type } from '@sinclair/typebox';
 import '@ortho/auth-middleware';
+import * as leadRepository from '../repositories/lead-repository.js';
 import * as appointmentService from '../services/appointment-service.js';
 import * as appointmentRepository from '../repositories/appointment-repository.js';
 import { serviceAuthHook } from '../middleware/service-auth.js';
@@ -66,6 +67,10 @@ export async function appointmentRoutes(
     schema: { params: LeadIdParams },
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
+    const lead = await leadRepository.findById(db, id);
+    if (!lead) {
+      return reply.status(404).send({ error: 'not found' });
+    }
     const appointments = await appointmentService.listAppointments(db, id);
     return reply.status(200).send(appointments);
   });

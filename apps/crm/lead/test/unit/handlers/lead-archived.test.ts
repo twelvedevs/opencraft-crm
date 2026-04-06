@@ -103,11 +103,11 @@ describe('handleLeadArchived', () => {
     expect(db.transaction).not.toHaveBeenCalled();
   });
 
-  it('clears current_pipeline and current_stage to NULL', async () => {
+  it("clears current_pipeline to 'none' and current_stage to NULL", async () => {
     await handleLeadArchived(makeEvent(), db);
 
     expect((mockTrx as unknown as Record<string, unknown>).raw).toHaveBeenCalledWith(
-      expect.stringContaining('current_pipeline = NULL'),
+      expect.stringContaining("current_pipeline = 'none'"),
       ['lead-1'],
     );
   });
