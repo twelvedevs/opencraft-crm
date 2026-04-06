@@ -6,6 +6,7 @@ import { env } from './env.js';
 import db from './db.js';
 import { leadsRoutes } from './routes/leads.js';
 import { appointmentRoutes } from './routes/appointments.js';
+import { tagRoutes } from './routes/tags.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const log = createLogger('crm-lead');
@@ -22,6 +23,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(leadsRoutes, { db });
   await app.register(appointmentRoutes, { db });
+  await app.register(tagRoutes, { db });
 
   return app;
 }
