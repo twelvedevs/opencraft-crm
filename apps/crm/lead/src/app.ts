@@ -5,6 +5,7 @@ import { createLogger } from '@ortho/logger';
 import { env } from './env.js';
 import db from './db.js';
 import { leadsRoutes } from './routes/leads.js';
+import { appointmentRoutes } from './routes/appointments.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const log = createLogger('crm-lead');
@@ -20,6 +21,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.get('/health', async () => ({ ok: true }));
 
   await app.register(leadsRoutes, { db });
+  await app.register(appointmentRoutes, { db });
 
   return app;
 }
