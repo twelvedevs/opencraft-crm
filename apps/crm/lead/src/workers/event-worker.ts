@@ -2,6 +2,7 @@ import type { Knex } from 'knex';
 import { createEventBus, type EventBus, type OrthoEvent } from '@ortho/event-bus';
 import { createLogger } from '@ortho/logger';
 import { handleAdLeadReceived } from './handlers/ad-lead-received.js';
+import { handleStageChanged } from './handlers/stage-changed.js';
 
 const log = createLogger('crm-lead');
 
@@ -32,7 +33,7 @@ export function createEventWorker(db: Knex): { start: () => Promise<void>; stop:
   // 13 subscriptions in specified order
   // ad_lead.received is the only handler that receives bus as 3rd argument
   wrapHandler(bus, 'ad_lead.received', handleAdLeadReceived as Handler, db, bus);
-  wrapHandler(bus, 'lead.stage_changed', noop, db);
+  wrapHandler(bus, 'lead.stage_changed', handleStageChanged, db);
   wrapHandler(bus, 'lead.archived', noop, db);
   wrapHandler(bus, 'lead.converted', noop, db);
   wrapHandler(bus, 'opt_out.received', noop, db);
