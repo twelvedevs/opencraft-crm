@@ -3,6 +3,8 @@ import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
 import { createLogger } from '@ortho/logger';
 import { env } from './env.js';
+import db from './db.js';
+import { leadsRoutes } from './routes/leads.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const log = createLogger('crm-lead');
@@ -16,6 +18,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   app.get('/health', async () => ({ ok: true }));
+
+  await app.register(leadsRoutes, { db });
 
   return app;
 }
