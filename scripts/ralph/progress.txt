@@ -257,3 +257,18 @@ Started: Mon Apr  6 09:30:41 UTC 2026
   - `truncateTables()` in `beforeEach` ensures test isolation — TRUNCATE CASCADE handles FK dependencies
   - Integration tests need the full app with all route plugins registered (not just the one under test) because shared middleware/hooks
 ---
+
+## 2026-04-06 - US-016
+- Created 4 integration test files for remaining route groups:
+  - appointments.test.ts (6 tests): POST creates with status 'scheduled', POST 404 for missing lead, PATCH updates status, DELETE with SERVICE_AUTH_TOKEN 204, DELETE without token 401, GET returns array
+  - tags.test.ts (7 tests): POST global tag 201, POST duplicate 409, POST location-scoped tag, GET returns location + global tags, POST /leads/:id/tags applies tag, DELETE /leads/:id/tags removes tag, DELETE /tags/:id removes from system
+  - activities.test.ts (5 tests): empty array for fresh lead, ordered DESC after insert, event_type filter, cursor pagination, 404 for unknown lead
+  - score-commentary.test.ts (3 tests): 200 with mocked AI success, 503 on AI non-2xx, 404 for unknown lead
+- 125 total tests (82 unit passing + 43 integration skipped without DB)
+- Files changed: 4 new files in test/integration/
+- **Learnings for future iterations:**
+  - To mock AI service fetch in integration tests while keeping JWKS mock: capture the helpers' mockFetch as `originalFetch`, then wrap it in a new function that intercepts AI URLs and delegates the rest
+  - For score-commentary tests, restore `globalThis.fetch` in `beforeEach` to avoid test pollution
+  - Insert activities directly via `db('crm_leads.lead_activities').insert(...)` rather than going through routes (no activity creation route exists)
+  - Tag integration tests need marketing_manager role for POST/DELETE /tags (narrower than general manager+ role)
+---
