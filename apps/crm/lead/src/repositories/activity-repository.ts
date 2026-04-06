@@ -37,12 +37,25 @@ function encodeCursor(data: ActivityCursorData): string {
   return Buffer.from(JSON.stringify(data)).toString('base64');
 }
 
-export function insertActivity(db: Knex, data: InsertActivityData): Promise<void> {
-  return db(TABLE)
-    .insert(data)
-    .onConflict('source_event_id')
-    .ignore()
-    .then(() => undefined);
+export async function insertActivity(db: Knex, data: InsertActivityData): Promise<string | null> {
+  const rows = await db.raw(
+    `INSERT INTO ${TABLE} (lead_id, event_type, actor_type, actor_id, payload, occurred_at, source_event_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (source_event_id) DO NOTHING
+     RETURNING id`,
+    [data.lead_id, data.event_type, data.actor_type, data.actor_id, JSON.stringify(data.payload), data.occurred_at, data.source_event_id],
+  );
+  const insertedId: string | undefined = rows.rows?.[0]?.id;
+  if (insertedId) {
+    await db.raw(
+      `UPDATE crm_leads.leads
+       SET last_activity_at = GREATEST(COALESCE(last_activity_at, '1970-01-01'::timestamptz), ?::timestamptz),
+           updated_at = now()
+       WHERE id = ?`,
+      [data.occurred_at, data.lead_id],
+    );
+  }
+  return insertedId ?? null;
 }
 
 export async function listActivities(
@@ -85,6 +98,14 @@ export async function listActivities(
   }
 
   return { activities: rows, nextCursor };
+}
+
+export async function findLastInboundAt(db: Knex, leadId: string): Promise<Date | null> {
+  const row = await db(TABLE)
+    .where({ lead_id: leadId, event_type: 'inbound_message.received' })
+    .orderBy('occurred_at', 'desc')
+    .first('occurred_at');
+  return row ? new Date(row.occurred_at as string) : null;
 }
 
 export function findBySourceEventId(db: Knex, sourceEventId: string): Promise<Activity | null> {

@@ -48,11 +48,12 @@ function makeDb(qb: Record<string, unknown>): Knex {
 
 describe('activity-repository', () => {
   describe('insertActivity', () => {
-    it('uses ON CONFLICT (source_event_id) DO NOTHING', async () => {
-      const qb = makeQueryBuilder({
-        then: vi.fn((_cb: (v: unknown) => unknown) => Promise.resolve(_cb(undefined))),
-      });
-      const db = makeDb(qb);
+    it('inserts row and updates last_activity_at when row is new', async () => {
+      const db = vi.fn() as unknown as Knex;
+      (db as unknown as Record<string, unknown>).raw = vi.fn()
+        .mockResolvedValueOnce({ rows: [{ id: 'act-new' }] })
+        .mockResolvedValueOnce(undefined);
+      (db as unknown as Record<string, unknown>)['fn'] = { now: vi.fn().mockReturnValue('NOW()') };
 
       const data = {
         lead_id: 'lead-1',
@@ -64,12 +65,36 @@ describe('activity-repository', () => {
         source_event_id: 'evt-abc',
       };
 
-      await insertActivity(db, data);
+      const result = await insertActivity(db, data);
 
-      expect(db).toHaveBeenCalledWith('crm_leads.lead_activities');
-      expect(qb.insert).toHaveBeenCalledWith(data);
-      expect(qb.onConflict).toHaveBeenCalledWith('source_event_id');
-      expect(qb.ignore).toHaveBeenCalled();
+      expect(result).toBe('act-new');
+      const rawFn = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).raw;
+      expect(rawFn).toHaveBeenCalledTimes(2);
+      // Second call is the last_activity_at UPDATE
+      expect(rawFn.mock.calls[1][0]).toContain('last_activity_at');
+    });
+
+    it('returns null and skips UPDATE when ON CONFLICT skips', async () => {
+      const db = vi.fn() as unknown as Knex;
+      (db as unknown as Record<string, unknown>).raw = vi.fn()
+        .mockResolvedValueOnce({ rows: [] });
+      (db as unknown as Record<string, unknown>)['fn'] = { now: vi.fn().mockReturnValue('NOW()') };
+
+      const data = {
+        lead_id: 'lead-1',
+        event_type: 'lead.created',
+        actor_type: 'system' as const,
+        actor_id: null,
+        payload: {},
+        occurred_at: '2026-01-01T12:00:00Z',
+        source_event_id: 'evt-abc',
+      };
+
+      const result = await insertActivity(db, data);
+
+      expect(result).toBeNull();
+      const rawFn = (db as unknown as Record<string, ReturnType<typeof vi.fn>>).raw;
+      expect(rawFn).toHaveBeenCalledTimes(1); // No UPDATE call
     });
   });
 
