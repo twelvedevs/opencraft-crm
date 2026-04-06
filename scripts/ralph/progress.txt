@@ -10,6 +10,7 @@
 - Phone lookup handler pattern: normalizePhone (warn+return on fail) → findByPhone (warn+return if empty) → take `leads[0]` → db.transaction with status/score/activity updates
 - Cast `lead.contact_status as ContactStatus` when passing to applyOptOut/removeOptOut/applyHardBounce
 - Handler unit test mock pattern: vi.mock repos + score-calculator, mockTrx with `.raw`/`.fn`, db with `{ transaction: cb => cb(mockTrx) }`, use `callOrder[]` array for verifying execution order
+- Phone numbers in test fixtures must use valid area codes (e.g., `+12125551234`) — `normalizePhone` rejects 555 area codes
 
 # Ralph Progress Log
 Started: Mon Apr  6 14:06:40 UTC 2026
@@ -149,4 +150,15 @@ Started: Mon Apr  6 14:06:40 UTC 2026
   - To test call order within transactions, use mock implementations that push to a shared `callOrder[]` array, then assert the array order
   - `mockTrx.raw` is accessed as `(mockTrx as unknown as Record<string, unknown>).raw` due to TypeScript typing
   - Handler tests don't need to mock `@ortho/logger` — the logger module works fine without mocking
+---
+
+## 2026-04-06 16:24 - US-013
+- Created unit tests for 9 lookup handlers: opt-out-received (6 tests), opt-out-removed (3 tests), email-bounced (5 tests), message-delivered (3 tests), message-failed (2 tests), inbound-message-received (4 tests), referral-converted (2 tests), sequence-step-completed (2 tests), workflow-triggered (3 tests) — 30 tests total
+- Tests cover: invalid phone early return, no lead found early return, soft bounce early return (email-bounced), contact_status transitions (active→sms_opted_out, email_invalid→fully_unreachable, sms_opted_out→active, fully_unreachable→email_invalid, active→email_invalid, sms_opted_out→fully_unreachable), score recalculation with updated status, activity-only handlers (message-failed), entity_type filtering (sequence/workflow), actor_type='automation' for sequence/workflow handlers
+- Files changed: `test/unit/handlers/opt-out-received.test.ts` (new), `test/unit/handlers/opt-out-removed.test.ts` (new), `test/unit/handlers/email-bounced.test.ts` (new), `test/unit/handlers/message-delivered.test.ts` (new), `test/unit/handlers/message-failed.test.ts` (new), `test/unit/handlers/inbound-message-received.test.ts` (new), `test/unit/handlers/referral-converted.test.ts` (new), `test/unit/handlers/sequence-step-completed.test.ts` (new), `test/unit/handlers/workflow-triggered.test.ts` (new)
+- **Learnings for future iterations:**
+  - Phone numbers in test fixtures must use valid area codes (e.g., `+12125551234` not `+15551234567`) — `normalizePhone` uses libphonenumber which rejects 555 area codes
+  - Contact status mocks: must mock the specific function from `contact-status.js` (e.g., `applyOptOut`, `removeOptOut`, `applyHardBounce`) — they are imported as named exports
+  - For handlers that only insert activity (no score/state update), assert `trx.raw` was NOT called to verify no score update
+  - Timeline-only handler tests (referral, sequence, workflow) are the simplest — just mock findById + insertActivity
 ---
