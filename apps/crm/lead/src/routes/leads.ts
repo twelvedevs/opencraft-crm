@@ -88,7 +88,7 @@ export async function leadsRoutes(
   app: FastifyInstance,
   opts: { db: Knex; eventBus: EventBus },
 ): Promise<void> {
-  const { db } = opts;
+  const { db, eventBus } = opts;
 
   // POST /leads
   app.post('/leads', {
@@ -120,7 +120,12 @@ export async function leadsRoutes(
     };
 
     try {
-      const lead = await leadService.createLead(db, body as Parameters<typeof leadService.createLead>[1]);
+      const lead = await leadService.createLead(
+        db,
+        body as Parameters<typeof leadService.createLead>[1],
+        eventBus,
+        req.user!.sub,
+      );
       return reply.status(201).send(lead);
     } catch (err) {
       if (err instanceof Error && err.message === 'invalid phone number') {
@@ -248,7 +253,7 @@ export async function leadsRoutes(
     }
 
     try {
-      const lead = await leadService.updateLead(db, id, body);
+      const lead = await leadService.updateLead(db, id, body, eventBus);
       return reply.status(200).send(lead);
     } catch (err) {
       if (err instanceof Error) {
@@ -275,7 +280,7 @@ export async function leadsRoutes(
       return reply.status(404).send({ error: 'not found' });
     }
 
-    await leadService.archiveLead(db, id);
+    await leadService.archiveLead(db, id, eventBus);
     return reply.status(204).send();
   });
 }

@@ -41,7 +41,7 @@ export async function appointmentRoutes(
   app: FastifyInstance,
   opts: { db: Knex; eventBus: EventBus },
 ): Promise<void> {
-  const { db } = opts;
+  const { db, eventBus } = opts;
 
   // POST /leads/:id/appointments
   app.post('/leads/:id/appointments', {
@@ -51,7 +51,7 @@ export async function appointmentRoutes(
     const body = req.body as { appointment_type: string; scheduled_at: string; notes?: string };
 
     try {
-      const appointment = await appointmentService.createAppointment(db, id, body, req.user!.sub);
+      const appointment = await appointmentService.createAppointment(db, id, body, req.user!.sub, eventBus);
       return reply.status(201).send(appointment);
     } catch (err) {
       if (err instanceof Error && err.message === 'lead not found') {
@@ -78,7 +78,7 @@ export async function appointmentRoutes(
     const body = req.body as { status?: string; scheduled_at?: string; notes?: string };
 
     try {
-      const appointment = await appointmentService.updateAppointment(db, appt_id, id, body);
+      const appointment = await appointmentService.updateAppointment(db, appt_id, id, body, eventBus);
       return reply.status(200).send(appointment);
     } catch (err) {
       if (err instanceof Error && err.message === 'appointment not found') {

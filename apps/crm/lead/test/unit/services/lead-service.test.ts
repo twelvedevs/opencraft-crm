@@ -11,7 +11,18 @@ vi.mock('../../../src/repositories/lead-repository.js', () => ({
   findByAdPlatformLeadId: vi.fn(),
 }));
 
+vi.mock('../../../src/repositories/activity-repository.js', () => ({
+  insertActivity: vi.fn(),
+}));
+
+vi.mock('../../../src/events/publisher.js', () => ({
+  publishLeadCreated: vi.fn(),
+  publishLeadUpdated: vi.fn(),
+  publishLeadArchived: vi.fn(),
+}));
+
 import type { Knex } from 'knex';
+import type { EventBus } from '@ortho/event-bus';
 import {
   normalizePhone,
   createLead,
@@ -23,6 +34,7 @@ import {
 import * as leadRepository from '../../../src/repositories/lead-repository.js';
 
 const db = {} as Knex;
+const eventBus = { publish: vi.fn(), stop: vi.fn() } as unknown as EventBus;
 
 const fakeLead = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -101,7 +113,7 @@ describe('createLead', () => {
       location_id: 'loc-1',
     };
 
-    await createLead(db, input);
+    await createLead(db, input, eventBus, 'user-1');
 
     expect(leadRepository.createLead).toHaveBeenCalledWith(db, expect.objectContaining({
       score: 0,
@@ -120,7 +132,7 @@ describe('createLead', () => {
       phone: '(212) 555-1234',
       channel: 'website_form',
       location_id: 'loc-1',
-    });
+    }, eventBus, 'user-1');
 
     expect(leadRepository.createLead).toHaveBeenCalledWith(db, expect.objectContaining({
       phone: '+12125551234',
@@ -134,7 +146,7 @@ describe('createLead', () => {
       phone: '0000000000',
       channel: 'website_form',
       location_id: 'loc-1',
-    })).rejects.toThrow('invalid phone number');
+    }, eventBus, 'user-1')).rejects.toThrow('invalid phone number');
   });
 });
 
@@ -154,7 +166,7 @@ describe('updateLead', () => {
     'referrer_id',
     'ad_platform_lead_id',
   ] as const)('throws when attribution field "%s" is present', async (field) => {
-    await expect(updateLead(db, fakeLead.id, { [field]: 'val' })).rejects.toThrow(
+    await expect(updateLead(db, fakeLead.id, { [field]: 'val' }, eventBus)).rejects.toThrow(
       'attribution fields are immutable',
     );
   });
@@ -162,7 +174,7 @@ describe('updateLead', () => {
   it('normalizes phone if present', async () => {
     vi.mocked(leadRepository.updateLead).mockResolvedValue({ ...fakeLead, phone: '+12125559876' });
 
-    await updateLead(db, fakeLead.id, { phone: '(212) 555-9876' });
+    await updateLead(db, fakeLead.id, { phone: '(212) 555-9876' }, eventBus);
 
     expect(leadRepository.updateLead).toHaveBeenCalledWith(db, fakeLead.id, {
       phone: '+12125559876',
@@ -172,7 +184,7 @@ describe('updateLead', () => {
   it('passes non-attribution fields through', async () => {
     vi.mocked(leadRepository.updateLead).mockResolvedValue({ ...fakeLead, first_name: 'Jane' });
 
-    await updateLead(db, fakeLead.id, { first_name: 'Jane' });
+    await updateLead(db, fakeLead.id, { first_name: 'Jane' }, eventBus);
 
     expect(leadRepository.updateLead).toHaveBeenCalledWith(db, fakeLead.id, { first_name: 'Jane' });
   });
@@ -182,7 +194,7 @@ describe('archiveLead', () => {
   it('calls leadRepository.archiveLead', async () => {
     vi.mocked(leadRepository.archiveLead).mockResolvedValue({ ...fakeLead, archived_at: '2026-04-06' });
 
-    const result = await archiveLead(db, fakeLead.id);
+    const result = await archiveLead(db, fakeLead.id, eventBus);
 
     expect(leadRepository.archiveLead).toHaveBeenCalledWith(db, fakeLead.id);
     expect(result.archived_at).toBe('2026-04-06');

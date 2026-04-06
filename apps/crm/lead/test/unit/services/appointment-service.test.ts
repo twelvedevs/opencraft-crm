@@ -12,7 +12,12 @@ vi.mock('../../../src/repositories/appointment-repository.js', () => ({
   deleteAppointment: vi.fn(),
 }));
 
+vi.mock('../../../src/events/publisher.js', () => ({
+  publishAppointmentUpdated: vi.fn(),
+}));
+
 import type { Knex } from 'knex';
+import type { EventBus } from '@ortho/event-bus';
 import {
   createAppointment,
   updateAppointment,
@@ -23,6 +28,7 @@ import * as leadRepository from '../../../src/repositories/lead-repository.js';
 import * as appointmentRepository from '../../../src/repositories/appointment-repository.js';
 
 const db = {} as Knex;
+const eventBus = { publish: vi.fn(), stop: vi.fn() } as unknown as EventBus;
 
 const fakeLead = {
   id: 'lead-1',
@@ -86,7 +92,7 @@ describe('createAppointment', () => {
     const result = await createAppointment(db, 'lead-1', {
       appointment_type: 'exam',
       scheduled_at: '2026-04-10T10:00:00Z',
-    }, 'user-1');
+    }, 'user-1', eventBus);
 
     expect(leadRepository.findById).toHaveBeenCalledWith(db, 'lead-1');
     expect(appointmentRepository.createAppointment).toHaveBeenCalledWith(db, {
@@ -108,7 +114,7 @@ describe('createAppointment', () => {
       createAppointment(db, 'missing-lead', {
         appointment_type: 'exam',
         scheduled_at: '2026-04-10T10:00:00Z',
-      }, 'user-1'),
+      }, 'user-1', eventBus),
     ).rejects.toThrow('lead not found');
   });
 });
@@ -121,7 +127,7 @@ describe('updateAppointment', () => {
       status: 'completed',
     });
 
-    const result = await updateAppointment(db, 'appt-1', 'lead-1', { status: 'completed' });
+    const result = await updateAppointment(db, 'appt-1', 'lead-1', { status: 'completed' }, eventBus);
 
     expect(appointmentRepository.findById).toHaveBeenCalledWith(db, 'appt-1');
     expect(appointmentRepository.updateAppointment).toHaveBeenCalledWith(db, 'appt-1', { status: 'completed' });
@@ -132,7 +138,7 @@ describe('updateAppointment', () => {
     vi.mocked(appointmentRepository.findById).mockResolvedValue(null);
 
     await expect(
-      updateAppointment(db, 'missing', 'lead-1', { status: 'completed' }),
+      updateAppointment(db, 'missing', 'lead-1', { status: 'completed' }, eventBus),
     ).rejects.toThrow('appointment not found');
   });
 
@@ -143,7 +149,7 @@ describe('updateAppointment', () => {
     });
 
     await expect(
-      updateAppointment(db, 'appt-1', 'lead-1', { status: 'completed' }),
+      updateAppointment(db, 'appt-1', 'lead-1', { status: 'completed' }, eventBus),
     ).rejects.toThrow('appointment not found');
   });
 });

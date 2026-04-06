@@ -1,7 +1,14 @@
 import type { Knex } from 'knex';
+import type { EventBus } from '@ortho/event-bus';
 import { parsePhoneNumber } from 'libphonenumber-js';
 import * as leadRepository from '../repositories/lead-repository.js';
+import * as activityRepository from '../repositories/activity-repository.js';
 import type { Lead, CreateLeadData, ListLeadsParams } from '../repositories/lead-repository.js';
+import {
+  publishLeadCreated,
+  publishLeadUpdated,
+  publishLeadArchived,
+} from '../events/publisher.js';
 
 export type { Lead };
 
@@ -71,7 +78,12 @@ export function normalizePhone(phone: string): string {
   return parsed.format('E.164');
 }
 
-export async function createLead(db: Knex, data: CreateLeadInput): Promise<Lead> {
+export async function createLead(
+  db: Knex,
+  data: CreateLeadInput,
+  eventBus: EventBus,
+  createdBy: string,
+): Promise<Lead> {
   const phone = normalizePhone(data.phone);
 
   // Step 1 — ad_platform_lead_id idempotency
@@ -106,7 +118,7 @@ export async function createLead(db: Knex, data: CreateLeadInput): Promise<Lead>
   }
 
   // Step 6 — insert lead with dedup fields
-  return leadRepository.createLead(db, {
+  const lead = await leadRepository.createLead(db, {
     ...data,
     phone,
     score: 0,
@@ -115,13 +127,47 @@ export async function createLead(db: Knex, data: CreateLeadInput): Promise<Lead>
     duplicate_status,
     duplicate_of_id,
   });
+
+  // Timeline entry — fire-and-don't-block
+  try {
+    await activityRepository.insertActivity(db, {
+      lead_id: lead.id,
+      event_type: 'lead.created',
+      actor_type: 'staff',
+      actor_id: createdBy,
+      payload: lead as unknown as Record<string, unknown>,
+      occurred_at: lead.created_at,
+      source_event_id: `internal:lead.created:${lead.id}`,
+    });
+  } catch (err) {
+    console.warn('Failed to insert lead.created activity', err);
+  }
+
+  // Publish event
+  await publishLeadCreated(eventBus, {
+    lead_id: lead.id,
+    location_id: lead.location_id,
+    channel: lead.channel,
+    current_pipeline: lead.current_pipeline,
+    current_stage: lead.current_stage,
+    referrer_id: lead.referrer_id ?? undefined,
+    referrer_type: lead.referrer_type ?? undefined,
+    referral_code: lead.referral_code ?? undefined,
+  });
+
+  return lead;
 }
 
 export async function getLead(db: Knex, id: string): Promise<Lead | null> {
   return leadRepository.findById(db, id);
 }
 
-export async function updateLead(db: Knex, id: string, fields: UpdateLeadInput): Promise<Lead> {
+export async function updateLead(
+  db: Knex,
+  id: string,
+  fields: UpdateLeadInput,
+  eventBus: EventBus,
+): Promise<Lead> {
   // Reject attribution fields
   for (const key of ATTRIBUTION_FIELDS) {
     if (key in fields) {
@@ -134,11 +180,60 @@ export async function updateLead(db: Knex, id: string, fields: UpdateLeadInput):
     fields.phone = normalizePhone(fields.phone);
   }
 
-  return leadRepository.updateLead(db, id, fields);
+  const lead = await leadRepository.updateLead(db, id, fields);
+
+  const changed_fields = Object.keys(fields);
+
+  // Timeline entry — fire-and-don't-block
+  try {
+    await activityRepository.insertActivity(db, {
+      lead_id: lead.id,
+      event_type: 'lead.updated',
+      actor_type: 'staff',
+      actor_id: null,
+      payload: { changed_fields },
+      occurred_at: lead.updated_at,
+      source_event_id: `internal:lead.updated:${lead.id}:${lead.updated_at}`,
+    });
+  } catch (err) {
+    console.warn('Failed to insert lead.updated activity', err);
+  }
+
+  // Publish event
+  await publishLeadUpdated(eventBus, {
+    lead_id: lead.id,
+    location_id: lead.location_id,
+    changed_fields,
+  });
+
+  return lead;
 }
 
-export async function archiveLead(db: Knex, id: string): Promise<Lead> {
-  return leadRepository.archiveLead(db, id);
+export async function archiveLead(db: Knex, id: string, eventBus: EventBus): Promise<Lead> {
+  const lead = await leadRepository.archiveLead(db, id);
+
+  // Timeline entry — fire-and-don't-block
+  try {
+    await activityRepository.insertActivity(db, {
+      lead_id: lead.id,
+      event_type: 'lead.archived',
+      actor_type: 'staff',
+      actor_id: null,
+      payload: {},
+      occurred_at: lead.updated_at,
+      source_event_id: `internal:lead.archived:${lead.id}`,
+    });
+  } catch (err) {
+    console.warn('Failed to insert lead.archived activity', err);
+  }
+
+  // Publish event
+  await publishLeadArchived(eventBus, {
+    lead_id: lead.id,
+    location_id: lead.location_id,
+  });
+
+  return lead;
 }
 
 export async function listLeads(
