@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Knex } from 'knex';
+import type { EventBus } from '@ortho/event-bus';
 import { Type } from '@sinclair/typebox';
 import '@ortho/auth-middleware';
 import * as appointmentService from '../services/appointment-service.js';
@@ -38,7 +39,7 @@ const PatchAppointmentBody = Type.Object({
 
 export async function appointmentRoutes(
   app: FastifyInstance,
-  opts: { db: Knex },
+  opts: { db: Knex; eventBus: EventBus },
 ): Promise<void> {
   const { db } = opts;
 

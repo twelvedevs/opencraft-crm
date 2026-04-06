@@ -5,6 +5,7 @@ import { authPlugin } from '@ortho/auth-middleware';
 import knexLib, { type Knex } from 'knex';
 import { createSigner } from 'fast-jwt';
 import { createLogger } from '@ortho/logger';
+import { EventBusImpl, MockDriver } from '@ortho/event-bus';
 import { leadsRoutes } from '../../src/routes/leads.js';
 import { appointmentRoutes } from '../../src/routes/appointments.js';
 import { tagRoutes } from '../../src/routes/tags.js';
@@ -91,10 +92,11 @@ export async function buildTestApp(): Promise<FastifyInstance> {
   app.get('/health', async () => ({ ok: true }));
 
   const testDb = getDb();
-  await app.register(leadsRoutes, { db: testDb });
-  await app.register(appointmentRoutes, { db: testDb });
-  await app.register(tagRoutes, { db: testDb });
-  await app.register(activityRoutes, { db: testDb });
+  const eventBus = new EventBusImpl(new MockDriver());
+  await app.register(leadsRoutes, { db: testDb, eventBus });
+  await app.register(appointmentRoutes, { db: testDb, eventBus });
+  await app.register(tagRoutes, { db: testDb, eventBus });
+  await app.register(activityRoutes, { db: testDb, eventBus });
 
   return app;
 }

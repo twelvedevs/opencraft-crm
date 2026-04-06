@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Knex } from 'knex';
+import type { EventBus } from '@ortho/event-bus';
 import { Type } from '@sinclair/typebox';
 import { requireRole } from '@ortho/auth-middleware';
 import '@ortho/auth-middleware';
@@ -85,7 +86,7 @@ const managerOnly = requireRole(MANAGER_ROLES);
 
 export async function leadsRoutes(
   app: FastifyInstance,
-  opts: { db: Knex },
+  opts: { db: Knex; eventBus: EventBus },
 ): Promise<void> {
   const { db } = opts;
 

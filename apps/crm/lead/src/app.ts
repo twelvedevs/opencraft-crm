@@ -2,14 +2,15 @@ import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
 import { createLogger } from '@ortho/logger';
+import type { EventBus } from '@ortho/event-bus';
+import type { Knex } from 'knex';
 import { env } from './env.js';
-import db from './db.js';
 import { leadsRoutes } from './routes/leads.js';
 import { appointmentRoutes } from './routes/appointments.js';
 import { tagRoutes } from './routes/tags.js';
 import { activityRoutes } from './routes/activities.js';
 
-export async function buildApp(): Promise<FastifyInstance> {
+export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance> {
   const log = createLogger('crm-lead');
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
@@ -20,12 +21,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     allowedPaths: ['/health'],
   });
 
+  app.decorate('eventBus', eventBus);
+
   app.get('/health', async () => ({ ok: true }));
 
-  await app.register(leadsRoutes, { db });
-  await app.register(appointmentRoutes, { db });
-  await app.register(tagRoutes, { db });
-  await app.register(activityRoutes, { db });
+  await app.register(leadsRoutes, { db, eventBus });
+  await app.register(appointmentRoutes, { db, eventBus });
+  await app.register(tagRoutes, { db, eventBus });
+  await app.register(activityRoutes, { db, eventBus });
 
   return app;
 }
