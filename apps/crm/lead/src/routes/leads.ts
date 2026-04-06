@@ -8,6 +8,7 @@ import * as leadService from '../services/lead-service.js';
 import * as leadRepository from '../repositories/lead-repository.js';
 import * as tagRepository from '../repositories/tag-repository.js';
 import * as appointmentRepository from '../repositories/appointment-repository.js';
+import { mergeLeads, MergeError } from '../services/merge-service.js';
 
 const CHANNEL_ENUM = [
   'website_form',
@@ -176,6 +177,38 @@ export async function leadsRoutes(
       duplicate_of_id: null,
     });
     return reply.status(200).send(updated);
+  });
+
+  // POST /leads/:id/merge
+  app.post('/leads/:id/merge', {
+    schema: {
+      params: IdParams,
+      body: Type.Object({
+        merge_lead_id: Type.String({ format: 'uuid' }),
+        winning_stage: Type.String(),
+      }),
+    },
+  }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { merge_lead_id: string; winning_stage: string };
+
+    try {
+      const lead = await mergeLeads(
+        db,
+        eventBus,
+        id,
+        body.merge_lead_id,
+        body.winning_stage,
+        req.user!.sub,
+        req.user?.locations ?? [],
+      );
+      return reply.status(200).send(lead);
+    } catch (err) {
+      if (err instanceof MergeError) {
+        return reply.status(err.statusCode).send({ error: err.message });
+      }
+      throw err;
+    }
   });
 
   // GET /leads — list with filters, bulk lookup, search, cursor pagination
