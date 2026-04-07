@@ -3,19 +3,17 @@ import { createEventBus } from '@ortho/event-bus';
 import { buildApp } from './app.js';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
+import { handleMessageDelivered } from './events/handlers/message-delivered.handler.js';
+import { handleMessageFailed } from './events/handlers/message-failed.handler.js';
 
 const eventBus = createEventBus();
 
-// EventBus subscriptions (handlers will be wired in later stories)
+// EventBus subscriptions
 eventBus.subscribe('inbound_message.received', async (_event) => {
   // Placeholder — wired in US-008
 });
-eventBus.subscribe('message.delivered', async (_event) => {
-  // Placeholder — wired in US-006
-});
-eventBus.subscribe('message.failed', async (_event) => {
-  // Placeholder — wired in US-006
-});
+eventBus.subscribe('message.delivered', (event) => handleMessageDelivered(db, event));
+eventBus.subscribe('message.failed', (event) => handleMessageFailed(db, event));
 
 await eventBus.start();
 
