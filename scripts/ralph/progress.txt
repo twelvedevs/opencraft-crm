@@ -181,3 +181,16 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - `mockDriver.published.length = 0` must be called after enrollment to isolate transition events from enrollment events
   - Close endpoint must be called before testing inactive membership transition (close sets status='closed')
 ---
+
+## 2026-04-07 - US-015
+- Created integration tests for convert, close, and history endpoints
+- Files created: test/integration/conversions.test.ts, test/integration/close.test.ts, test/integration/history.test.ts
+- conversions.test.ts: 4 tests — valid conversion (contract_signed → in_treatment/new_patient with full event + history assertions), invalid source stage (422), invalid conversion pair (422), double convert (409)
+- close.test.ts: 4 tests — valid close (import_undo with no history/no events), missing triggered_by (400), already-closed (409), unknown id (404)
+- history.test.ts: 2 tests — 3 rows after enrollment + 2 transitions in ASC order, unknown membership (404)
+- **Learnings for future iterations:**
+  - Use `override: true` in transition helper to skip valid-transition checks when you just need a membership at a specific stage for testing
+  - Conversion tests require multiple steps: enroll → transition to contract_signed → then convert; use helper functions to keep tests concise
+  - Close endpoint does NOT publish events and does NOT insert history — verify absence of both in tests
+  - History rows are returned in transitioned_at ASC order — verify ordering with timestamp comparison
+---
