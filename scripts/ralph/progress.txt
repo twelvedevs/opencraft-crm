@@ -1,0 +1,219 @@
+# Ralph Progress Log
+Started: Tue Apr  7 09:52:40 UTC 2026
+
+## Codebase Patterns
+- Pipeline service uses internal-auth (x-internal-api-key header), NOT JWT auth like the lead service
+- All services use ESM with `.js` extensions in imports (e.g., `./env.js`)
+- Fastify plugins are plain async functions (no fastify-plugin wrapper needed for encapsulated plugins)
+- Logger: `createLogger('crm-pipeline')` from `@ortho/logger`
+- EventBus: `createEventBus()` from `@ortho/event-bus`, uses `EVENT_BUS_DRIVER` env var
+- vitest.config.ts needs `passWithNoTests: true` to avoid failing when no test files exist
+- Route plugins receive `{ db: Knex, eventBus: EventBus }` as opts and are registered with prefix
+- Migrations live outside `src/` — not typechecked by `tsc --noEmit`; use `loadExtensions: ['.ts']` in knexfile
+- Check constraints added via `knex.raw()` ALTER TABLE after `createTable()` (Knex has no native CHECK support)
+
+---
+
+## 2026-04-07 - US-001
+- Scaffolded Pipeline Engine service at apps/crm/pipeline/
+- Files created: package.json, tsconfig.json, Dockerfile, vitest.config.ts, src/env.ts, src/db.ts, src/app.ts, src/index.ts, src/plugins/internal-auth.ts, src/routes/memberships.ts (stub)
+- **Learnings for future iterations:**
+  - Pipeline service PORT defaults to 3005
+  - internal-auth plugin uses `request.url.startsWith('/health')` to skip auth for health endpoint
+  - Membership routes registered under `/pipeline` prefix so full path is `/pipeline/memberships`
+  - tsconfig uses `module: NodeNext` and `moduleResolution: NodeNext` (matching lead service pattern)
+---
+
+## 2026-04-07 - US-002
+- Created 3 migration files: schema creation, pipeline_memberships table, pipeline_stage_history table
+- Created knexfile.ts for migration runner configuration
+- Files created: knexfile.ts, migrations/20260325000000_create_crm_pipeline_schema.ts, migrations/20260325000001_create_pipeline_memberships.ts, migrations/20260325000002_create_pipeline_stage_history.ts
+- **Learnings for future iterations:**
+  - Migrations live outside `src/` and are NOT included in tsconfig `include` — they don't get typechecked by `tsc --noEmit` (same as lead service pattern)
+  - knexfile.ts uses `loadExtensions: ['.ts']` and `schemaName: 'crm_pipeline'` for migration tracking table placement
+  - Check constraints added via `knex.raw()` ALTER TABLE after table creation (Knex doesn't have built-in CHECK constraint support)
+  - Partial unique index uses `WHERE status = 'active'` to enforce one active membership per lead per pipeline
+  - Foreign key reference to cross-schema table uses full `crm_pipeline.pipeline_memberships` path in `.inTable()`
+---
+
+## 2026-04-07 - US-003
+- Created state machine module at apps/crm/pipeline/src/services/state-machine.ts
+- Exports: StageConfig interface, STAGES constant (13 stages across 3 pipelines), isValidTransition(), computeTimeoutAt(), getTimeoutStage()
+- Files created: src/services/state-machine.ts
+- **Learnings for future iterations:**
+  - All state machine functions are pure — no DB or event-bus imports
+  - `lost` stage has timeoutDays=30 but timeoutStage=null — this means archival, not a stage transition
+  - `recall_due` uses requiresCallerTimeoutAt=true — callerProvidedTimeoutAt must be passed by the caller
+  - Override=true bypasses allowedTransitions check but still returns false for unknown fromStage
+---
+
+## 2026-04-07 - US-004
+- Created membership.repo.ts with: Membership interface, findById, findWithLock (FOR UPDATE raw SQL), findActiveByLeadAndPipeline, listMemberships (cursor pagination), createMembership, updateStage, setStatus
+- Created stage-history.repo.ts with: StageHistory interface, insertHistory, findByMembershipId
+- Files created: src/repositories/membership.repo.ts, src/repositories/stage-history.repo.ts
+- **Learnings for future iterations:**
+  - findWithLock uses `db.raw()` for SELECT FOR UPDATE — must be called within a transaction context for the lock to be held
+  - Cursor pagination uses base64-encoded JSON `{ id, created_at }` — sort by (created_at ASC, id ASC), filter with tuple comparison
+  - All repo functions take `db: Knex` as first param (function-based, not class-based) following lead service pattern
+  - `listMemberships` returns `{ rows, nextCursor }` — no default status filter (returns all statuses if not specified)
+---
+
+## 2026-04-07 - US-005
+- Created event publisher module at apps/crm/pipeline/src/events/publisher.ts
+- Exports: publishStageChanged, publishConverted, publishStageTimeout, publishArchived, computeTimeInStage, computeResponseTime
+- All four publish functions set event_id (randomUUID), schema_version ('1.0'), correlation_id, event_type, entity_type ('lead'), entity_id (lead_id)
+- Files created: src/events/publisher.ts
+- **Learnings for future iterations:**
+  - Pipeline publisher explicitly sets event_id, schema_version, correlation_id unlike the lead service publisher which omits them
+  - The OrthoEvent payload field is Record<string, unknown> so typed payload objects need `as unknown as Record<string, unknown>` cast
+  - computeTimeInStage and computeResponseTime are pure helper functions exported alongside the publish functions
+---
+
+## 2026-04-07 - US-006
+- Implemented POST /pipeline/memberships enrollment endpoint with TypeBox validation
+- Validates recall_due requires timeout_at, checks duplicate active membership (409), runs DB transaction (createMembership + insertHistory), publishes lead.stage_changed after commit
+- Files changed: src/routes/memberships.ts (replaced stub with full implementation)
+- **Learnings for future iterations:**
+  - TypeBox schema is defined at module level and passed via `{ schema: { body: ... } }` in route options
+  - correlationId comes from `x-correlation-id` header, fallback to randomUUID()
+  - Event publishing happens AFTER the transaction commit, not inside it
+  - `timeout_at` in the membership is a Date but must be converted to ISO string for the event payload
+---
+
+## 2026-04-07 - US-007
+- Added GET /pipeline/memberships (list with cursor pagination + filters) and GET /pipeline/memberships/:id (single lookup with 404)
+- Files changed: src/routes/memberships.ts
+- **Learnings for future iterations:**
+  - TypeBox query schema uses `Type.Optional(Type.Integer({ minimum: 1, maximum: 200 }))` for limit param validation
+  - GET list endpoint returns `{ rows, nextCursor }` directly from listMemberships repo function
+  - GET by ID returns 404 `{ error: 'not_found' }` when membership doesn't exist
+  - Query schema uses `querystring` key (not `query`) in Fastify schema options
+---
+
+## 2026-04-07 - US-008
+- Created transition service (src/services/transition.service.ts) with applyTransition function and TransitionError class
+- Created transition route (src/routes/transitions.ts) with POST /memberships/:id/transition endpoint
+- Registered transitionRoutes in app.ts under /pipeline prefix
+- Files created: src/services/transition.service.ts, src/routes/transitions.ts
+- Files changed: src/app.ts
+- **Learnings for future iterations:**
+  - TransitionError is a custom error class with statusCode and body — route handler catches it and maps to HTTP response
+  - applyTransition is a reusable service function — the timeout poll job (US-011) will call it directly for auto-transitions
+  - response_time_seconds is only computed when stage_to='contacted', stage_from is not null, AND triggered_by is non-null
+  - `findWithLock` must be called within a transaction (trx) for the FOR UPDATE lock to actually be held
+---
+
+## 2026-04-07 - US-009
+- Created convert service (src/services/convert.service.ts) with applyConversion function and ConversionError class
+- Created conversion route (src/routes/conversions.ts) with POST /memberships/:id/convert endpoint
+- Registered conversionRoutes in app.ts under /pipeline prefix
+- Files created: src/services/convert.service.ts, src/routes/conversions.ts
+- Files changed: src/app.ts
+- **Learnings for future iterations:**
+  - ConversionError follows same pattern as TransitionError — custom error class with statusCode and body
+  - ALLOWED_CONVERSIONS is a static array of valid (from_pipeline, from_stage) → (to_pipeline, to_stage) pairs; only 2 pairs exist
+  - Convert closes source via setStatus, inserts history for both source and target, creates new membership — all in one transaction
+  - Source history row has stage_from=stage_to=current.stage (not a real transition, just a record of conversion)
+  - Two events published after commit: publishConverted first, then publishStageChanged for the new membership
+---
+
+## 2026-04-07 - US-010
+- Created POST /pipeline/memberships/:id/close endpoint (src/routes/close.ts) with TypeBox validation: triggered_by (string, minLength 1), closed_reason (literal 'import_undo')
+- Created GET /pipeline/memberships/:id/history endpoint (src/routes/history.ts) returning stage history ordered by transitioned_at ASC
+- Registered both routes in app.ts under /pipeline prefix
+- Files created: src/routes/close.ts, src/routes/history.ts
+- Files changed: src/app.ts
+- **Learnings for future iterations:**
+  - Close endpoint does NOT insert history row and does NOT publish any event (by design — it's for import undo only)
+  - Close endpoint uses setStatus repo function directly (no transaction needed — single write)
+  - History endpoint checks membership exists first (404 if not found), then returns findByMembershipId results
+  - Both route files accept `{ db: Knex; eventBus: EventBus }` opts even if they don't use eventBus (consistent plugin signature)
+---
+
+## 2026-04-07 - US-011
+- Created timeout poll job at src/jobs/timeout-poll.job.ts
+- Exports: createTimeoutPollJob (start/stop), runPoll (for direct testing), resetIsRunning (for test cleanup)
+- Uses croner with `protect: true` for re-entrancy guard, plus module-level `isRunning` flag
+- Outer query: SELECT FOR UPDATE SKIP LOCKED to find up to 100 overdue active memberships
+- Per-row processing: stage timeout transitions use updateStage + insertHistory in a transaction, then publish stageChanged + stageTimeout; archival uses direct UPDATE in a transaction, then publishes archived only
+- Updated src/index.ts to wire up pollJob.start() after eventBus.start(), pollJob.stop() in SIGTERM handler before app.close()
+- Files created: src/jobs/timeout-poll.job.ts
+- Files changed: src/index.ts
+- **Learnings for future iterations:**
+  - `runPoll` is exported separately from `createTimeoutPollJob` so integration tests can call it directly without the cron scheduler
+  - `resetIsRunning` is exported for test cleanup of the module-level isRunning flag
+  - croner Cron constructor takes (pattern, options, callback) — `protect: true` prevents overlapping runs at the cron level
+  - Archival path does NOT insert history and does NOT publish stage_changed or stage_timeout — only publishes archived
+  - exceededBySeconds = Math.floor((now - timeout_at) / 1000) — computed before processing each row
+---
+
+## 2026-04-07 - US-012
+- Created comprehensive unit tests for state machine at test/unit/state-machine.test.ts
+- 44 tests covering isValidTransition (valid pairs, invalid pairs, override, unknown stages), computeTimeoutAt (all timeout configurations, caller-provided timeout, unknown stages), getTimeoutStage (all 13 stages + unknown)
+- Files created: test/unit/state-machine.test.ts
+- **Learnings for future iterations:**
+  - Unit test files use `.js` extension in imports (e.g., `../../src/services/state-machine.js`) matching ESM convention
+  - `it.each` works well for exhaustive transition pair testing
+  - All three functions gracefully handle unknown stages (return false/null, no throw)
+---
+
+## 2026-04-07 - US-013
+- Created integration test infrastructure: setup.ts, helpers.ts, and memberships.test.ts
+- Updated vitest.config.ts with setupFiles and testTimeout
+- 11 tests covering enrollment (happy path, duplicate 409, recall_due validation, auth 401), query (lead_id/status/pipeline filters, GET by ID, 404), and cursor pagination
+- Files created: test/integration/setup.ts, test/integration/helpers.ts, test/integration/memberships.test.ts
+- Files changed: vitest.config.ts
+- **Learnings for future iterations:**
+  - `mockDriver` is exported as a mutable `let` from helpers.ts — tests reset `mockDriver.published.length = 0` in beforeEach
+  - `buildTestApp()` mirrors app.ts but injects MockDriver instead of real EventBus — creates a fresh MockDriver on each call
+  - Integration tests use `describe.skipIf(!HAS_DB)` — all tests are skipped when no real DB is available (CI must provide DATABASE_URL)
+  - `truncateTables` uses raw TRUNCATE CASCADE on both tables (history first, then memberships) to avoid FK constraint issues
+  - `app.inject()` is Fastify's built-in HTTP injection — no need for supertest or running the server on a port
+---
+
+## 2026-04-07 - US-014
+- Created integration tests for the transition endpoint at test/integration/transitions.test.ts
+- 12 tests covering: valid transition (new_lead→contacted), invalid transition (422), override (200), override without triggered_by (400), recall_due without timeout_at (400), recall_due with timeout_at (200), inactive membership (409), unknown membership (404), concurrent transitions (race safety), time_in_stage_seconds, response_time_seconds present/null
+- Files created: test/integration/transitions.test.ts
+- **Learnings for future iterations:**
+  - Concurrent test uses `Promise.all` with two identical transitions — one gets 200, the other gets 422 (contacted→contacted is invalid) due to SELECT FOR UPDATE serialization
+  - To test time_in_stage_seconds, directly update entered_stage_at via `db('pipeline_memberships').update()` to set a past date
+  - `mockDriver.published.length = 0` must be called after enrollment to isolate transition events from enrollment events
+  - Close endpoint must be called before testing inactive membership transition (close sets status='closed')
+---
+
+## 2026-04-07 - US-015
+- Created integration tests for convert, close, and history endpoints
+- Files created: test/integration/conversions.test.ts, test/integration/close.test.ts, test/integration/history.test.ts
+- conversions.test.ts: 4 tests — valid conversion (contract_signed → in_treatment/new_patient with full event + history assertions), invalid source stage (422), invalid conversion pair (422), double convert (409)
+- close.test.ts: 4 tests — valid close (import_undo with no history/no events), missing triggered_by (400), already-closed (409), unknown id (404)
+- history.test.ts: 2 tests — 3 rows after enrollment + 2 transitions in ASC order, unknown membership (404)
+- **Learnings for future iterations:**
+  - Use `override: true` in transition helper to skip valid-transition checks when you just need a membership at a specific stage for testing
+  - Conversion tests require multiple steps: enroll → transition to contract_signed → then convert; use helper functions to keep tests concise
+  - Close endpoint does NOT publish events and does NOT insert history — verify absence of both in tests
+  - History rows are returned in transitioned_at ASC order — verify ordering with timestamp comparison
+---
+
+## 2026-04-07 - US-016
+- Created integration tests for timeout poll job at test/integration/timeout-poll.test.ts
+- 6 tests: stage timeout (contacted → lost), recall_due timeout (→ long_term_follow), lost archival, non-overdue skip, SKIP LOCKED (pg Client holds lock), batch cap (101 rows, only 100 processed)
+- Files created: test/integration/timeout-poll.test.ts
+- **Learnings for future iterations:**
+  - Poll tests call `runPoll(db, eventBus)` directly — don't use cron scheduler (TIMEOUT_POLL_ENABLED=false in setup)
+  - Must call `resetIsRunning()` in beforeEach to clear the module-level isRunning flag between tests
+  - Use a separate `MockDriver` + `EventBusImpl` for poll tests (not the app-injected one from buildTestApp)
+  - SKIP LOCKED test: use raw `pg.Client` to hold a FOR UPDATE lock, then verify poll skips the row
+  - Batch cap test: insert 101 rows with unique lead_ids (partial unique index requires unique lead_id+pipeline for active memberships)
+  - Lead ID prefix `00000000-0000-0000-0000-0000000000` + 2-digit suffix for generating unique UUIDs in batch inserts
+---
+
+## 2026-04-07 - US-017
+- Created contract tests for all four event types at test/contract/events.test.ts
+- 7 tests covering: lead.stage_changed (envelope + payload, null time_in_stage when stage_from null, response_time present/null), lead.converted, lead.stage_timeout, lead.archived
+- Files created: test/contract/events.test.ts
+- **Learnings for future iterations:**
+  - Contract tests use MockDriver + EventBusImpl directly (no HTTP, no DB needed) — fastest test type
+  - Contract tests verify both envelope fields (event_id, event_type, entity_type, entity_id, schema_version, correlation_id) and payload shape
+  - `expect.any(String)` is useful for asserting non-empty UUID fields without knowing exact value
+---
