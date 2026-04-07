@@ -224,3 +224,26 @@ export interface WorkflowTriggeredPayload {
   entity_type: string;
   workflow_id: string;
 }
+
+// --- Conversation Service published events ---
+
+export interface MessageReceivedPayload {
+  entity_type: 'lead';
+  entity_id: string;
+  message_id: string;
+  conversation_id: string;
+  lead_id: string;
+  location_id: string;
+  body: string;
+  message_type: 'normal' | 'stop' | 'unstop';
+  from_number: string;
+  practice_number: string;
+  received_at: string;
+}
+
+export interface MessageReceivedEvent {
+  event_type: 'message.received';
+  entity_type: 'lead';
+  entity_id: string;
+  payload: MessageReceivedPayload;
+}
