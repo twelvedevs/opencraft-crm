@@ -1,4 +1,4 @@
-import { Queue, Worker } from 'bullmq';
+import { Queue } from 'bullmq';
 import { createEventBus } from '@ortho/event-bus';
 import { buildApp } from './app.js';
 import db, { destroy } from './db.js';
@@ -8,6 +8,7 @@ import { handleMessageDelivered } from './events/handlers/message-delivered.hand
 import { handleMessageFailed } from './events/handlers/message-failed.handler.js';
 import { createAiAgentReplyWorker } from './workers/ai-agent-reply.worker.js';
 import { createScheduledSendWorker } from './workers/scheduled-send.worker.js';
+import { createBulkSendWorker } from './workers/bulk-send.worker.js';
 
 const eventBus = createEventBus();
 
@@ -35,11 +36,7 @@ const bulkSendQueue = new Queue('conversation:bulk-send', {
 // BullMQ workers
 const aiAgentWorker = createAiAgentReplyWorker(db);
 const scheduledSendWorker = createScheduledSendWorker(db);
-const bulkSendWorker = new Worker(
-  'conversation:bulk-send',
-  async (_job) => { /* wired in US-015 */ },
-  { connection: { url: env.BULLMQ_REDIS_URL }, concurrency: env.BULK_SEND_CONCURRENCY },
-);
+const bulkSendWorker = createBulkSendWorker(db);
 
 const app = await buildApp(db, eventBus, { scheduledSendQueue });
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
