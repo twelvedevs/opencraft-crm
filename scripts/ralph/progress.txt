@@ -194,3 +194,16 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - Close endpoint does NOT publish events and does NOT insert history — verify absence of both in tests
   - History rows are returned in transitioned_at ASC order — verify ordering with timestamp comparison
 ---
+
+## 2026-04-07 - US-016
+- Created integration tests for timeout poll job at test/integration/timeout-poll.test.ts
+- 6 tests: stage timeout (contacted → lost), recall_due timeout (→ long_term_follow), lost archival, non-overdue skip, SKIP LOCKED (pg Client holds lock), batch cap (101 rows, only 100 processed)
+- Files created: test/integration/timeout-poll.test.ts
+- **Learnings for future iterations:**
+  - Poll tests call `runPoll(db, eventBus)` directly — don't use cron scheduler (TIMEOUT_POLL_ENABLED=false in setup)
+  - Must call `resetIsRunning()` in beforeEach to clear the module-level isRunning flag between tests
+  - Use a separate `MockDriver` + `EventBusImpl` for poll tests (not the app-injected one from buildTestApp)
+  - SKIP LOCKED test: use raw `pg.Client` to hold a FOR UPDATE lock, then verify poll skips the row
+  - Batch cap test: insert 101 rows with unique lead_ids (partial unique index requires unique lead_id+pipeline for active memberships)
+  - Lead ID prefix `00000000-0000-0000-0000-0000000000` + 2-digit suffix for generating unique UUIDs in batch inserts
+---
