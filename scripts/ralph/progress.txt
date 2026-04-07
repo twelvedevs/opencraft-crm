@@ -102,3 +102,17 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - response_time_seconds is only computed when stage_to='contacted', stage_from is not null, AND triggered_by is non-null
   - `findWithLock` must be called within a transaction (trx) for the FOR UPDATE lock to actually be held
 ---
+
+## 2026-04-07 - US-009
+- Created convert service (src/services/convert.service.ts) with applyConversion function and ConversionError class
+- Created conversion route (src/routes/conversions.ts) with POST /memberships/:id/convert endpoint
+- Registered conversionRoutes in app.ts under /pipeline prefix
+- Files created: src/services/convert.service.ts, src/routes/conversions.ts
+- Files changed: src/app.ts
+- **Learnings for future iterations:**
+  - ConversionError follows same pattern as TransitionError — custom error class with statusCode and body
+  - ALLOWED_CONVERSIONS is a static array of valid (from_pipeline, from_stage) → (to_pipeline, to_stage) pairs; only 2 pairs exist
+  - Convert closes source via setStatus, inserts history for both source and target, creates new membership — all in one transaction
+  - Source history row has stage_from=stage_to=current.stage (not a real transition, just a record of conversion)
+  - Two events published after commit: publishConverted first, then publishStageChanged for the new membership
+---
