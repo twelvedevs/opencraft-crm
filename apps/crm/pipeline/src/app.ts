@@ -6,6 +6,7 @@ import type { Knex } from 'knex';
 import { internalAuthPlugin } from './plugins/internal-auth.js';
 import { membershipRoutes } from './routes/memberships.js';
 import { transitionRoutes } from './routes/transitions.js';
+import { conversionRoutes } from './routes/conversions.js';
 
 export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance> {
   const log = createLogger('crm-pipeline');
@@ -18,6 +19,7 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
 
   await app.register(membershipRoutes, { prefix: '/pipeline', db, eventBus });
   await app.register(transitionRoutes, { prefix: '/pipeline', db, eventBus });
+  await app.register(conversionRoutes, { prefix: '/pipeline', db, eventBus });
 
   return app;
 }
