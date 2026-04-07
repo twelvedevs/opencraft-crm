@@ -6,6 +6,7 @@ import { env } from './env.js';
 import { handleInboundMessage } from './events/handlers/inbound-message.handler.js';
 import { handleMessageDelivered } from './events/handlers/message-delivered.handler.js';
 import { handleMessageFailed } from './events/handlers/message-failed.handler.js';
+import { createScheduledSendWorker } from './workers/scheduled-send.worker.js';
 
 const eventBus = createEventBus();
 
@@ -36,18 +37,14 @@ const aiAgentWorker = new Worker(
   async (_job) => { /* wired in US-014 */ },
   { connection: { url: env.BULLMQ_REDIS_URL }, concurrency: env.AI_AGENT_CONCURRENCY },
 );
-const scheduledSendWorker = new Worker(
-  'conversation:scheduled-send',
-  async (_job) => { /* wired in US-012 */ },
-  { connection: { url: env.BULLMQ_REDIS_URL }, concurrency: env.SCHEDULED_SEND_CONCURRENCY },
-);
+const scheduledSendWorker = createScheduledSendWorker(db);
 const bulkSendWorker = new Worker(
   'conversation:bulk-send',
   async (_job) => { /* wired in US-015 */ },
   { connection: { url: env.BULLMQ_REDIS_URL }, concurrency: env.BULK_SEND_CONCURRENCY },
 );
 
-const app = await buildApp(db, eventBus);
+const app = await buildApp(db, eventBus, { scheduledSendQueue });
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
 
 process.on('SIGTERM', async () => {

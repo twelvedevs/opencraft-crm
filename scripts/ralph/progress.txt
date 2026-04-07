@@ -29,6 +29,8 @@ Started: Tue Apr  7 00:00:00 UTC 2026
 - API Gateway forwards user context via X-User-Id, X-User-Role, X-User-Locations (comma-separated) headers; internal services parse these to populate req.user
 - Don't re-declare FastifyRequest.user if @ortho/auth-middleware already declares it — use `import '@ortho/auth-middleware'` for side-effect type augmentation
 - Empty locations array = all-locations access (manager/admin roles); check `locations.length === 0 || locations.includes(locationId)`
+- BullMQ Queue instances must be created outside Fastify route plugins and passed via opts (DI) — creating them inside plugins fails in tests
+- buildApp accepts optional `AppQueues` for passing BullMQ queues to route plugins; route plugins that need queues conditionally register only when queue is provided
 
 ---
 
@@ -146,4 +148,38 @@ Started: Tue Apr  7 00:00:00 UTC 2026
   - hasLocationAccess helper: if userLocations.length === 0, grant access (manager/admin); otherwise check includes
   - Route plugins receive `{ db: Knex }` in opts; register before stubs to avoid conflicts
   - When enabling agent_mode_active via PATCH, also reset agent_exchange_count to 0
+---
+
+## 2026-04-07 19:47 UTC - US-010
+- Created messages route plugin with GET /:id/messages (cursor-based pagination with hasMore) and POST /:id/messages (outbound send via outbound-sender service)
+- Updated app.ts: registered messagesRoute plugin, removed message stubs from remaining stubs block
+- Files changed: 1 new (routes/messages.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - hasMore pagination: request limit+1 rows, if returned > limit then hasMore=true and slice to limit
+  - hasLocationAccess helper is duplicated across route files — could be extracted to a shared utility but keeping it local follows existing pattern
+  - messagesRoute follows same plugin pattern as conversationsRoute: `(app, { db }) => void`
+---
+
+## 2026-04-07 19:48 UTC - US-011
+- Created notes route plugin with POST /:id/notes (create) and DELETE /:id/notes/:note_id (delete)
+- Updated app.ts: registered notesRoute plugin, removed notes stubs from remaining stubs block
+- Files changed: 1 new (routes/notes.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - Notes route follows same pattern as messages route: validate user, find conversation, check location access, then perform action
+  - POST returns 201 (not 200) for create operations
+  - DELETE uses NoteIdParams with both `id` and `note_id` params for the compound URL pattern
+---
+
+## 2026-04-07 19:51 UTC - US-012
+- Created scheduled messages route plugin (POST create, GET list, DELETE cancel) at src/routes/scheduled.ts
+- Created scheduled-send BullMQ worker at src/workers/scheduled-send.worker.ts
+- Updated app.ts: registered scheduledRoute, removed scheduled stubs; added AppQueues interface for dependency injection of BullMQ queues
+- Updated index.ts: imported and wired createScheduledSendWorker, passed scheduledSendQueue to buildApp
+- Files changed: 2 new (routes/scheduled.ts, workers/scheduled-send.worker.ts), 2 modified (app.ts, index.ts)
+- **Learnings for future iterations:**
+  - BullMQ Queue cannot be instantiated inside a Fastify route plugin — it fails in tests because queue name with `:` is invalid in newer BullMQ versions during test environments. Pass Queue instances as plugin options via dependency injection instead.
+  - buildApp now accepts optional `AppQueues` object for passing BullMQ queues to route plugins that need them
+  - Scheduled route conditionally registers only when scheduledSendQueue is provided — tests that don't provide it still pass
+  - Worker dedup_key format for scheduled messages: `sched:${scheduled_message_id}`
+  - Delayed jobs use `Math.max(delay, 0)` to handle edge case where scheduled_for is in the past
 ---

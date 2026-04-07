@@ -3,13 +3,19 @@ import sensible from '@fastify/sensible';
 import { createLogger } from '@ortho/logger';
 import type { EventBus } from '@ortho/event-bus';
 import type { Knex } from 'knex';
+import type { Queue } from 'bullmq';
 import '@ortho/auth-middleware';
 import { env } from './env.js';
 import { conversationsRoute } from './routes/conversations.js';
 import { messagesRoute } from './routes/messages.js';
 import { notesRoute } from './routes/notes.js';
+import { scheduledRoute } from './routes/scheduled.js';
 
-export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance> {
+export interface AppQueues {
+  scheduledSendQueue?: Queue;
+}
+
+export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues): Promise<FastifyInstance> {
   const log = createLogger('crm-conversation');
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
@@ -51,12 +57,12 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
   await app.register(conversationsRoute, { prefix: '/conversations', db });
   await app.register(messagesRoute, { prefix: '/conversations', db });
   await app.register(notesRoute, { prefix: '/conversations', db });
+  if (queues?.scheduledSendQueue) {
+    await app.register(scheduledRoute, { prefix: '/conversations', db, scheduledSendQueue: queues.scheduledSendQueue });
+  }
 
   // Remaining stubs for routes not yet implemented
   await app.register(async (instance) => {
-    instance.post('/:id/scheduled-messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.get('/:id/scheduled-messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.delete('/:id/scheduled-messages/:msg_id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
     instance.post('/:id/ai/drafts', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
     instance.post('/:id/ai/summary', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
     instance.post('/:id/ai/objection', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
