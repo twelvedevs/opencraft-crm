@@ -170,3 +170,14 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - `truncateTables` uses raw TRUNCATE CASCADE on both tables (history first, then memberships) to avoid FK constraint issues
   - `app.inject()` is Fastify's built-in HTTP injection — no need for supertest or running the server on a port
 ---
+
+## 2026-04-07 - US-014
+- Created integration tests for the transition endpoint at test/integration/transitions.test.ts
+- 12 tests covering: valid transition (new_lead→contacted), invalid transition (422), override (200), override without triggered_by (400), recall_due without timeout_at (400), recall_due with timeout_at (200), inactive membership (409), unknown membership (404), concurrent transitions (race safety), time_in_stage_seconds, response_time_seconds present/null
+- Files created: test/integration/transitions.test.ts
+- **Learnings for future iterations:**
+  - Concurrent test uses `Promise.all` with two identical transitions — one gets 200, the other gets 422 (contacted→contacted is invalid) due to SELECT FOR UPDATE serialization
+  - To test time_in_stage_seconds, directly update entered_stage_at via `db('pipeline_memberships').update()` to set a past date
+  - `mockDriver.published.length = 0` must be called after enrollment to isolate transition events from enrollment events
+  - Close endpoint must be called before testing inactive membership transition (close sets status='closed')
+---
