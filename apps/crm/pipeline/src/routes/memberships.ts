@@ -32,7 +32,7 @@ const EnrollBodySchema = Type.Object({
     Type.Literal('in_retention'),
   ]),
   stage: Type.String(),
-  triggered_by: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  triggered_by: Type.Optional(Type.Union([Type.String({ format: 'uuid' }), Type.Null()])),
   reason: Type.Union([Type.Literal('manual'), Type.Literal('import')]),
   timeout_at: Type.Optional(Type.String()),
 });

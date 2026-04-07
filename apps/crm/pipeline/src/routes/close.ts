@@ -5,7 +5,7 @@ import type { EventBus } from '@ortho/event-bus';
 import { findById, setStatus } from '../repositories/membership.repo.js';
 
 const CloseBodySchema = Type.Object({
-  triggered_by: Type.String({ minLength: 1 }),
+  triggered_by: Type.String({ format: 'uuid' }),
   closed_reason: Type.Literal('import_undo'),
 });
 

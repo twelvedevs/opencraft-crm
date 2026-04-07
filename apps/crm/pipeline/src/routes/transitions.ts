@@ -8,7 +8,7 @@ import { applyTransition, TransitionError } from '../services/transition.service
 const TransitionBodySchema = Type.Object({
   stage: Type.String(),
   override: Type.Boolean({ default: false }),
-  triggered_by: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  triggered_by: Type.Optional(Type.Union([Type.String({ format: 'uuid' }), Type.Null()])),
   reason: Type.Union([
     Type.Literal('manual'),
     Type.Literal('timeout'),

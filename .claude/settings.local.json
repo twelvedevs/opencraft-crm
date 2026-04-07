@@ -41,7 +41,8 @@
       "Bash(npx vitest:*)",
       "Bash(git -C /Users/andrey/dev/pre-sale/ortho diff --stat ec3e25913d0ee2e2316d1fedff5afc0015e3bcd8..6803db91515291189a3952d782a59ae1bfee03af)",
       "Bash(npx tsc:*)",
-      "Bash(xargs -I{} echo \"=== {} ===\")"
+      "Bash(xargs -I{} echo \"=== {} ===\")",
+      "Bash(git:*)"
     ]
   }
 }

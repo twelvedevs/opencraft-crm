@@ -8,7 +8,7 @@ import { applyConversion, ConversionError } from '../services/convert.service.js
 const ConvertBodySchema = Type.Object({
   to_pipeline: Type.Union([Type.Literal('in_treatment'), Type.Literal('in_retention')]),
   to_stage: Type.String(),
-  triggered_by: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  triggered_by: Type.Optional(Type.Union([Type.String({ format: 'uuid' }), Type.Null()])),
   reason: Type.Literal('converted'),
   channel: Type.Union([
     Type.Literal('google_ads'),
