@@ -7,6 +7,7 @@ import '@ortho/auth-middleware';
 import { env } from './env.js';
 import { conversationsRoute } from './routes/conversations.js';
 import { messagesRoute } from './routes/messages.js';
+import { notesRoute } from './routes/notes.js';
 
 export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance> {
   const log = createLogger('crm-conversation');
@@ -49,11 +50,10 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
 
   await app.register(conversationsRoute, { prefix: '/conversations', db });
   await app.register(messagesRoute, { prefix: '/conversations', db });
+  await app.register(notesRoute, { prefix: '/conversations', db });
 
   // Remaining stubs for routes not yet implemented
   await app.register(async (instance) => {
-    instance.post('/:id/notes', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.delete('/:id/notes/:note_id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
     instance.post('/:id/scheduled-messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
     instance.get('/:id/scheduled-messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
     instance.delete('/:id/scheduled-messages/:msg_id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
