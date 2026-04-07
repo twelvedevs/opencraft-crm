@@ -89,3 +89,16 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - GET by ID returns 404 `{ error: 'not_found' }` when membership doesn't exist
   - Query schema uses `querystring` key (not `query`) in Fastify schema options
 ---
+
+## 2026-04-07 - US-008
+- Created transition service (src/services/transition.service.ts) with applyTransition function and TransitionError class
+- Created transition route (src/routes/transitions.ts) with POST /memberships/:id/transition endpoint
+- Registered transitionRoutes in app.ts under /pipeline prefix
+- Files created: src/services/transition.service.ts, src/routes/transitions.ts
+- Files changed: src/app.ts
+- **Learnings for future iterations:**
+  - TransitionError is a custom error class with statusCode and body — route handler catches it and maps to HTTP response
+  - applyTransition is a reusable service function — the timeout poll job (US-011) will call it directly for auto-transitions
+  - response_time_seconds is only computed when stage_to='contacted', stage_from is not null, AND triggered_by is non-null
+  - `findWithLock` must be called within a transaction (trx) for the FOR UPDATE lock to actually be held
+---
