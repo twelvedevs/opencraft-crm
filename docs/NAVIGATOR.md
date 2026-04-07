@@ -26,18 +26,26 @@ All specs are **Approved** unless noted otherwise.
 | Spec | Memory |
 |------|--------|
 | [automation-engine-design.md](superpowers/specs/2026-03-24-automation-engine-design.md) | [memories/automation](memories/) |
-| [nurturing-engine-design.md](superpowers/specs/2026-03-25-nurturing-engine-design.md) | — |
-| [messaging-service-design.md](superpowers/specs/2026-03-25-messaging-service-design.md) | [memories/messaging-service.md](memories/messaging-service.md) |
-| [email-service-design.md](superpowers/specs/2026-03-25-email-service-design.md) | — |
-| [email-service-updated-design.md](superpowers/specs/2026-03-29-email-service-updated-design.md) | — |
-| [notification-service-design.md](superpowers/specs/2026-03-25-notification-service-design.md) | [memories/notification-service.md](memories/notification-service.md) |
+| [nurturing-engine-design.md](superpowers/specs/2026-03-25-nurturing-engine-design.md) _(superseded)_ | — |
+| [nurturing-engine-updated-design.md](superpowers/specs/2026-03-30-nurturing-engine-updated-design.md) _(supersedes above)_ | — |
+| [messaging-service-design.md](superpowers/specs/2026-03-25-messaging-service-design.md) _(superseded)_ | [memories/messaging-service.md](memories/messaging-service.md) |
+| [messaging-service-updated-design.md](superpowers/specs/2026-03-30-messaging-service-updated-design.md) _(supersedes above)_ | [memories/messaging-service.md](memories/messaging-service.md) |
+| [email-service-design.md](superpowers/specs/2026-03-25-email-service-design.md) _(superseded)_ | — |
+| [email-service-updated-design.md](superpowers/specs/2026-03-29-email-service-updated-design.md) _(supersedes above)_ | — |
+| [notification-service-design.md](superpowers/specs/2026-03-25-notification-service-design.md) _(superseded)_ | [memories/notification-service.md](memories/notification-service.md) |
 | [notification-service-updated-design.md](superpowers/specs/2026-03-30-notification-service-updated-design.md) _(supersedes above)_ | [memories/notification-service.md](memories/notification-service.md) |
-| [template-service-design.md](superpowers/specs/2026-03-25-template-service-design.md) | [memories/template-service.md](memories/template-service.md) |
-| [audience-engine-design.md](superpowers/specs/2026-03-25-audience-engine-design.md) | [memories/audience-engine.md](memories/audience-engine.md) |
-| [ai-service-design.md](superpowers/specs/2026-03-25-ai-service-design.md) | [memories/ai-service.md](memories/ai-service.md) |
-| [analytics-service-design.md](superpowers/specs/2026-03-25-analytics-service-design.md) | [memories/analytics-service.md](memories/analytics-service.md) |
-| [integration-hub-design.md](superpowers/specs/2026-03-25-integration-hub-design.md) | [memories/integration-hub.md](memories/integration-hub.md) |
-| [media-service-design.md](superpowers/specs/2026-03-25-media-service-design.md) | [memories/media-service.md](memories/media-service.md) |
+| [template-service-design.md](superpowers/specs/2026-03-25-template-service-design.md) _(superseded)_ | [memories/template-service.md](memories/template-service.md) |
+| [template-service-updated-design.md](superpowers/specs/2026-03-30-template-service-updated-design.md) _(supersedes above)_ | [memories/template-service.md](memories/template-service.md) |
+| [audience-engine-design.md](superpowers/specs/2026-03-25-audience-engine-design.md) _(superseded)_ | [memories/audience-engine.md](memories/audience-engine.md) |
+| [audience-engine-updated-design.md](superpowers/specs/2026-03-30-audience-engine-updated-design.md) _(supersedes above)_ | [memories/audience-engine.md](memories/audience-engine.md) |
+| [ai-service-design.md](superpowers/specs/2026-03-25-ai-service-design.md) _(superseded)_ | [memories/ai-service.md](memories/ai-service.md) |
+| [ai-service-updated-design.md](superpowers/specs/2026-04-02-ai-service-updated-design.md) _(supersedes above)_ | [memories/ai-service.md](memories/ai-service.md) |
+| [analytics-service-design.md](superpowers/specs/2026-03-25-analytics-service-design.md) _(superseded)_ | [memories/analytics-service.md](memories/analytics-service.md) |
+| [analytics-service-updated-design.md](superpowers/specs/2026-04-02-analytics-service-updated-design.md) _(supersedes above)_ | [memories/analytics-service.md](memories/analytics-service.md) |
+| [integration-hub-design.md](superpowers/specs/2026-03-25-integration-hub-design.md) _(superseded)_ | [memories/integration-hub.md](memories/integration-hub.md) |
+| [integration-hub-updated-design.md](superpowers/specs/2026-04-02-integration-hub-updated-design.md) _(supersedes above)_ | [memories/integration-hub.md](memories/integration-hub.md) |
+| [media-service-design.md](superpowers/specs/2026-03-25-media-service-design.md) _(superseded)_ | [memories/media-service.md](memories/media-service.md) |
+| [media-service-updated-design.md](superpowers/specs/2026-04-03-media-service-updated-design.md) _(supersedes above)_ | [memories/media-service.md](memories/media-service.md) |
 | [identity-service-design.md](superpowers/specs/2026-03-25-identity-service-design.md) _(superseded)_ | [memories/identity-service.md](memories/identity-service.md) |
 | [identity-service-updated-design.md](superpowers/specs/2026-04-02-identity-service-updated-design.md) _(supersedes above)_ | [memories/identity-service.md](memories/identity-service.md) |
 
@@ -47,7 +55,8 @@ All specs are **Approved** unless noted otherwise.
 |------|--------|
 | [lead-service-design.md](superpowers/specs/2026-03-25-lead-service-design.md) _(superseded)_ | [memories/lead-service.md](memories/lead-service.md) |
 | [lead-service-updated-design.md](superpowers/specs/2026-04-06-lead-service-updated-design.md) _(supersedes above)_ | [memories/lead-service.md](memories/lead-service.md) |
-| [pipeline-engine-design.md](superpowers/specs/2026-03-25-pipeline-engine-design.md) | [memories/pipeline-engine.md](memories/pipeline-engine.md) |
+| [pipeline-engine-design.md](superpowers/specs/2026-03-25-pipeline-engine-design.md) _(superseded)_ | [memories/pipeline-engine.md](memories/pipeline-engine.md) |
+| [pipeline-engine-updated-design.md](superpowers/specs/2026-04-07-pipeline-engine-updated-design.md) _(supersedes above)_ | [memories/pipeline-engine.md](memories/pipeline-engine.md) |
 | [conversation-service-design.md](superpowers/specs/2026-03-25-conversation-service-design.md) | [memories/conversation-service.md](memories/conversation-service.md) |
 | [campaign-service-design.md](superpowers/specs/2026-03-25-campaign-service-design.md) | [memories/campaign-service.md](memories/campaign-service.md) |
 | [referral-service-design.md](superpowers/specs/2026-03-25-referral-service-design.md) | [memories/referral-service.md](memories/referral-service.md) |
@@ -74,8 +83,16 @@ All specs are **Approved** unless noted otherwise.
 | Plan | Description |
 |------|-------------|
 | [2026-03-27-automation-engine-phase-1.md](superpowers/plans/2026-03-27-automation-engine-phase-1.md) | Automation Engine — Phase 1 implementation plan |
+| [2026-04-03-docker-compose.md](superpowers/plans/2026-04-03-docker-compose.md) | Local docker-compose — implementation plan |
+
+## Phase / Rollout Specs (`docs/superpowers/specs/`)
+
+| Spec | Description |
+|------|-------------|
 | [2026-03-27-automation-engine-phases.md](superpowers/specs/2026-03-27-automation-engine-phases.md) | Automation Engine — phased rollout spec |
 | [2026-03-29-email-service-phases.md](superpowers/specs/2026-03-29-email-service-phases.md) | Email Service — phased rollout spec |
+| [2026-03-30-nurturing-engine-phases.md](superpowers/specs/2026-03-30-nurturing-engine-phases.md) | Nurturing Engine — phased rollout spec |
+| [2026-03-30-template-service-phases.md](superpowers/specs/2026-03-30-template-service-phases.md) | Template Service — phased rollout spec |
 
 ## Key Design Decisions (memories/)
 
