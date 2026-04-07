@@ -5,6 +5,7 @@ import type { EventBus } from '@ortho/event-bus';
 import type { Knex } from 'knex';
 import { internalAuthPlugin } from './plugins/internal-auth.js';
 import { membershipRoutes } from './routes/memberships.js';
+import { transitionRoutes } from './routes/transitions.js';
 
 export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance> {
   const log = createLogger('crm-pipeline');
@@ -16,6 +17,7 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
   app.get('/health', async () => ({ ok: true }));
 
   await app.register(membershipRoutes, { prefix: '/pipeline', db, eventBus });
+  await app.register(transitionRoutes, { prefix: '/pipeline', db, eventBus });
 
   return app;
 }
