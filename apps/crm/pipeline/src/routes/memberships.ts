@@ -13,6 +13,16 @@ import {
 import { insertHistory } from '../repositories/stage-history.repo.js';
 import { publishStageChanged } from '../events/publisher.js';
 
+const ListQuerySchema = Type.Object({
+  lead_id: Type.Optional(Type.String()),
+  pipeline: Type.Optional(Type.String()),
+  stage: Type.Optional(Type.String()),
+  location_id: Type.Optional(Type.String()),
+  status: Type.Optional(Type.String()),
+  cursor: Type.Optional(Type.String()),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+});
+
 const EnrollBodySchema = Type.Object({
   lead_id: Type.String({ format: 'uuid' }),
   location_id: Type.String({ format: 'uuid' }),
@@ -104,5 +114,38 @@ export async function membershipRoutes(
     });
 
     return reply.status(201).send(membership);
+  });
+
+  app.get('/memberships', { schema: { querystring: ListQuerySchema } }, async (req, reply) => {
+    const query = req.query as {
+      lead_id?: string;
+      pipeline?: string;
+      stage?: string;
+      location_id?: string;
+      status?: string;
+      cursor?: string;
+      limit?: number;
+    };
+
+    const result = await listMemberships(db, {
+      lead_id: query.lead_id,
+      pipeline: query.pipeline,
+      stage: query.stage,
+      location_id: query.location_id,
+      status: query.status,
+      cursor: query.cursor,
+      limit: query.limit,
+    });
+
+    return reply.status(200).send(result);
+  });
+
+  app.get('/memberships/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const membership = await findById(db, id);
+    if (!membership) {
+      return reply.status(404).send({ error: 'not_found' });
+    }
+    return reply.status(200).send(membership);
   });
 }
