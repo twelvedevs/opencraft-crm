@@ -13,6 +13,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'pipeline:read',
     'pipeline:write',
     'reports:read',
+    'bulk-sms:write',
   ],
   marketing_staff: [
     'leads:read',
@@ -35,6 +36,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'api-keys:read',
     'api-keys:write',
     'reports:read',
+    'bulk-sms:write',
   ],
   super_admin: [
     'leads:read',
@@ -50,5 +52,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'api-keys:read',
     'api-keys:write',
     'reports:read',
+    'bulk-sms:write',
   ],
 };

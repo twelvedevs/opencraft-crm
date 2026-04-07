@@ -11,9 +11,12 @@ import { messagesRoute } from './routes/messages.js';
 import { notesRoute } from './routes/notes.js';
 import { scheduledRoute } from './routes/scheduled.js';
 import { aiRoute } from './routes/ai.js';
+import { bulkSendsRoute } from './routes/bulk-sends.js';
+import { settingsRoute } from './routes/settings.js';
 
 export interface AppQueues {
   scheduledSendQueue?: Queue;
+  bulkSendQueue?: Queue;
 }
 
 export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues): Promise<FastifyInstance> {
@@ -49,11 +52,11 @@ export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues)
 
   app.get('/health', async () => ({ ok: true }));
 
-  // Route plugins — bulk-sends registered before /:id to avoid param conflicts
-  await app.register(async (instance) => {
-    instance.post('/bulk-sends', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.get('/bulk-sends/:job_id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-  }, { prefix: '/conversations' });
+  // Route plugins — bulk-sends and settings registered before /:id to avoid param conflicts
+  if (queues?.bulkSendQueue) {
+    await app.register(bulkSendsRoute, { prefix: '/conversations', db, bulkSendQueue: queues.bulkSendQueue });
+  }
+  await app.register(settingsRoute, { prefix: '/conversations', db });
 
   await app.register(conversationsRoute, { prefix: '/conversations', db });
   await app.register(messagesRoute, { prefix: '/conversations', db });

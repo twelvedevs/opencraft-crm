@@ -54,11 +54,11 @@ describe('internal auth', () => {
 
   it('passes auth with correct key', async () => {
     const res = await app.inject({
-      method: 'POST',
-      url: '/conversations/bulk-sends',
+      method: 'GET',
+      url: '/conversations/settings/locations/00000000-0000-0000-0000-000000000001',
       headers: { 'x-internal-api-key': 'test-key' },
     });
-    // 501 means auth passed, route stub returned not_implemented
-    expect(res.statusCode).toBe(501);
+    // 403 means auth passed (key accepted) but user context / role is missing
+    expect(res.statusCode).toBe(403);
   });
 });

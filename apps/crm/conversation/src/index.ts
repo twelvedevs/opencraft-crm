@@ -38,7 +38,7 @@ const aiAgentWorker = createAiAgentReplyWorker(db);
 const scheduledSendWorker = createScheduledSendWorker(db);
 const bulkSendWorker = createBulkSendWorker(db);
 
-const app = await buildApp(db, eventBus, { scheduledSendQueue });
+const app = await buildApp(db, eventBus, { scheduledSendQueue, bulkSendQueue });
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
 
 process.on('SIGTERM', async () => {
