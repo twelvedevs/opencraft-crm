@@ -79,3 +79,13 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - Event publishing happens AFTER the transaction commit, not inside it
   - `timeout_at` in the membership is a Date but must be converted to ISO string for the event payload
 ---
+
+## 2026-04-07 - US-007
+- Added GET /pipeline/memberships (list with cursor pagination + filters) and GET /pipeline/memberships/:id (single lookup with 404)
+- Files changed: src/routes/memberships.ts
+- **Learnings for future iterations:**
+  - TypeBox query schema uses `Type.Optional(Type.Integer({ minimum: 1, maximum: 200 }))` for limit param validation
+  - GET list endpoint returns `{ rows, nextCursor }` directly from listMemberships repo function
+  - GET by ID returns 404 `{ error: 'not_found' }` when membership doesn't exist
+  - Query schema uses `querystring` key (not `query`) in Fastify schema options
+---
