@@ -10,6 +10,7 @@ import { conversationsRoute } from './routes/conversations.js';
 import { messagesRoute } from './routes/messages.js';
 import { notesRoute } from './routes/notes.js';
 import { scheduledRoute } from './routes/scheduled.js';
+import { aiRoute } from './routes/ai.js';
 
 export interface AppQueues {
   scheduledSendQueue?: Queue;
@@ -61,12 +62,7 @@ export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues)
     await app.register(scheduledRoute, { prefix: '/conversations', db, scheduledSendQueue: queues.scheduledSendQueue });
   }
 
-  // Remaining stubs for routes not yet implemented
-  await app.register(async (instance) => {
-    instance.post('/:id/ai/drafts', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.post('/:id/ai/summary', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.post('/:id/ai/objection', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-  }, { prefix: '/conversations' });
+  await app.register(aiRoute, { prefix: '/conversations', db });
 
   return app;
 }
