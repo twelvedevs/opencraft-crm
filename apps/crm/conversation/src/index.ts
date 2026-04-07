@@ -3,24 +3,26 @@ import { createEventBus } from '@ortho/event-bus';
 import { buildApp } from './app.js';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
+import { handleInboundMessage } from './events/handlers/inbound-message.handler.js';
 import { handleMessageDelivered } from './events/handlers/message-delivered.handler.js';
 import { handleMessageFailed } from './events/handlers/message-failed.handler.js';
 
 const eventBus = createEventBus();
 
-// EventBus subscriptions
-eventBus.subscribe('inbound_message.received', async (_event) => {
-  // Placeholder — wired in US-008
+// BullMQ queues
+const aiAgentQueue = new Queue('conversation:ai-agent-reply', {
+  connection: { url: env.BULLMQ_REDIS_URL },
 });
+
+// EventBus subscriptions
+eventBus.subscribe('inbound_message.received', (event) =>
+  handleInboundMessage(db, eventBus, { aiAgentQueue }, event),
+);
 eventBus.subscribe('message.delivered', (event) => handleMessageDelivered(db, event));
 eventBus.subscribe('message.failed', (event) => handleMessageFailed(db, event));
 
 await eventBus.start();
 
-// BullMQ queues
-const aiAgentQueue = new Queue('conversation:ai-agent-reply', {
-  connection: { url: env.BULLMQ_REDIS_URL },
-});
 const scheduledSendQueue = new Queue('conversation:scheduled-send', {
   connection: { url: env.BULLMQ_REDIS_URL },
 });
