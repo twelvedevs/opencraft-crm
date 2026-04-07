@@ -129,3 +129,20 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - History endpoint checks membership exists first (404 if not found), then returns findByMembershipId results
   - Both route files accept `{ db: Knex; eventBus: EventBus }` opts even if they don't use eventBus (consistent plugin signature)
 ---
+
+## 2026-04-07 - US-011
+- Created timeout poll job at src/jobs/timeout-poll.job.ts
+- Exports: createTimeoutPollJob (start/stop), runPoll (for direct testing), resetIsRunning (for test cleanup)
+- Uses croner with `protect: true` for re-entrancy guard, plus module-level `isRunning` flag
+- Outer query: SELECT FOR UPDATE SKIP LOCKED to find up to 100 overdue active memberships
+- Per-row processing: stage timeout transitions use updateStage + insertHistory in a transaction, then publish stageChanged + stageTimeout; archival uses direct UPDATE in a transaction, then publishes archived only
+- Updated src/index.ts to wire up pollJob.start() after eventBus.start(), pollJob.stop() in SIGTERM handler before app.close()
+- Files created: src/jobs/timeout-poll.job.ts
+- Files changed: src/index.ts
+- **Learnings for future iterations:**
+  - `runPoll` is exported separately from `createTimeoutPollJob` so integration tests can call it directly without the cron scheduler
+  - `resetIsRunning` is exported for test cleanup of the module-level isRunning flag
+  - croner Cron constructor takes (pattern, options, callback) — `protect: true` prevents overlapping runs at the cron level
+  - Archival path does NOT insert history and does NOT publish stage_changed or stage_timeout — only publishes archived
+  - exceededBySeconds = Math.floor((now - timeout_at) / 1000) — computed before processing each row
+---
