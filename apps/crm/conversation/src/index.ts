@@ -6,6 +6,7 @@ import { env } from './env.js';
 import { handleInboundMessage } from './events/handlers/inbound-message.handler.js';
 import { handleMessageDelivered } from './events/handlers/message-delivered.handler.js';
 import { handleMessageFailed } from './events/handlers/message-failed.handler.js';
+import { createAiAgentReplyWorker } from './workers/ai-agent-reply.worker.js';
 import { createScheduledSendWorker } from './workers/scheduled-send.worker.js';
 
 const eventBus = createEventBus();
@@ -31,12 +32,8 @@ const bulkSendQueue = new Queue('conversation:bulk-send', {
   connection: { url: env.BULLMQ_REDIS_URL },
 });
 
-// BullMQ workers (placeholder processors — wired in later stories)
-const aiAgentWorker = new Worker(
-  'conversation:ai-agent-reply',
-  async (_job) => { /* wired in US-014 */ },
-  { connection: { url: env.BULLMQ_REDIS_URL }, concurrency: env.AI_AGENT_CONCURRENCY },
-);
+// BullMQ workers
+const aiAgentWorker = createAiAgentReplyWorker(db);
 const scheduledSendWorker = createScheduledSendWorker(db);
 const bulkSendWorker = new Worker(
   'conversation:bulk-send',
