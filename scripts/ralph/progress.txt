@@ -9,6 +9,8 @@ Started: Tue Apr  7 09:52:40 UTC 2026
 - EventBus: `createEventBus()` from `@ortho/event-bus`, uses `EVENT_BUS_DRIVER` env var
 - vitest.config.ts needs `passWithNoTests: true` to avoid failing when no test files exist
 - Route plugins receive `{ db: Knex, eventBus: EventBus }` as opts and are registered with prefix
+- Migrations live outside `src/` — not typechecked by `tsc --noEmit`; use `loadExtensions: ['.ts']` in knexfile
+- Check constraints added via `knex.raw()` ALTER TABLE after `createTable()` (Knex has no native CHECK support)
 
 ---
 
@@ -20,4 +22,16 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - internal-auth plugin uses `request.url.startsWith('/health')` to skip auth for health endpoint
   - Membership routes registered under `/pipeline` prefix so full path is `/pipeline/memberships`
   - tsconfig uses `module: NodeNext` and `moduleResolution: NodeNext` (matching lead service pattern)
+---
+
+## 2026-04-07 - US-002
+- Created 3 migration files: schema creation, pipeline_memberships table, pipeline_stage_history table
+- Created knexfile.ts for migration runner configuration
+- Files created: knexfile.ts, migrations/20260325000000_create_crm_pipeline_schema.ts, migrations/20260325000001_create_pipeline_memberships.ts, migrations/20260325000002_create_pipeline_stage_history.ts
+- **Learnings for future iterations:**
+  - Migrations live outside `src/` and are NOT included in tsconfig `include` — they don't get typechecked by `tsc --noEmit` (same as lead service pattern)
+  - knexfile.ts uses `loadExtensions: ['.ts']` and `schemaName: 'crm_pipeline'` for migration tracking table placement
+  - Check constraints added via `knex.raw()` ALTER TABLE after table creation (Knex doesn't have built-in CHECK constraint support)
+  - Partial unique index uses `WHERE status = 'active'` to enforce one active membership per lead per pipeline
+  - Foreign key reference to cross-schema table uses full `crm_pipeline.pipeline_memberships` path in `.inTable()`
 ---
