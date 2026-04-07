@@ -156,3 +156,17 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - `it.each` works well for exhaustive transition pair testing
   - All three functions gracefully handle unknown stages (return false/null, no throw)
 ---
+
+## 2026-04-07 - US-013
+- Created integration test infrastructure: setup.ts, helpers.ts, and memberships.test.ts
+- Updated vitest.config.ts with setupFiles and testTimeout
+- 11 tests covering enrollment (happy path, duplicate 409, recall_due validation, auth 401), query (lead_id/status/pipeline filters, GET by ID, 404), and cursor pagination
+- Files created: test/integration/setup.ts, test/integration/helpers.ts, test/integration/memberships.test.ts
+- Files changed: vitest.config.ts
+- **Learnings for future iterations:**
+  - `mockDriver` is exported as a mutable `let` from helpers.ts — tests reset `mockDriver.published.length = 0` in beforeEach
+  - `buildTestApp()` mirrors app.ts but injects MockDriver instead of real EventBus — creates a fresh MockDriver on each call
+  - Integration tests use `describe.skipIf(!HAS_DB)` — all tests are skipped when no real DB is available (CI must provide DATABASE_URL)
+  - `truncateTables` uses raw TRUNCATE CASCADE on both tables (history first, then memberships) to avoid FK constraint issues
+  - `app.inject()` is Fastify's built-in HTTP injection — no need for supertest or running the server on a port
+---
