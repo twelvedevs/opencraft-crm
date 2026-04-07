@@ -46,3 +46,14 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - `recall_due` uses requiresCallerTimeoutAt=true — callerProvidedTimeoutAt must be passed by the caller
   - Override=true bypasses allowedTransitions check but still returns false for unknown fromStage
 ---
+
+## 2026-04-07 - US-004
+- Created membership.repo.ts with: Membership interface, findById, findWithLock (FOR UPDATE raw SQL), findActiveByLeadAndPipeline, listMemberships (cursor pagination), createMembership, updateStage, setStatus
+- Created stage-history.repo.ts with: StageHistory interface, insertHistory, findByMembershipId
+- Files created: src/repositories/membership.repo.ts, src/repositories/stage-history.repo.ts
+- **Learnings for future iterations:**
+  - findWithLock uses `db.raw()` for SELECT FOR UPDATE — must be called within a transaction context for the lock to be held
+  - Cursor pagination uses base64-encoded JSON `{ id, created_at }` — sort by (created_at ASC, id ASC), filter with tuple comparison
+  - All repo functions take `db: Knex` as first param (function-based, not class-based) following lead service pattern
+  - `listMemberships` returns `{ rows, nextCursor }` — no default status filter (returns all statuses if not specified)
+---
