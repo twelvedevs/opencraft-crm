@@ -68,3 +68,14 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - The OrthoEvent payload field is Record<string, unknown> so typed payload objects need `as unknown as Record<string, unknown>` cast
   - computeTimeInStage and computeResponseTime are pure helper functions exported alongside the publish functions
 ---
+
+## 2026-04-07 - US-006
+- Implemented POST /pipeline/memberships enrollment endpoint with TypeBox validation
+- Validates recall_due requires timeout_at, checks duplicate active membership (409), runs DB transaction (createMembership + insertHistory), publishes lead.stage_changed after commit
+- Files changed: src/routes/memberships.ts (replaced stub with full implementation)
+- **Learnings for future iterations:**
+  - TypeBox schema is defined at module level and passed via `{ schema: { body: ... } }` in route options
+  - correlationId comes from `x-correlation-id` header, fallback to randomUUID()
+  - Event publishing happens AFTER the transaction commit, not inside it
+  - `timeout_at` in the membership is a Date but must be converted to ISO string for the event payload
+---
