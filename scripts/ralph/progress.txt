@@ -207,3 +207,13 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - Batch cap test: insert 101 rows with unique lead_ids (partial unique index requires unique lead_id+pipeline for active memberships)
   - Lead ID prefix `00000000-0000-0000-0000-0000000000` + 2-digit suffix for generating unique UUIDs in batch inserts
 ---
+
+## 2026-04-07 - US-017
+- Created contract tests for all four event types at test/contract/events.test.ts
+- 7 tests covering: lead.stage_changed (envelope + payload, null time_in_stage when stage_from null, response_time present/null), lead.converted, lead.stage_timeout, lead.archived
+- Files created: test/contract/events.test.ts
+- **Learnings for future iterations:**
+  - Contract tests use MockDriver + EventBusImpl directly (no HTTP, no DB needed) — fastest test type
+  - Contract tests verify both envelope fields (event_id, event_type, entity_type, entity_id, schema_version, correlation_id) and payload shape
+  - `expect.any(String)` is useful for asserting non-empty UUID fields without knowing exact value
+---
