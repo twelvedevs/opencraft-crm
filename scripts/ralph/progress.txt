@@ -146,3 +146,13 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - Archival path does NOT insert history and does NOT publish stage_changed or stage_timeout — only publishes archived
   - exceededBySeconds = Math.floor((now - timeout_at) / 1000) — computed before processing each row
 ---
+
+## 2026-04-07 - US-012
+- Created comprehensive unit tests for state machine at test/unit/state-machine.test.ts
+- 44 tests covering isValidTransition (valid pairs, invalid pairs, override, unknown stages), computeTimeoutAt (all timeout configurations, caller-provided timeout, unknown stages), getTimeoutStage (all 13 stages + unknown)
+- Files created: test/unit/state-machine.test.ts
+- **Learnings for future iterations:**
+  - Unit test files use `.js` extension in imports (e.g., `../../src/services/state-machine.js`) matching ESM convention
+  - `it.each` works well for exhaustive transition pair testing
+  - All three functions gracefully handle unknown stages (return false/null, no throw)
+---
