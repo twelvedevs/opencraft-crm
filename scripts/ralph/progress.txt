@@ -23,6 +23,127 @@ Started: Tue Apr  7 00:00:00 UTC 2026
 - BullMQ workers: call the worker's internal handler function directly in integration tests (bypass queue)
 - Knex searchPath uses array: `searchPath: ['crm_<service>', 'public']`
 - Single EventBus instance handles both pub and sub — call bus.subscribe() × N before bus.start()
+- Fastify plugin encapsulation: use `app.addHook()` at root scope for auth hooks that must apply to all routes; hooks inside `app.register(plugin)` are scoped to that plugin
+- In tests, use `MockDriver` + `EventBusImpl` from `@ortho/event-bus` instead of `createEventBus()` (which requires EVENT_BUS_DRIVER)
 - event_id: randomUUID() on every published event; schema_version: '1.0' always; correlation_id forwarded from trigger
+- API Gateway forwards user context via X-User-Id, X-User-Role, X-User-Locations (comma-separated) headers; internal services parse these to populate req.user
+- Don't re-declare FastifyRequest.user if @ortho/auth-middleware already declares it — use `import '@ortho/auth-middleware'` for side-effect type augmentation
+- Empty locations array = all-locations access (manager/admin roles); check `locations.length === 0 || locations.includes(locationId)`
 
+---
+
+## 2026-04-07 18:34 UTC - US-001
+- Scaffolded Conversation Service at apps/crm/conversation/
+- Created: package.json, tsconfig.json, vitest.config.ts, Dockerfile
+- Created: src/env.ts, src/db.ts, src/app.ts, src/index.ts, src/plugins/internal-auth.ts
+- Created test/unit/scaffold.test.ts verifying health (200) and auth (401)
+- EventBus subscriptions: inbound_message.received, message.delivered, message.failed (placeholder handlers)
+- BullMQ: 3 queues + 3 workers with placeholder processors (ai-agent-reply, scheduled-send, bulk-send)
+- Files changed: 11 new files in apps/crm/conversation/
+- **Learnings for future iterations:**
+  - Fastify plugin encapsulation: hooks registered inside `app.register(plugin)` only apply to routes in that plugin's scope. To apply auth to all routes, either use `app.addHook()` at root scope or register routes inside the same plugin context.
+  - For scaffold tests, use `MockDriver` + `EventBusImpl` from `@ortho/event-bus` (not `createEventBus()` which requires EVENT_BUS_DRIVER env var)
+  - Route stubs returning 501 are acceptable at scaffold stage per AC
+  - `vi.stubEnv()` must be called before dynamic imports of modules that read env vars
+---
+
+## 2026-04-07 18:38 UTC - US-002
+- Created migration file `migrations/20260325000000_create_conversations.ts` with crm_conversations schema and all 7 tables (conversations, conversation_messages, conversation_notes, conversation_reads, scheduled_messages, location_conversation_settings, bulk_send_jobs)
+- Created `knexfile.ts` for migration runner configuration
+- Files changed: 2 new files
+- **Learnings for future iterations:**
+  - Use `knex.schema.withSchema('crm_conversations').createTable(...)` for all tables within the schema
+  - CHECK constraints must use `knex.raw()` ALTER TABLE (Knex has no native CHECK support)
+  - Composite primary keys use `table.primary(['col1', 'col2'])` in Knex
+  - `text[]` array columns use `table.specificType('media_urls', 'text[]')`
+  - Indexes with DESC sorting need `knex.raw()` CREATE INDEX statements
+  - knexfile uses `schemaName: 'crm_conversations'` so knex_migrations table is in the service schema
+---
+
+## 2026-04-07 18:42 UTC - US-003
+- Added `MessageReceivedPayload` and `MessageReceivedEvent` interfaces to `packages/@ortho/types/src/events.ts`
+- Created `apps/crm/conversation/src/lib/service-client.ts` with `createServiceClient()` factory and 5 pre-instantiated clients (messagingClient, leadClient, aiClient, audienceClient, notificationClient)
+- Files changed: 2 (1 modified, 1 new)
+- **Learnings for future iterations:**
+  - @ortho/types uses plain interface pairs (Payload + Event) — not generic `OrthoEvent<T>` wrapper types; the AC mentioned `OrthoEvent<>` but the actual pattern is a concrete interface with `event_type`, `entity_type`, `entity_id`, `payload` fields
+  - The barrel export in `@ortho/types/src/index.ts` uses `export * from './events.js'` so new exports from events.ts are automatically available
+  - Service-to-service auth in conversation service uses `X-Internal-Api-Key` header (not `Authorization: Bearer`)
+  - The `lib/` directory under `src/` is used for utility modules that aren't routes, repos, services, or events
+---
+
+## 2026-04-07 18:58 UTC - US-004
+- Created three core repository modules: conversations.repo.ts, messages.repo.ts, reads.repo.ts
+- conversations.repo: findById, findRecent (inactivity window lookup), create, update, list (with unread_count + last_message_preview subqueries)
+- messages.repo: insert, updateStatus (by messaging_message_id), listByConversation (cursor-based newest-first), getLatestMessageId
+- reads.repo: upsert (ON CONFLICT DO UPDATE), getUnreadCount (cursor-based count after last read message)
+- Files changed: 3 new files in apps/crm/conversation/src/repositories/
+- **Learnings for future iterations:**
+  - conversations.repo.list uses raw SQL subqueries for unread_count and last_message_preview (not stored columns) — inline `db.raw()` within `.select()`
+  - reads.repo.upsert uses `db.raw()` with ON CONFLICT for PostgreSQL upsert pattern
+  - messages.repo cursor pagination: fetch the cursor row's created_at first, then filter with `< cursor.created_at`
+  - The `list()` function accepts `user_id` for unread count calculation — this will come from req.user.sub in routes
+---
+
+## 2026-04-07 19:01 UTC - US-005
+- Created four supporting repository modules: notes.repo.ts, scheduled.repo.ts, bulk-send-jobs.repo.ts, settings.repo.ts
+- notes.repo: create, deleteById (returns boolean)
+- scheduled.repo: create, updateBullmqJobId, findById, updateStatus, listPending
+- bulk-send-jobs.repo: create (JSON.stringify segment for jsonb), updateStatus (with optional extra fields), findById
+- settings.repo: findByLocationId, upsert (ON CONFLICT merge), getEffectiveSettings (returns defaults if no row)
+- Files changed: 4 new files in apps/crm/conversation/src/repositories/
+- **Learnings for future iterations:**
+  - settings.repo uses Knex `.onConflict('location_id').merge()` for upsert — cleaner than raw SQL for simple cases
+  - bulk-send-jobs.repo needs `JSON.stringify()` for jsonb `segment` column on insert
+  - getEffectiveSettings returns a synthetic object with defaults when no DB row exists — no DB write on read
+  - scheduled.repo.listPending orders by `scheduled_for ASC` to show soonest first
+---
+
+## 2026-04-07 19:06 UTC - US-006
+- Created event publisher (publishMessageReceived) and two delivery status handlers (message-delivered, message-failed)
+- Updated index.ts to wire handlers into EventBus subscriptions
+- Files changed: 3 new (publisher.ts, message-delivered.handler.ts, message-failed.handler.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - @ortho/types is NOT in conversation service's package.json dependencies — define payload interfaces locally or add the dep
+  - Publisher casts typed payload to `Record<string, unknown>` via `as unknown as Record<string, unknown>` to satisfy OrthoEvent.payload type
+  - Delivery handlers use messaging_message_id (from Messaging Service) to match messages, not the conversation_messages.id
+  - Silent no-op pattern: if updateStatus returns 0 rows, log debug and return (message may belong to another service)
+---
+
+## 2026-04-07 19:08 UTC - US-007
+- Created conversation-resolver.ts: find-or-create with inactivity window logic via getEffectiveSettings
+- Created outbound-sender.ts: coordinator send via Messaging Service, stores outbound message, disables agent mode
+- Files changed: 2 new files in apps/crm/conversation/src/services/
+- **Learnings for future iterations:**
+  - conversation-resolver uses getEffectiveSettings to get inactivity_days, then computes afterTimestamp = now - inactivity_days
+  - findRecent may return a conversation without last_message_at (treat as inactive — create new)
+  - outbound-sender disables agent_mode_active BEFORE sending to Messaging Service
+  - messagingClient.post returns { message_id } which maps to messaging_message_id in conversation_messages
+  - Services import repo modules as `* as conversationsRepo` for clear namespacing
+---
+
+## 2026-04-07 19:10 UTC - US-008
+- Created inbound-message.handler.ts: processes inbound_message.received events end-to-end
+- Handler flow: lead lookup → resolveConversation → insert message → update last_message_at → publish message.received → send notification → AI agent logic (enqueue or escalate)
+- Updated index.ts: wired handleInboundMessage into EventBus subscription, moved aiAgentQueue creation before subscriptions
+- Files changed: 1 new (inbound-message.handler.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - leadClient.get throws on non-2xx (e.g., 404 for unknown lead) — use try/catch to handle unknown phone numbers gracefully
+  - aiAgentQueue must be created before eventBus subscriptions since the handler needs it; move Queue instantiation above subscribe() calls
+  - The handler needs to re-fetch settings separately from conversation-resolver (resolver gets settings for inactivity, handler needs them for agent_mode_enabled check)
+  - Notification failures should be caught and logged as warnings, not propagated — they're non-critical
+---
+
+## 2026-04-07 19:45 UTC - US-009
+- Created conversations route plugin with GET /, GET /:id, PATCH /:id, POST /:id/read
+- Updated app.ts: added user context parsing from X-User-Id/X-User-Role/X-User-Locations headers; registered conversationsRoute plugin; kept stubs for unimplemented routes
+- Added listByConversation to notes.repo.ts for fetching all notes per conversation
+- Imported `@ortho/auth-middleware` for JwtPayload type augmentation on FastifyRequest
+- Files changed: 3 modified (app.ts, notes.repo.ts, prd.json), 1 new (routes/conversations.ts)
+- **Learnings for future iterations:**
+  - API Gateway forwards user context via `X-User-Id`, `X-User-Role`, `X-User-Locations` (comma-separated) headers — internal services parse these to populate req.user
+  - Don't re-declare the `user` property on FastifyRequest if @ortho/auth-middleware already declares it — just `import '@ortho/auth-middleware'` for the side-effect type augmentation
+  - Empty locations array means all-locations access (marketing_staff, marketing_manager, super_admin roles)
+  - hasLocationAccess helper: if userLocations.length === 0, grant access (manager/admin); otherwise check includes
+  - Route plugins receive `{ db: Knex }` in opts; register before stubs to avoid conflicts
+  - When enabling agent_mode_active via PATCH, also reset agent_exchange_count to 0
 ---

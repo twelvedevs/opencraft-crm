@@ -22,6 +22,15 @@ export async function create(
   return row as ConversationNote;
 }
 
+export async function listByConversation(
+  db: Knex,
+  conversationId: string,
+): Promise<ConversationNote[]> {
+  return db(TABLE)
+    .where('conversation_id', conversationId)
+    .orderBy('created_at', 'asc') as Promise<ConversationNote[]>;
+}
+
 export async function deleteById(
   db: Knex,
   id: string,

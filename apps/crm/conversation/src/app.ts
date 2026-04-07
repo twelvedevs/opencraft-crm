@@ -3,7 +3,9 @@ import sensible from '@fastify/sensible';
 import { createLogger } from '@ortho/logger';
 import type { EventBus } from '@ortho/event-bus';
 import type { Knex } from 'knex';
+import '@ortho/auth-middleware';
 import { env } from './env.js';
+import { conversationsRoute } from './routes/conversations.js';
 
 export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance> {
   const log = createLogger('crm-conversation');
@@ -19,21 +21,45 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
     if (apiKey !== env.INTERNAL_API_KEY) {
       return reply.status(401).send({ error: 'unauthorized' });
     }
+
+    // Parse forwarded user context from API Gateway
+    const userId = request.headers['x-user-id'] as string | undefined;
+    const role = request.headers['x-user-role'] as string | undefined;
+    const locationsHeader = request.headers['x-user-locations'] as string | undefined;
+
+    if (userId && role) {
+      const locations = locationsHeader ? locationsHeader.split(',').filter(Boolean) : [];
+      request.user = {
+        sub: userId,
+        role,
+        locations,
+        must_change_password: false,
+      };
+    }
   });
 
   app.get('/health', async () => ({ ok: true }));
 
-  // Route stubs — will be replaced by route plugins in later stories
-  // bulk-sends registered before /:id to avoid param conflicts
+  // Route plugins — bulk-sends registered before /:id to avoid param conflicts
   await app.register(async (instance) => {
     instance.post('/bulk-sends', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.post('/', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.get('/', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.get('/:id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.patch('/:id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
-    instance.post('/:id/read', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.get('/bulk-sends/:job_id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+  }, { prefix: '/conversations' });
+
+  await app.register(conversationsRoute, { prefix: '/conversations', db });
+
+  // Remaining stubs for routes not yet implemented
+  await app.register(async (instance) => {
     instance.post('/:id/messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
     instance.get('/:id/messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.post('/:id/notes', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.delete('/:id/notes/:note_id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.post('/:id/scheduled-messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.get('/:id/scheduled-messages', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.delete('/:id/scheduled-messages/:msg_id', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.post('/:id/ai/drafts', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.post('/:id/ai/summary', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
+    instance.post('/:id/ai/objection', async (_req, reply) => reply.status(501).send({ error: 'not_implemented' }));
   }, { prefix: '/conversations' });
 
   return app;
