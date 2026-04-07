@@ -1,0 +1,325 @@
+{
+  "project": "Ortho CRM — Pipeline Engine",
+  "branchName": "feature/pipeline-engine",
+  "description": "Pipeline Engine service (apps/crm/pipeline) — hardcoded state machine for 3 pipelines / 13 stages, stage transition validation with SELECT FOR UPDATE, timeout enforcement via croner polling, EventBridge event publishing, and full test coverage.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Service scaffold — package.json, tsconfig, env, db, app, index",
+      "description": "As a developer, I need the Pipeline Engine service bootstrapped with Fastify, Knex (searchPath: crm_pipeline), internal-auth middleware, and graceful shutdown, so that the service can start and handle requests.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/package.json created: name '@ortho/pipeline-engine', type 'module', scripts: build/dev/start/test/typecheck; dependencies: fastify ^5, @fastify/sensible ^6, knex ^3, pg ^8, @sinclair/typebox ^0.34, @ortho/event-bus file:../../../packages/@ortho/event-bus, @ortho/logger file:../../../packages/@ortho/logger, croner ^8; devDependencies: typescript ^5, tsx ^4, vitest ^2, @types/node ^22, @types/pg ^8",
+        "apps/crm/pipeline/tsconfig.json: extends from root or standalone, module ESNext, target ES2022, moduleResolution bundler/node16, strict true, outDir dist",
+        "apps/crm/pipeline/src/env.ts: exports const env with DATABASE_URL (required), PORT (optional, default 3005), INTERNAL_API_KEY (required), EVENT_BUS_DRIVER (required), EVENTBRIDGE_BUS_NAME (required when driver='eventbridge'), AWS_REGION (required when driver='eventbridge'), TIMEOUT_POLL_ENABLED (optional, default 'true'), LOG_LEVEL (optional, default 'info')",
+        "apps/crm/pipeline/src/db.ts: exports default knex instance with client 'pg', connection env.DATABASE_URL, searchPath ['crm_pipeline', 'public']; exports destroy(): Promise<void>",
+        "apps/crm/pipeline/src/plugins/internal-auth.ts: Fastify plugin that registers an 'onRequest' hook; reads request.headers['x-internal-api-key']; if !== env.INTERNAL_API_KEY → reply.status(401).send({ error: 'unauthorized' }) and return; skip check for path '/health'",
+        "apps/crm/pipeline/src/app.ts: exports async buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance>; registers @fastify/sensible; registers internal-auth plugin; registers GET /health route returning { ok: true }; registers all route plugins under prefix '/pipeline' (stubs returning 501 are acceptable at this stage)",
+        "apps/crm/pipeline/src/index.ts: creates eventBus = createEventBus(); builds app; calls app.listen({ port: env.PORT, host: '0.0.0.0' }); calls await eventBus.start(); SIGTERM handler: stops croner job (if started), calls app.close(), eventBus.stop(), db destroy(), process.exit(0)",
+        "apps/crm/pipeline/Dockerfile: FROM node:24-alpine, WORKDIR /app, copies package.json + dist, RUN npm ci --omit=dev, CMD node dist/index.js",
+        "GET /health returns 200 { ok: true } without X-Internal-Api-Key header",
+        "POST /pipeline/memberships returns 401 when X-Internal-Api-Key header is absent or wrong",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Database migrations — crm_pipeline schema, pipeline_memberships, pipeline_stage_history",
+      "description": "As a developer, I need the three migration files that create the crm_pipeline schema and both tables with all columns, constraints, and indexes, so that the service has its database foundation.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/migrations/20260325000000_create_crm_pipeline_schema.ts: up() runs CREATE SCHEMA IF NOT EXISTS crm_pipeline; down() runs DROP SCHEMA IF EXISTS crm_pipeline CASCADE",
+        "apps/crm/pipeline/migrations/20260325000001_create_pipeline_memberships.ts: up() creates table pipeline_memberships with columns: id uuid PK DEFAULT gen_random_uuid(), lead_id uuid NOT NULL, location_id uuid NOT NULL, pipeline varchar NOT NULL CHECK IN ('new_patient','in_treatment','in_retention'), stage varchar NOT NULL, status varchar NOT NULL DEFAULT 'active' CHECK IN ('active','closed','archived'), entered_stage_at timestamptz NOT NULL DEFAULT now(), timeout_at timestamptz NULL, previous_stage varchar NULL, last_transition_override boolean NOT NULL DEFAULT false, closed_at timestamptz NULL, closed_reason varchar NULL CHECK IN ('converted','archived','manual','import','import_undo'), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()",
+        "migrations/20260325000001: creates UNIQUE INDEX ON pipeline_memberships (lead_id, pipeline) WHERE status = 'active'; INDEX ON (pipeline, stage, status, timeout_at); INDEX ON (location_id, pipeline, stage, status); INDEX ON (lead_id)",
+        "apps/crm/pipeline/migrations/20260325000002_create_pipeline_stage_history.ts: up() creates table pipeline_stage_history with columns: id uuid PK DEFAULT gen_random_uuid(), membership_id uuid NOT NULL REFERENCES pipeline_memberships(id), lead_id uuid NOT NULL, pipeline varchar NOT NULL, stage_from varchar NULL, stage_to varchar NOT NULL, override boolean NOT NULL DEFAULT false, triggered_by uuid NULL, reason varchar NULL, transitioned_at timestamptz NOT NULL DEFAULT now(); down() drops table",
+        "migrations/20260325000002: creates INDEX ON pipeline_stage_history (membership_id); INDEX ON (lead_id, transitioned_at DESC)",
+        "apps/crm/pipeline/knexfile.ts: exports default config with client 'pg', connection process.env.DATABASE_URL, searchPath ['crm_pipeline', 'public'], migrations.directory './migrations'",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "State machine — STAGES constant, isValidTransition, computeTimeoutAt, getTimeoutStage",
+      "description": "As a developer, I need the pure-function state machine module with all 13 stage configurations and the three helper functions, so that all transition validation and timeout calculation can be done without DB access.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/services/state-machine.ts: exports StageConfig interface: { pipeline: 'new_patient'|'in_treatment'|'in_retention', timeoutDays: number|null, timeoutStage: string|null, requiresCallerTimeoutAt: boolean, allowedTransitions: string[] }",
+        "Exports STAGES: Record<string, StageConfig> with all 13 stages configured exactly as in the design spec: new_lead (pipeline: new_patient, timeoutDays: null, timeoutStage: null, requiresCallerTimeoutAt: false, allowedTransitions: ['contacted','lost']), contacted (5d, 'lost', false, ['exam_scheduled','lost']), exam_scheduled (null, null, false, ['exam_completed','contacted']), exam_completed (7d, 'lost', false, ['tx_presented','lost']), tx_presented (14d, 'lost', false, ['contract_signed','lost']), contract_signed (null, null, false, []), lost (30d, null, false, ['contacted']), new_patient (in_treatment, null, null, false, ['in_treatment']), in_treatment (null, null, false, ['treatment_complete']), treatment_complete (null, null, false, []), active_retention (in_retention, null, null, false, ['recall_due']), recall_due (null, 'long_term_follow', true, ['long_term_follow']), long_term_follow (null, null, false, ['active_retention'])",
+        "Exports isValidTransition(fromStage: string, toStage: string, override: boolean): boolean — returns true if toStage is in STAGES[fromStage].allowedTransitions OR override is true; returns false if fromStage is unknown",
+        "Exports computeTimeoutAt(stage: string, enteredAt: Date, callerProvidedTimeoutAt?: Date): Date|null — for stages with timeoutDays: returns new Date(enteredAt.getTime() + timeoutDays * 86400000); for recall_due: returns callerProvidedTimeoutAt (caller must provide it — if absent returns null); for stages with timeoutDays null and not recall_due: returns null",
+        "Exports getTimeoutStage(stage: string): string|null — returns STAGES[stage].timeoutStage; returns null for stages with no timeout or unknown stages",
+        "All exports are pure functions with no side effects, no imports of DB or event-bus",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Repositories — membership.repo.ts and stage-history.repo.ts",
+      "description": "As a developer, I need the two repository modules that wrap all Knex queries against pipeline_memberships and pipeline_stage_history, so that services can interact with the DB through typed functions.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/repositories/membership.repo.ts: exports TypeScript interface Membership matching all columns of pipeline_memberships (use Date for timestamptz, string for varchar/uuid, boolean for boolean, null for nullable fields)",
+        "membership.repo.ts exports findById(db: Knex, id: string): Promise<Membership|null>",
+        "membership.repo.ts exports findWithLock(db: Knex, id: string): Promise<Membership|null> — uses knex.raw('SELECT * FROM pipeline_memberships WHERE id = ? FOR UPDATE', [id]) inside a transaction context",
+        "membership.repo.ts exports findActiveByLeadAndPipeline(db: Knex, leadId: string, pipeline: string): Promise<Membership|null> — SELECT WHERE lead_id = ? AND pipeline = ? AND status = 'active'",
+        "membership.repo.ts exports listMemberships(db: Knex, filters: { lead_id?: string, pipeline?: string, stage?: string, location_id?: string, status?: string, cursor?: string, limit?: number }): Promise<{ rows: Membership[], nextCursor: string|null }> — cursor is base64-encoded JSON { id, created_at } of the last row; sort created_at ASC, id ASC; default limit 50; if no status filter provided, returns all statuses",
+        "membership.repo.ts exports createMembership(db: Knex, data: { lead_id, location_id, pipeline, stage, triggered_by, timeout_at, reason }): Promise<Membership> — INSERT with entered_stage_at = now()",
+        "membership.repo.ts exports updateStage(db: Knex, id: string, data: { stage, timeout_at, override, previous_stage }): Promise<Membership> — UPDATE membership SET stage, entered_stage_at=now(), timeout_at, previous_stage, last_transition_override, updated_at=now()",
+        "membership.repo.ts exports setStatus(db: Knex, id: string, data: { status, closed_reason, closed_at }): Promise<Membership> — UPDATE SET status, closed_reason, closed_at, updated_at=now()",
+        "apps/crm/pipeline/src/repositories/stage-history.repo.ts: exports StageHistory interface matching all columns of pipeline_stage_history",
+        "stage-history.repo.ts exports insertHistory(db: Knex, data: { membership_id, lead_id, pipeline, stage_from, stage_to, override, triggered_by, reason }): Promise<StageHistory>",
+        "stage-history.repo.ts exports findByMembershipId(db: Knex, membershipId: string): Promise<StageHistory[]> — ORDER BY transitioned_at ASC",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Event publisher — all four event types with envelope fields",
+      "description": "As a developer, I need the publisher module that builds and emits all four Pipeline Engine events with the correct OrthoEvent envelope fields (event_id, schema_version, correlation_id), so that downstream services receive properly structured events.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/events/publisher.ts: all four publish functions accept eventBus: EventBus and correlationId: string as parameters; correlationId is placed in OrthoEvent.correlation_id; every event sets schema_version: '1.0' and event_id: randomUUID()",
+        "Exports publishStageChanged(eventBus, correlationId, payload: { membership_id, lead_id, location_id, pipeline, stage_from: string|null, stage_to, override, triggered_by: string|null, reason, timeout_at: string|null, transitioned_at: string, time_in_stage_seconds: number|null, response_time_seconds: number|null }): Promise<void> — builds OrthoEvent with event_type: 'lead.stage_changed', entity_type: 'lead', entity_id: payload.lead_id",
+        "Exports publishConverted(eventBus, correlationId, payload: { lead_id, location_id, from_pipeline, from_stage, to_pipeline, to_stage, new_membership_id, channel, triggered_by: string|null, converted_at: string }): Promise<void> — event_type: 'lead.converted'",
+        "Exports publishStageTimeout(eventBus, correlationId, payload: { membership_id, lead_id, location_id, pipeline, timed_out_stage, new_stage, timed_out_at: string, exceeded_by_seconds: number }): Promise<void> — event_type: 'lead.stage_timeout'",
+        "Exports publishArchived(eventBus, correlationId, payload: { membership_id, lead_id, location_id, pipeline, archived_at: string }): Promise<void> — event_type: 'lead.archived'",
+        "time_in_stage_seconds computation helper: exported as computeTimeInStage(enteredAt: Date, transitionedAt: Date): number — returns Math.floor((transitionedAt.getTime() - enteredAt.getTime()) / 1000)",
+        "response_time_seconds computation helper: exported as computeResponseTime(membershipCreatedAt: Date, transitionedAt: Date): number — returns Math.floor((transitionedAt.getTime() - membershipCreatedAt.getTime()) / 1000)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Membership enrollment endpoint — POST /pipeline/memberships",
+      "description": "As a developer, I need the POST /pipeline/memberships endpoint that enrolls a lead in a pipeline at an initial stage, runs the duplicate check, executes the DB transaction, and publishes lead.stage_changed.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/routes/memberships.ts: registers POST /memberships (under /pipeline prefix) with TypeBox request body schema: { lead_id: Type.String({ format: 'uuid' }), location_id: Type.String({ format: 'uuid' }), pipeline: Type.Union([...]), stage: Type.String(), triggered_by: Type.Optional(Type.Union([Type.String(), Type.Null()])), reason: Type.Union([Type.Literal('manual'), Type.Literal('import')]), timeout_at: Type.Optional(Type.String()) }",
+        "Handler validates: if stage === 'recall_due' and timeout_at is absent → return 400 { error: 'timeout_at_required' }",
+        "Handler checks for existing active membership via findActiveByLeadAndPipeline; if found → return 409 { error: 'membership_already_active' }",
+        "Handler runs DB transaction: (1) createMembership with timeout_at = computeTimeoutAt(stage, now(), callerProvidedTimeoutAt); (2) insertHistory with stage_from: null, stage_to: stage, override: false, triggered_by, reason",
+        "After COMMIT: publishStageChanged with stage_from: null, time_in_stage_seconds: null, response_time_seconds: null; correlationId = request.headers['x-correlation-id'] ?? randomUUID()",
+        "Returns 201 with the created membership object; returns 400 for TypeBox validation failures",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Membership query endpoints — GET /pipeline/memberships and GET /pipeline/memberships/:id",
+      "description": "As a developer, I need the two read endpoints for listing and fetching memberships, so that the Lead Service, Data Import Service, and CRM API Gateway can query pipeline state.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/routes/memberships.ts: adds GET /memberships with TypeBox query schema: { lead_id?: string, pipeline?: string, stage?: string, location_id?: string, status?: string, cursor?: string, limit?: Type.Integer({ minimum: 1, maximum: 200 }) }",
+        "GET /memberships calls listMemberships with the provided filters; returns 200 { rows: Membership[], nextCursor: string|null }; when no status query param provided, returns all statuses (no default status filter injected); default limit 50",
+        "Cursor pagination: decode cursor from base64 JSON { id, created_at }; add WHERE (created_at, id) > (cursor.created_at, cursor.id) to query; if result rows === limit, encode last row as nextCursor; otherwise nextCursor = null",
+        "GET /memberships/:id calls findById; returns 200 membership object or 404 { error: 'not_found' } if null",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Transition endpoint — POST /pipeline/memberships/:id/transition",
+      "description": "As a developer, I need the transition endpoint that validates the stage move, uses SELECT FOR UPDATE for concurrency safety, runs the atomic DB write, and publishes lead.stage_changed.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/routes/transitions.ts: registers POST /memberships/:id/transition with TypeBox body schema: { stage: Type.String(), override: Type.Boolean({ default: false }), triggered_by: Type.Optional(Type.Union([Type.String(), Type.Null()])), reason: Type.Union([Type.Literal('manual'), Type.Literal('timeout'), Type.Literal('no_show'), Type.Literal('import'), Type.Literal('import_undo')]), timeout_at: Type.Optional(Type.String()) }",
+        "apps/crm/pipeline/src/services/transition.service.ts: exports applyTransition(db: Knex, eventBus: EventBus, membershipId: string, data: TransitionInput, correlationId: string): Promise<Membership>",
+        "applyTransition opens a DB transaction; inside: uses knex.raw to SELECT membership FOR UPDATE; if no row found → throw 404; if status !== 'active' → throw 409; if override is true and triggered_by is null → throw 400 { error: 'override_requires_triggered_by' }",
+        "applyTransition validates: if stage === 'recall_due' and timeout_at absent → throw 400 { error: 'timeout_at_required' }; if !isValidTransition(current.stage, data.stage, data.override) → throw 422 { error: 'invalid_transition', from: current.stage, to: data.stage, allowed: STAGES[current.stage].allowedTransitions }",
+        "applyTransition inside transaction: updateStage(trx, id, { stage, timeout_at: computeTimeoutAt(...), override, previous_stage: current.stage }); insertHistory(trx, { membership_id, lead_id: current.lead_id, pipeline: current.pipeline, stage_from: current.stage, stage_to: stage, override, triggered_by, reason })",
+        "After transaction COMMIT: compute time_in_stage_seconds = computeTimeInStage(current.entered_stage_at, now()); compute response_time_seconds = (stage === 'contacted' && stage_from !== null && triggered_by !== null) ? computeResponseTime(current.created_at, now()) : null; call publishStageChanged",
+        "Route handler maps service errors to HTTP responses: 404 → 404, 409 → 409, 400 → 400, 422 → 422; returns 200 updated membership",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Convert endpoint — POST /pipeline/memberships/:id/convert",
+      "description": "As a developer, I need the atomic convert endpoint that closes the source membership and opens a target membership in one transaction, publishing both lead.converted and lead.stage_changed.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/routes/conversions.ts: registers POST /memberships/:id/convert with TypeBox body schema: { to_pipeline: Type.Union([Type.Literal('in_treatment'), Type.Literal('in_retention')]), to_stage: Type.String(), triggered_by: Type.Optional(Type.Union([Type.String(), Type.Null()])), reason: Type.Literal('converted'), channel: Type.Union([Type.Literal('google_ads'), Type.Literal('facebook'), Type.Literal('website'), Type.Literal('referral_patient'), Type.Literal('referral_doctor'), Type.Literal('call_tracking'), Type.Literal('walk_in'), Type.Literal('chat'), Type.Literal('google_business'), Type.Literal('import'), Type.Literal('unknown')]) }",
+        "apps/crm/pipeline/src/services/convert.service.ts: exports applyConversion(db, eventBus, membershipId, data, correlationId): Promise<Membership>",
+        "applyConversion validates channel is a valid value → 400 if not; validates (source.pipeline, source.stage, to_pipeline, to_stage) against allowed pairs: (new_patient, contract_signed → in_treatment, new_patient) and (in_treatment, treatment_complete → in_retention, active_retention) → 422 { error: 'invalid_conversion' } if not matched",
+        "applyConversion opens DB transaction with SELECT FOR UPDATE on source membership; if not found → 404; if status !== 'active' → 409; if current stage !== expected from_stage for the conversion → 422 { error: 'invalid_source_stage', expected: '...', actual: '...' }",
+        "Inside transaction: (1) setStatus source membership to { status: 'closed', closed_reason: 'converted', closed_at: now() }; (2) insertHistory for source: { stage_from: current.stage, stage_to: current.stage, reason: 'converted' }; (3) createMembership for target: { lead_id, location_id, pipeline: to_pipeline, stage: to_stage, triggered_by, timeout_at: null }; (4) insertHistory for target: { stage_from: null, stage_to: to_stage, reason: 'converted' }",
+        "After COMMIT: publishConverted with from_pipeline, from_stage, to_pipeline, to_stage, new_membership_id; then publishStageChanged for the new membership with stage_from: null, reason: 'converted', time_in_stage_seconds: null, response_time_seconds: null",
+        "Returns 201 with new membership object",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Close and history endpoints — POST /pipeline/memberships/:id/close and GET /pipeline/memberships/:id/history",
+      "description": "As a developer, I need the close endpoint for the Data Import undo flow and the history endpoint for timeline queries.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/routes/close.ts: registers POST /memberships/:id/close with TypeBox body: { triggered_by: Type.String({ minLength: 1 }), closed_reason: Type.Literal('import_undo') }",
+        "Close handler: findById to get membership; if not found → 404; if status !== 'active' → 409 { error: 'membership_not_active' }; runs UPDATE SET status='closed', closed_reason, closed_at=now(), updated_at=now() (no transaction needed — single write); does NOT insert pipeline_stage_history row; does NOT publish any event; returns 200 updated membership",
+        "apps/crm/pipeline/src/routes/history.ts: registers GET /memberships/:id/history",
+        "History handler: findById to check membership exists; if not found → 404 { error: 'not_found' }; calls findByMembershipId(db, id); returns 200 array of StageHistory rows ordered transitioned_at ASC (ordering is done by the repository)",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Timeout poll job — croner, SKIP LOCKED, archival, graceful shutdown",
+      "description": "As a developer, I need the timeout poll job that runs every 15 minutes, auto-transitions overdue stages, archives lost memberships, and supports graceful shutdown via TIMEOUT_POLL_ENABLED and croner task.stop().",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/src/jobs/timeout-poll.job.ts: imports Cron from 'croner'; exports createTimeoutPollJob(db: Knex, eventBus: EventBus): { start(): void, stop(): void }",
+        "start() checks TIMEOUT_POLL_ENABLED env var; if === 'false' → does NOT schedule the cron job, logs info 'timeout poll disabled'; otherwise schedules with Cron('*/15 * * * *', ...) with protect: true (croner's built-in re-entrancy guard)",
+        "Poll function uses a module-level isRunning flag set to true at start of each run and false on completion; at start of run: if isRunning → log warn 'timeout poll already running, skipping' and return",
+        "Poll function executes in DB transaction: knex.raw('SELECT * FROM pipeline_memberships WHERE status = $1 AND timeout_at IS NOT NULL AND timeout_at < NOW() ORDER BY timeout_at ASC LIMIT 100 FOR UPDATE SKIP LOCKED', ['active']); note: this raw query must be inside a transaction so the FOR UPDATE lock is held during processing",
+        "Actually: the SELECT FOR UPDATE SKIP LOCKED should be executed inside the same transaction as the per-row UPDATE. Per-row transactions: for each row, open a separate db.transaction(async (trx) => { ... }) to process it independently; a failure on one row does not affect others",
+        "For each overdue row where STAGES[stage].timeoutStage is a string (not null): run applyTransition with { stage: timeoutStage, override: false, triggered_by: null, reason: 'timeout', timeout_at: undefined }; also call publishStageTimeout after commit with exceeded_by_seconds = Math.floor((now - row.timeout_at) / 1000)",
+        "For each overdue row where STAGES[stage].timeoutStage is null (i.e. 'lost' with 30d timeout): inside transaction: UPDATE pipeline_memberships SET status='archived', closed_reason='archived', closed_at=now(), timeout_at=NULL, updated_at=now() WHERE id=row.id; DO NOT insert pipeline_stage_history; DO NOT call publishStageChanged; after COMMIT: call publishArchived with correlationId=randomUUID()",
+        "Log levels: log.info at end of each run with count of rows processed; log.error per failed row (row is retried next run — no re-throw); log.warn if rows returned === 100 (batch cap hit)",
+        "stop() method: calls cronTask.stop() if task was created (no-op if TIMEOUT_POLL_ENABLED=false); the stop does NOT forcibly kill an in-progress run — the protect option and isRunning flag handle that",
+        "src/index.ts updated to call const pollJob = createTimeoutPollJob(db, eventBus); pollJob.start(); SIGTERM handler calls pollJob.stop() before app.close()",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Unit tests — state machine (isValidTransition, computeTimeoutAt, getTimeoutStage)",
+      "description": "As a developer, I need comprehensive unit tests for the three pure state machine functions, so that all valid/invalid transition pairs and timeout calculations are verified without DB or event-bus dependencies.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/test/unit/state-machine.test.ts created using Vitest",
+        "isValidTransition tests: each valid transition pair from the spec returns true; representative invalid pairs (e.g. new_lead→tx_presented, contacted→contract_signed) return false; override=true returns true for any pair within the same pipeline; override=true with unknown fromStage returns false; unknown stage returns false without throwing",
+        "computeTimeoutAt tests: new_lead with timeoutDays null → returns null; contacted with timeoutDays=5 and enteredAt → returns enteredAt + 5 days (milliseconds exact); recall_due with callerProvidedTimeoutAt → returns callerProvidedTimeoutAt exactly; recall_due without callerProvidedTimeoutAt → returns null; treatment_complete (no timeout) → returns null",
+        "getTimeoutStage tests: contacted → 'lost'; exam_completed → 'lost'; tx_presented → 'lost'; lost → null (archive, not a stage); recall_due → 'long_term_follow'; new_lead → null; contract_signed → null; new_patient → null; unknown stage → null (no throw)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Integration test infrastructure + enrollment + query tests",
+      "description": "As a developer, I need the integration test helpers, setup file, and tests for enrollment and query endpoints, so that the DB-backed behavior is verified against a real PostgreSQL schema.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/test/integration/setup.ts: sets process.env DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://localhost:5432/test'; EVENT_BUS_DRIVER = 'mock' (or handled via MockDriver injection); INTERNAL_API_KEY = 'test-key'; LOG_LEVEL = 'silent'; TIMEOUT_POLL_ENABLED = 'false'",
+        "apps/crm/pipeline/test/integration/helpers.ts: exports HAS_DB = !!DATABASE_URL && DATABASE_URL !== 'postgresql://localhost:5432/test'; exports runMigrations(): creates a Knex instance, runs all migrations from migrations/ directory; exports cleanup(): rolls back all migrations then destroys db; exports truncateTables(): deletes all rows from pipeline_stage_history then pipeline_memberships; exports buildTestApp(db: Knex): returns Fastify app with MockDriver injected; exports LOCATION_ID = '00000000-0000-0000-0000-000000000001'; exports LEAD_ID_1 = '00000000-0000-0000-0000-000000000010'; exports LEAD_ID_2 = '00000000-0000-0000-0000-000000000011'",
+        "apps/crm/pipeline/vitest.config.ts: references test/integration/setup.ts as setupFiles; test timeout 30000",
+        "apps/crm/pipeline/test/integration/memberships.test.ts: describe.skipIf(!HAS_DB) wraps all tests; beforeAll: runMigrations, buildTestApp; afterAll: cleanup; beforeEach: truncateTables",
+        "Enroll happy path: POST /pipeline/memberships with valid new_patient/new_lead payload → 201 membership with correct fields; stage_history row inserted with stage_from=null; lead.stage_changed published with stage_from: null",
+        "Enroll duplicate: POST same lead_id + pipeline twice → second returns 409",
+        "Enroll recall_due without timeout_at → 400 { error: 'timeout_at_required' }",
+        "Enroll recall_due with timeout_at → 201; membership.timeout_at matches provided value",
+        "Auth: POST without X-Internal-Api-Key → 401",
+        "GET /pipeline/memberships?lead_id=... → 200 with correct row; GET ?status=active filters correctly; GET ?pipeline=new_patient filters correctly",
+        "GET /pipeline/memberships/:id → 200 with membership; GET unknown id → 404",
+        "Cursor pagination: insert 3 memberships for different leads; GET with limit=2 → 2 rows + nextCursor; GET with cursor → remaining 1 row + nextCursor=null",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Integration tests — transitions",
+      "description": "As a developer, I need integration tests for the transition endpoint covering valid transitions, invalid transitions, override behavior, concurrent safety, and error cases.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/test/integration/transitions.test.ts: describe.skipIf(!HAS_DB); beforeAll/afterAll/beforeEach same pattern as memberships.test.ts",
+        "Valid transition: enroll lead at new_lead; POST transition to contacted → 200; membership.stage='contacted'; membership.previous_stage='new_lead'; history row inserted with stage_from='new_lead', stage_to='contacted'; lead.stage_changed published with correct fields",
+        "Invalid transition: enroll at new_lead; POST transition to tx_presented → 422 { error: 'invalid_transition', from: 'new_lead', to: 'tx_presented', allowed: ['contacted','lost'] }; no history row inserted; no event published",
+        "Override: enroll at new_lead; POST transition to tx_presented with override:true → 200; membership.last_transition_override=true",
+        "Override without triggered_by: POST with override:true and triggered_by:null → 400 { error: 'override_requires_triggered_by' }",
+        "recall_due transition without timeout_at → 400 { error: 'timeout_at_required' }",
+        "recall_due transition with timeout_at → 200; membership.timeout_at matches provided value",
+        "Inactive membership → 409",
+        "Unknown membership id → 404",
+        "Concurrent identical transitions: enroll at new_lead; fire two simultaneous POST /transition requests to contacted; one succeeds (200), the other returns 422 (already at contacted) or 409; exactly ONE history row exists afterward; exactly ONE event published",
+        "time_in_stage_seconds: enroll at contacted (with a past entered_stage_at via direct DB insert); transition to exam_scheduled; published event time_in_stage_seconds > 0",
+        "response_time_seconds: present when stage_to='contacted', stage_from not null, triggered_by non-null; null when triggered_by is null",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Integration tests — convert, close, history",
+      "description": "As a developer, I need integration tests for the convert, close, and history endpoints.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/test/integration/conversions.test.ts: describe.skipIf(!HAS_DB); enroll lead at new_patient pipeline, transition to contract_signed; POST /convert to in_treatment/new_patient → 201; source membership status='closed', closed_reason='converted'; new membership created in in_treatment at new_patient; two history rows total (source: stage_from=contract_signed stage_to=contract_signed reason=converted; target: stage_from=null stage_to=new_patient reason=converted); lead.converted published; lead.stage_changed published with stage_from:null",
+        "conversions.test.ts: invalid source stage: enroll at new_patient pipeline, stage=new_lead; POST /convert to in_treatment → 422 { error: 'invalid_source_stage' }",
+        "conversions.test.ts: invalid conversion pair: enroll at new_patient/contract_signed; POST /convert to in_retention → 422 { error: 'invalid_conversion' }",
+        "conversions.test.ts: double convert: run valid convert; run same convert again → 409 (source membership no longer active)",
+        "apps/crm/pipeline/test/integration/close.test.ts: describe.skipIf(!HAS_DB); enroll lead; POST /close with triggered_by and closed_reason='import_undo' → 200; membership status='closed', closed_reason='import_undo', closed_at set; NO history row inserted; NO event published (mockDriver.published is empty after the close)",
+        "close.test.ts: POST /close without triggered_by → 400; POST /close on inactive membership → 409; POST /close unknown id → 404",
+        "apps/crm/pipeline/test/integration/history.test.ts: describe.skipIf(!HAS_DB); enroll, then transition twice; GET /history → 3 rows (initial enrollment + 2 transitions) in transitioned_at ASC order; GET /history for unknown membership id → 404",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Integration tests — timeout poll (stage transitions, archival, SKIP LOCKED)",
+      "description": "As a developer, I need integration tests for the timeout poll job that verify auto-transitions, archival, SKIP LOCKED behavior, and the publish of all relevant events.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/test/integration/timeout-poll.test.ts: describe.skipIf(!HAS_DB); imports the poll function directly (not via cron scheduler — TIMEOUT_POLL_ENABLED=false in setup); uses the same helpers.ts infrastructure",
+        "Stage timeout transition: insert a membership at 'contacted' with timeout_at = 2 days ago (via direct DB insert into pipeline_memberships); call poll function; assert membership.stage='lost', membership.timeout_at is now set to lost's timeout (30 days from now); assert history row inserted with reason='timeout'; assert lead.stage_changed event published with reason:'timeout'; assert lead.stage_timeout event published with timed_out_stage:'contacted', new_stage:'lost', exceeded_by_seconds > 0",
+        "recall_due timeout: insert membership at recall_due with timeout_at = 1 hour ago; call poll; assert stage='long_term_follow'; lead.stage_changed + lead.stage_timeout both published",
+        "lost archival: insert membership at 'lost' with timeout_at = 31 days ago; call poll; assert membership.status='archived', membership.closed_reason='archived', membership.timeout_at=null; assert NO history row inserted; assert lead.archived published; assert NO lead.stage_changed published; assert NO lead.stage_timeout published",
+        "Non-overdue row: insert membership at contacted with timeout_at = 2 days from now; call poll; assert no changes to membership; no events published",
+        "SKIP LOCKED test: insert an overdue membership at 'contacted'; using 'pg' Client directly (not Knex) to begin a transaction and SELECT the row FOR UPDATE (hold the lock without committing); then call poll function in the same process; assert poll does NOT process the locked row (no stage change); assert no events published; then release the pg lock (client.query('ROLLBACK'))",
+        "Batch cap: insert 101 overdue memberships (all at contacted, timeout_at in past); call poll; assert exactly 100 rows were processed; assert log.warn was called with batch-cap message (can spy on logger or check DB state — 1 row remains at contacted)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Contract tests — event payload shape for all four event types",
+      "description": "As a developer, I need contract tests in test/contract/ that verify each published event has all required envelope fields and payload fields per the spec, so that downstream services receive correctly structured events.",
+      "acceptanceCriteria": [
+        "apps/crm/pipeline/test/contract/events.test.ts created; uses MockDriver injected into createEventBus; calls publisher functions directly (no HTTP) and asserts on mockDriver.published[0]",
+        "lead.stage_changed contract: call publishStageChanged with a complete payload; assert published event has event_id (non-empty string), event_type='lead.stage_changed', entity_type='lead', entity_id=lead_id, schema_version='1.0', correlation_id (non-empty string); payload has: membership_id, lead_id, location_id, pipeline, stage_from, stage_to, override, triggered_by, reason, timeout_at, transitioned_at, time_in_stage_seconds; when stage_from is null → time_in_stage_seconds is null; when stage_to='contacted' and stage_from is not null and triggered_by is not null → response_time_seconds is a number; when triggered_by is null → response_time_seconds is null",
+        "lead.converted contract: call publishConverted; assert event_id, schema_version='1.0', event_type='lead.converted', entity_type='lead'; payload has lead_id, location_id, from_pipeline, from_stage, to_pipeline, to_stage, new_membership_id, channel, triggered_by, converted_at",
+        "lead.stage_timeout contract: call publishStageTimeout; assert event_id, schema_version='1.0', event_type='lead.stage_timeout'; payload has membership_id, lead_id, location_id, pipeline, timed_out_stage, new_stage, timed_out_at, exceeded_by_seconds",
+        "lead.archived contract: call publishArchived; assert event_id, schema_version='1.0', event_type='lead.archived'; payload has membership_id, lead_id, location_id, pipeline, archived_at",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
