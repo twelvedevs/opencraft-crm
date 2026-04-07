@@ -1,0 +1,28 @@
+# Ralph Progress Log
+Started: Tue Apr  7 00:00:00 UTC 2026
+
+## Codebase Patterns
+- All services use ESM with `.js` extensions in imports (e.g., `./env.js`)
+- Fastify plugins are plain async functions (no fastify-plugin wrapper needed for encapsulated plugins)
+- Logger: `createLogger('crm-<service>')` from `@ortho/logger`
+- EventBus: `createEventBus()` from `@ortho/event-bus`, uses `EVENT_BUS_DRIVER` env var
+- vitest.config.ts needs `passWithNoTests: true` to avoid failing when no test files exist
+- Route plugins receive `{ db: Knex, eventBus: EventBus }` as opts and are registered with prefix
+- Migrations live outside `src/` — not typechecked by `tsc --noEmit`; use `loadExtensions: ['.ts']` in knexfile
+- Check constraints added via `knex.raw()` ALTER TABLE after `createTable()` (Knex has no native CHECK support)
+- Services use internal-auth (x-internal-api-key header), NOT JWT auth (Gateway handles JWT)
+- tsconfig uses `module: NodeNext` and `moduleResolution: NodeNext`
+- TypeBox schema is defined at module level and passed via `{ schema: { body: ... } }` in route options
+- correlationId comes from `x-correlation-id` header, fallback to randomUUID()
+- Event publishing happens AFTER the transaction commit, not inside it
+- All repo functions take `db: Knex` as first param (function-based, not class-based)
+- Integration tests use `describe.skipIf(!HAS_DB)` — skipped when no DATABASE_URL available
+- `app.inject()` is Fastify's built-in HTTP injection — no need for supertest
+- Contract tests use MockDriver + EventBusImpl directly (no HTTP, no DB needed)
+- Mock HTTP calls in integration tests using `nock` (intercepts Node.js fetch/http)
+- BullMQ workers: call the worker's internal handler function directly in integration tests (bypass queue)
+- Knex searchPath uses array: `searchPath: ['crm_<service>', 'public']`
+- Single EventBus instance handles both pub and sub — call bus.subscribe() × N before bus.start()
+- event_id: randomUUID() on every published event; schema_version: '1.0' always; correlation_id forwarded from trigger
+
+---
