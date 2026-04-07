@@ -116,3 +116,16 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - Source history row has stage_from=stage_to=current.stage (not a real transition, just a record of conversion)
   - Two events published after commit: publishConverted first, then publishStageChanged for the new membership
 ---
+
+## 2026-04-07 - US-010
+- Created POST /pipeline/memberships/:id/close endpoint (src/routes/close.ts) with TypeBox validation: triggered_by (string, minLength 1), closed_reason (literal 'import_undo')
+- Created GET /pipeline/memberships/:id/history endpoint (src/routes/history.ts) returning stage history ordered by transitioned_at ASC
+- Registered both routes in app.ts under /pipeline prefix
+- Files created: src/routes/close.ts, src/routes/history.ts
+- Files changed: src/app.ts
+- **Learnings for future iterations:**
+  - Close endpoint does NOT insert history row and does NOT publish any event (by design — it's for import undo only)
+  - Close endpoint uses setStatus repo function directly (no transaction needed — single write)
+  - History endpoint checks membership exists first (404 if not found), then returns findByMembershipId results
+  - Both route files accept `{ db: Knex; eventBus: EventBus }` opts even if they don't use eventBus (consistent plugin signature)
+---
