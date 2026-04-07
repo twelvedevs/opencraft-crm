@@ -35,3 +35,14 @@ Started: Tue Apr  7 09:52:40 UTC 2026
   - Partial unique index uses `WHERE status = 'active'` to enforce one active membership per lead per pipeline
   - Foreign key reference to cross-schema table uses full `crm_pipeline.pipeline_memberships` path in `.inTable()`
 ---
+
+## 2026-04-07 - US-003
+- Created state machine module at apps/crm/pipeline/src/services/state-machine.ts
+- Exports: StageConfig interface, STAGES constant (13 stages across 3 pipelines), isValidTransition(), computeTimeoutAt(), getTimeoutStage()
+- Files created: src/services/state-machine.ts
+- **Learnings for future iterations:**
+  - All state machine functions are pure — no DB or event-bus imports
+  - `lost` stage has timeoutDays=30 but timeoutStage=null — this means archival, not a stage transition
+  - `recall_due` uses requiresCallerTimeoutAt=true — callerProvidedTimeoutAt must be passed by the caller
+  - Override=true bypasses allowedTransitions check but still returns false for unknown fromStage
+---
