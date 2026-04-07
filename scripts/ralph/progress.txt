@@ -183,3 +183,84 @@ Started: Tue Apr  7 00:00:00 UTC 2026
   - Worker dedup_key format for scheduled messages: `sched:${scheduled_message_id}`
   - Delayed jobs use `Math.max(delay, 0)` to handle edge case where scheduled_for is in the past
 ---
+
+## 2026-04-07 19:55 UTC - US-013
+- Created ai-features.ts service with getDraftReplies, getSummary, getObjectionStrategies
+- Created ai.ts route plugin with POST /:id/ai/drafts, /:id/ai/summary, /:id/ai/objection
+- Updated app.ts: registered aiRoute, removed AI stubs
+- Prompt files already existed in apps/platform/ai/src/prompts/ (created by AI service implementation)
+- Files changed: 2 new (ai-features.ts, ai.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - AI Service POST /ai/complete expects `{ prompt_id, context }` and returns `{ text }` — context is a free-form object
+  - getDraftReplies and getObjectionStrategies parse response.text as JSON; getSummary uses response.text directly as plain text
+  - The four conversation prompt files were already registered in the AI service's prompt-registry.ts — no changes needed in that service
+  - AI route follows same pattern as other routes: validate user, find conversation, check location access, then call service
+---
+
+## 2026-04-07 19:56 UTC - US-014
+- Created agent-mode.ts service with buildDisclosureFooter and parseAgentResponse functions
+- Created ai-agent-reply.worker.ts with createAiAgentReplyWorker factory following same pattern as scheduled-send worker
+- Updated index.ts to use createAiAgentReplyWorker instead of placeholder worker
+- Files changed: 2 new (agent-mode.ts, ai-agent-reply.worker.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - Worker factory pattern: `createXWorker(db: Knex): Worker` — same as scheduled-send worker
+  - parseAgentResponse returns null for any non-object or missing text/escalate fields (fail-safe escalation)
+  - AI agent dedup_key format: `agent:${conversation_id}:${agent_exchange_count}`
+  - Notification failures in worker are caught and logged as warnings (non-critical)
+  - Worker reads settings separately from inbound handler — needs location_phone for disclosure footer
+---
+
+## 2026-04-07 20:00 UTC - US-015
+- Created bulk-sender.ts service: paginate leads → evaluate audience segment → send in batches of 50 with per-lead error handling → update job status
+- Created bulk-send.worker.ts: factory pattern matching scheduled-send worker, processes 'conversation:bulk-send' queue
+- Updated index.ts: replaced placeholder bulk-send worker with createBulkSendWorker, removed unused Worker import
+- Files changed: 2 new (bulk-sender.ts, bulk-send.worker.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - bulk-sender paginate pattern: while loop with cursor param, break when next_cursor is null
+  - Audience Engine POST /audiences/evaluate expects { filter, entities, snapshot } and returns { matched_entity_ids }
+  - Per-lead send failures are caught and counted (failed++), not thrown — job continues for remaining leads
+  - On uncaught error in executeBulkSend, mark job as 'failed' before re-throwing
+  - Worker factory pattern is consistent: createXWorker(db: Knex): Worker
+---
+
+## 2026-04-07 20:02 UTC - US-016
+- Added 'bulk-sms:write' permission to call_center_manager, marketing_manager, super_admin in @ortho/auth-middleware
+- Created bulk-sends.ts route: POST /bulk-sends (role-gated, enqueues BullMQ job), GET /bulk-sends/:job_id (location-scoped)
+- Created settings.ts route: GET /settings/locations/:id (marketing_manager/super_admin only), PATCH with agent_mode_enabled validation (requires location_phone + practice_number)
+- Updated app.ts: added bulkSendQueue to AppQueues, registered bulkSendsRoute + settingsRoute before /:id param routes
+- Updated index.ts: passed bulkSendQueue to buildApp
+- Updated scaffold test: changed auth-pass test from old 501 stub to settings 403 (role check)
+- Files changed: 2 new (bulk-sends.ts, settings.ts), 4 modified (app.ts, index.ts, permissions.ts, scaffold.test.ts)
+- **Learnings for future iterations:**
+  - Bulk-sends route conditionally registers only when bulkSendQueue is provided (same pattern as scheduledSendQueue)
+  - Settings route uses SETTINGS_ROLES array for role gating — only marketing_manager and super_admin
+  - When enabling agent_mode_enabled, validate both location_phone and practice_number exist (either in request body or existing DB row)
+  - Scaffold test needed update after removing 501 stubs — use a route that always exists (settings) to verify auth passes
+  - call_center_manager has location restriction on bulk sends (must include location_id in own locations); marketing_manager/super_admin do not
+---
+
+## 2026-04-07 20:04 UTC - US-017
+- Created 3 unit test files: conversation-resolver.test.ts (5 tests), agent-mode.test.ts (6 tests), outbound-sender.test.ts (3 tests)
+- Total: 14 new tests, all passing
+- Files changed: 3 new files in apps/crm/conversation/test/unit/
+- **Learnings for future iterations:**
+  - vi.mock() with factory must be placed before imports of the mocked module
+  - For outbound-sender tests, mock `../../src/lib/service-client.js` to stub messagingClient.post
+  - conversationsRepo.update is called separately for agent_mode disable vs last_message_at update — test agent mode disable by checking if any update call includes agent_mode_active: false
+  - parseAgentResponse returns `reason: undefined` (not omitted) when reason field is absent — use toEqual with explicit undefined
+---
+
+## 2026-04-07 20:16 UTC - US-018
+- Created integration test infrastructure: setup.ts (env vars), helpers.ts (DB utilities, mock queue, constants)
+- Created inbound.test.ts with 7 test cases: happy path, append to existing, new after inactivity, unknown phone, STOP message, AI agent enqueue, escalation on max exchanges
+- Updated vitest.config.ts to include setupFiles for integration tests
+- All tests use describe.skipIf(!HAS_DB) pattern; skipped when no real DB available
+- Files changed: 3 new (setup.ts, helpers.ts, inbound.test.ts), 1 modified (vitest.config.ts)
+- **Learnings for future iterations:**
+  - MockDriver from @ortho/event-bus stores published events in `driver.published` (not `publishedEvents`)
+  - Integration test setup.ts sets process.env before module imports; unit tests with vi.stubEnv still work because they dynamic-import after stubbing
+  - Use nock to intercept service-client HTTP calls (leadClient → http://localhost:3000, notificationClient → http://localhost:3004)
+  - MockQueue pattern: simple object with `add` function and `jobs` array — no need for real BullMQ in integration tests
+  - For escalation test, nock needs two `.post('/notifications/publish')` chained (one for inbound notification, one for escalation)
+  - handleInboundMessage is called directly in integration tests (not via EventBus subscription) — pass db, bus, queues, event directly
+---

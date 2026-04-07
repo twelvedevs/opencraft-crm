@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     passWithNoTests: true,
     testTimeout: 30_000,
+    setupFiles: ['./test/integration/setup.ts'],
   },
 });
