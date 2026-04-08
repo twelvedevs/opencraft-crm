@@ -5,6 +5,7 @@ import { createLogger } from '@ortho/logger';
 import type { Knex } from 'knex';
 import { env } from './env.js';
 import { campaignsRoutes } from './routes/campaigns.js';
+import { workflowRoutes } from './routes/workflow.js';
 
 export async function buildApp(db: Knex): Promise<FastifyInstance> {
   const log = createLogger('crm-campaign');
@@ -20,6 +21,7 @@ export async function buildApp(db: Knex): Promise<FastifyInstance> {
   app.get('/health', async () => ({ ok: true }));
 
   await app.register(campaignsRoutes, { prefix: '/campaigns', db });
+  await app.register(workflowRoutes, { prefix: '/campaigns', db });
 
   return app;
 }
