@@ -13,6 +13,9 @@ import { commentsRoutes } from '../../src/routes/comments.js';
 const DATABASE_URL = process.env['DATABASE_URL'];
 export const HAS_DB = !!DATABASE_URL && DATABASE_URL !== 'postgresql://localhost:5432/test';
 
+const BULLMQ_REDIS_URL = process.env['BULLMQ_REDIS_URL'];
+export const HAS_REDIS = !!BULLMQ_REDIS_URL && BULLMQ_REDIS_URL !== 'redis://localhost:6379';
+
 // RSA keypair for signing test JWTs
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
