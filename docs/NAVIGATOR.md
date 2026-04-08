@@ -58,7 +58,8 @@ All specs are **Approved** unless noted otherwise.
 | [pipeline-engine-design.md](superpowers/specs/2026-03-25-pipeline-engine-design.md) _(superseded)_ | [memories/pipeline-engine.md](memories/pipeline-engine.md) |
 | [pipeline-engine-updated-design.md](superpowers/specs/2026-04-07-pipeline-engine-updated-design.md) _(supersedes above)_ | [memories/pipeline-engine.md](memories/pipeline-engine.md) |
 | [conversation-service-design.md](superpowers/specs/2026-03-25-conversation-service-design.md) | [memories/conversation-service.md](memories/conversation-service.md) |
-| [campaign-service-design.md](superpowers/specs/2026-03-25-campaign-service-design.md) | [memories/campaign-service.md](memories/campaign-service.md) |
+| [campaign-service-design.md](superpowers/specs/2026-03-25-campaign-service-design.md) _(superseded)_ | [memories/campaign-service.md](memories/campaign-service.md) |
+| [campaign-service-updated-design.md](superpowers/specs/2026-04-08-campaign-service-updated-design.md) _(supersedes above)_ | [memories/campaign-service.md](memories/campaign-service.md) |
 | [referral-service-design.md](superpowers/specs/2026-03-25-referral-service-design.md) | [memories/referral-service.md](memories/referral-service.md) |
 | [reporting-service-design.md](superpowers/specs/2026-03-25-reporting-service-design.md) | [memories/reporting-service.md](memories/reporting-service.md) |
 | [data-import-service-design.md](superpowers/specs/2026-03-25-data-import-service-design.md) | [memories/data-import-service.md](memories/data-import-service.md) |
