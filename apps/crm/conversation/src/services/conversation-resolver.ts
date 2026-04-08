@@ -26,16 +26,6 @@ export async function resolveConversation(
   );
 
   if (existing) {
-    // Treat conversations without last_message_at as inactive
-    if (!existing.last_message_at) {
-      return conversationsRepo.create(db, {
-        lead_id: opts.leadId,
-        location_id: opts.locationId,
-        practice_number: opts.practiceNumber,
-        lead_phone: opts.leadPhone,
-      });
-    }
-
     // Reopen if closed
     if (existing.status === 'closed') {
       return conversationsRepo.update(db, existing.id, { status: 'open' });

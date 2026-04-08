@@ -5,6 +5,7 @@ import * as conversationsRepo from '../repositories/conversations.repo.js';
 import * as messagesRepo from '../repositories/messages.repo.js';
 import * as notesRepo from '../repositories/notes.repo.js';
 import * as readsRepo from '../repositories/reads.repo.js';
+import { hasLocationAccess } from '../lib/auth-helpers.js';
 
 const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
 
@@ -23,12 +24,6 @@ const PatchBody = Type.Object({
   status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('closed')])),
   agent_mode_active: Type.Optional(Type.Boolean()),
 });
-
-function hasLocationAccess(userLocations: string[], locationId: string): boolean {
-  // Empty locations array means all-locations access (manager/admin roles)
-  if (userLocations.length === 0) return true;
-  return userLocations.includes(locationId);
-}
 
 export async function conversationsRoute(
   app: FastifyInstance,

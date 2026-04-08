@@ -264,3 +264,29 @@ Started: Tue Apr  7 00:00:00 UTC 2026
   - For escalation test, nock needs two `.post('/notifications/publish')` chained (one for inbound notification, one for escalation)
   - handleInboundMessage is called directly in integration tests (not via EventBus subscription) — pass db, bus, queues, event directly
 ---
+
+## 2026-04-07 20:21 UTC - US-019
+- Created 6 integration test files: outbound.test.ts (2 tests), delivery.test.ts (2 tests), ai-agent.test.ts (3 tests), scheduled.test.ts (2 tests), reads.test.ts (2 tests), patch.test.ts (2 tests)
+- Total: 13 new integration tests, all passing (skipped without DB as expected)
+- Files changed: 6 new files in apps/crm/conversation/test/integration/
+- **Learnings for future iterations:**
+  - For worker integration tests, replicate the worker handler logic inline rather than importing the Worker class (avoids BullMQ Redis dependency)
+  - outbound.test.ts and reads.test.ts use buildApp + app.inject() for HTTP-level integration tests
+  - delivery.test.ts imports handleMessageDelivered directly (event handler, no HTTP needed)
+  - ai-agent.test.ts imports repos and services directly to replicate worker logic with real DB but mocked HTTP
+  - scheduled.test.ts combines HTTP tests (POST/DELETE via app.inject) with direct worker handler simulation
+  - MockQueue from helpers.ts can be cast to BullMQ Queue type via `as unknown as Queue` for buildApp
+  - patch.test.ts: marketing_manager with empty x-user-locations header gets all-locations access
+---
+
+## 2026-04-07 20:39 UTC - US-020
+- Created 3 contract test files with 7 tests total:
+  - events.test.ts (2 tests): verifies message.received event envelope (event_id, event_type, entity_type, entity_id, schema_version, correlation_id, causation_id) and payload fields (all 11 fields present as strings)
+  - messaging-client.test.ts (2 tests): verifies outbound-sender calls Messaging Service with { to, from_number, body, dedup_key } all present; verifies unique dedup_key per send
+  - ai-client.test.ts (3 tests): verifies AI Service call shape { prompt_id: 'conversation-agent-reply', context: { lead_name, lead_stage, treatment_interest, recent_messages } }; verifies response.text parseable as { text, escalate } JSON; verifies escalation response parsing
+- Files changed: 3 new files in apps/crm/conversation/test/contract/
+- **Learnings for future iterations:**
+  - Contract tests use MockDriver + EventBusImpl for event tests (no HTTP, no DB) — same pattern as codebase patterns doc
+  - Contract tests for service clients use vi.mock() + replicate handler logic inline (same as unit tests)
+  - parseAgentResponse can be tested directly as a pure function — no mocking needed
+---

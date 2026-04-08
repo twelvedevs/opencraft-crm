@@ -4,6 +4,7 @@ import type { Queue } from 'bullmq';
 import { Type } from '@sinclair/typebox';
 import * as conversationsRepo from '../repositories/conversations.repo.js';
 import * as scheduledRepo from '../repositories/scheduled.repo.js';
+import { hasLocationAccess } from '../lib/auth-helpers.js';
 
 const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
 
@@ -14,14 +15,9 @@ const ScheduledMsgParams = Type.Object({
 
 const CreateScheduledBody = Type.Object({
   body: Type.String({ minLength: 1 }),
-  media_url: Type.Optional(Type.String()),
+  media_url: Type.Optional(Type.String({ format: 'uri' })),
   scheduled_for: Type.String({ format: 'date-time' }),
 });
-
-function hasLocationAccess(userLocations: string[], locationId: string): boolean {
-  if (userLocations.length === 0) return true;
-  return userLocations.includes(locationId);
-}
 
 export async function scheduledRoute(
   app: FastifyInstance,

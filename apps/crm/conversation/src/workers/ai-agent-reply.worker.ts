@@ -42,7 +42,7 @@ export function createAiAgentReplyWorker(db: Knex): Worker {
           lead_name: lead.name,
           lead_stage: lead.current_stage,
           treatment_interest: lead.treatment_interest,
-          location_name: settings.location_phone,
+          location_phone: settings.location_phone,
           recent_messages: messages.map((m) => ({
             direction: m.direction,
             body: m.body,

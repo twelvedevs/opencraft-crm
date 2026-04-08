@@ -24,6 +24,21 @@ describe('agent-mode', () => {
       const result = parseAgentResponse('"just a string"');
       expect(result).toBeNull();
     });
+
+    it('returns null when text field is missing', () => {
+      const result = parseAgentResponse(JSON.stringify({ escalate: false }));
+      expect(result).toBeNull();
+    });
+
+    it('returns null when escalate field is missing', () => {
+      const result = parseAgentResponse(JSON.stringify({ text: 'hi' }));
+      expect(result).toBeNull();
+    });
+
+    it('returns null for JSON null literal', () => {
+      const result = parseAgentResponse('null');
+      expect(result).toBeNull();
+    });
   });
 
   describe('buildDisclosureFooter', () => {

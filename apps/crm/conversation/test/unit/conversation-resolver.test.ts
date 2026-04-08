@@ -76,23 +76,6 @@ describe('conversation-resolver', () => {
     expect(conversationsRepo.create).not.toHaveBeenCalled();
   });
 
-  it('creates new conversation when last_message_at is null (treated as inactive)', async () => {
-    const existing = makeConversation({ last_message_at: null });
-    const created = makeConversation({ id: 'conv-2' });
-    vi.mocked(conversationsRepo.findRecent).mockResolvedValue(existing);
-    vi.mocked(conversationsRepo.create).mockResolvedValue(created);
-
-    const result = await resolveConversation(mockDb, baseOpts);
-
-    expect(conversationsRepo.create).toHaveBeenCalledWith(mockDb, {
-      lead_id: baseOpts.leadId,
-      location_id: baseOpts.locationId,
-      practice_number: baseOpts.practiceNumber,
-      lead_phone: baseOpts.leadPhone,
-    });
-    expect(result).toBe(created);
-  });
-
   it('creates new conversation when no existing conversation found', async () => {
     const created = makeConversation({ id: 'conv-2' });
     vi.mocked(conversationsRepo.findRecent).mockResolvedValue(null);

@@ -3,17 +3,13 @@ import type { Knex } from 'knex';
 import { Type } from '@sinclair/typebox';
 import * as conversationsRepo from '../repositories/conversations.repo.js';
 import { getDraftReplies, getSummary, getObjectionStrategies } from '../services/ai-features.js';
+import { hasLocationAccess } from '../lib/auth-helpers.js';
 
 const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
 
 const ObjectionBody = Type.Object({
   objection_type: Type.String({ minLength: 1 }),
 });
-
-function hasLocationAccess(userLocations: string[], locationId: string): boolean {
-  if (userLocations.length === 0) return true;
-  return userLocations.includes(locationId);
-}
 
 export async function aiRoute(
   app: FastifyInstance,

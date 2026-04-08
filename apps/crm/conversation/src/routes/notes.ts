@@ -3,6 +3,7 @@ import type { Knex } from 'knex';
 import { Type } from '@sinclair/typebox';
 import * as conversationsRepo from '../repositories/conversations.repo.js';
 import * as notesRepo from '../repositories/notes.repo.js';
+import { hasLocationAccess } from '../lib/auth-helpers.js';
 
 const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
 
@@ -14,11 +15,6 @@ const NoteIdParams = Type.Object({
 const CreateNoteBody = Type.Object({
   body: Type.String({ minLength: 1 }),
 });
-
-function hasLocationAccess(userLocations: string[], locationId: string): boolean {
-  if (userLocations.length === 0) return true;
-  return userLocations.includes(locationId);
-}
 
 export async function notesRoute(
   app: FastifyInstance,

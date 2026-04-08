@@ -79,7 +79,7 @@ export async function executeBulkSend(
     // Update total
     await bulkSendJobsRepo.updateStatus(db, jobId, 'processing', { total: matchedIds.length });
 
-    // Send in batches of 50
+    // Send in batches of 50 (parallel within each batch)
     let sent = 0;
     let failed = 0;
     const BATCH_SIZE = 50;
@@ -87,26 +87,31 @@ export async function executeBulkSend(
     for (let i = 0; i < matchedIds.length; i += BATCH_SIZE) {
       const batch = matchedIds.slice(i, i + BATCH_SIZE);
 
-      for (const leadId of batch) {
-        const lead = leadMap.get(leadId);
-        if (!lead) {
-          log.warn({ leadId }, 'Lead not found in map, skipping');
-          failed++;
-          continue;
-        }
+      const results = await Promise.all(
+        batch.map(async (leadId) => {
+          const lead = leadMap.get(leadId);
+          if (!lead) {
+            log.warn({ leadId }, 'Lead not found in map, skipping');
+            return 'failed' as const;
+          }
+          try {
+            await messagingClient.post('/messages/send', {
+              to: lead.phone,
+              from_number: settings.practice_number,
+              body: opts.body,
+              dedup_key: `${jobId}:${leadId}`,
+            });
+            return 'sent' as const;
+          } catch (err) {
+            log.error({ err, leadId }, 'Failed to send bulk message to lead');
+            return 'failed' as const;
+          }
+        }),
+      );
 
-        try {
-          await messagingClient.post('/messages/send', {
-            to: lead.phone,
-            from_number: settings.practice_number,
-            body: opts.body,
-            dedup_key: `${jobId}:${leadId}`,
-          });
-          sent++;
-        } catch (err) {
-          log.error({ err, leadId }, 'Failed to send bulk message to lead');
-          failed++;
-        }
+      for (const result of results) {
+        if (result === 'sent') sent++;
+        else failed++;
       }
     }
 

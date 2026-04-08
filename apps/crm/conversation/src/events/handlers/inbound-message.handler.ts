@@ -122,6 +122,7 @@ export async function handleInboundMessage(
       // Escalate — max exchanges reached
       await conversationsRepo.update(db, conversation.id, {
         escalated: true,
+        agent_mode_active: false,
       });
 
       try {

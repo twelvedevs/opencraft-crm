@@ -4,6 +4,7 @@ import { Type } from '@sinclair/typebox';
 import * as conversationsRepo from '../repositories/conversations.repo.js';
 import * as messagesRepo from '../repositories/messages.repo.js';
 import { sendOutbound } from '../services/outbound-sender.js';
+import { hasLocationAccess } from '../lib/auth-helpers.js';
 
 const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
 
@@ -14,13 +15,8 @@ const MessagesQuery = Type.Object({
 
 const SendBody = Type.Object({
   body: Type.String({ minLength: 1 }),
-  media_url: Type.Optional(Type.String()),
+  media_url: Type.Optional(Type.String({ format: 'uri' })),
 });
-
-function hasLocationAccess(userLocations: string[], locationId: string): boolean {
-  if (userLocations.length === 0) return true;
-  return userLocations.includes(locationId);
-}
 
 export async function messagesRoute(
   app: FastifyInstance,

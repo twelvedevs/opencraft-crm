@@ -3,9 +3,10 @@ import type { Knex } from 'knex';
 import type { Queue } from 'bullmq';
 import { Type } from '@sinclair/typebox';
 import * as bulkSendJobsRepo from '../repositories/bulk-send-jobs.repo.js';
+import { hasLocationAccess } from '../lib/auth-helpers.js';
 
 const CreateBulkSendBody = Type.Object({
-  segment: Type.Unknown(),
+  segment: Type.Object({}, { additionalProperties: true }),
   body: Type.String({ minLength: 1 }),
   location_id: Type.String({ format: 'uuid' }),
 });
@@ -13,11 +14,6 @@ const CreateBulkSendBody = Type.Object({
 const JobIdParams = Type.Object({ job_id: Type.String({ format: 'uuid' }) });
 
 const ALLOWED_ROLES = ['call_center_manager', 'marketing_manager', 'super_admin'];
-
-function hasLocationAccess(userLocations: string[], locationId: string): boolean {
-  if (userLocations.length === 0) return true;
-  return userLocations.includes(locationId);
-}
 
 export async function bulkSendsRoute(
   app: FastifyInstance,

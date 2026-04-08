@@ -59,10 +59,10 @@ export async function settingsRoute(
       const effectivePractice = body.practice_number ?? existing?.practice_number;
 
       if (!effectivePhone) {
-        return reply.status(422).send({ error: 'location_phone is required when enabling agent mode' });
+        return reply.status(422).send({ error: 'unprocessable', reason: 'location_phone is required when enabling agent mode' });
       }
       if (!effectivePractice) {
-        return reply.status(422).send({ error: 'practice_number is required when enabling agent mode' });
+        return reply.status(422).send({ error: 'unprocessable', reason: 'practice_number is required when enabling agent mode' });
       }
     }
 

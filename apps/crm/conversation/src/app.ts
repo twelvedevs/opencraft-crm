@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { createLogger } from '@ortho/logger';
@@ -30,7 +31,9 @@ export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues)
     if (request.url.startsWith('/health')) return;
 
     const apiKey = request.headers['x-internal-api-key'];
-    if (apiKey !== env.INTERNAL_API_KEY) {
+    const expected = Buffer.from(env.INTERNAL_API_KEY);
+    const actual = Buffer.from(typeof apiKey === 'string' ? apiKey : '');
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
       return reply.status(401).send({ error: 'unauthorized' });
     }
 

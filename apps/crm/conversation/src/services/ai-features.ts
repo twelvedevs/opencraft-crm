@@ -29,7 +29,12 @@ export async function getDraftReplies(
     },
   });
 
-  const drafts = JSON.parse(response.text) as { body: string; label: string }[];
+  let drafts: { body: string; label: string }[];
+  try {
+    drafts = JSON.parse(response.text) as { body: string; label: string }[];
+  } catch {
+    throw Object.assign(new Error('AI service returned unparseable response'), { status: 502 });
+  }
   return { drafts };
 }
 
@@ -65,6 +70,11 @@ export async function getObjectionStrategies(
     },
   });
 
-  const strategies = JSON.parse(response.text) as { title: string; body: string }[];
+  let strategies: { title: string; body: string }[];
+  try {
+    strategies = JSON.parse(response.text) as { title: string; body: string }[];
+  } catch {
+    throw Object.assign(new Error('AI service returned unparseable response'), { status: 502 });
+  }
   return { strategies };
 }

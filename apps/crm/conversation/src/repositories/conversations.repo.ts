@@ -101,7 +101,7 @@ export async function list(
     .select(
       `${TABLE}.*`,
       db.raw(`(
-        SELECT body FROM conversation_messages
+        SELECT LEFT(body, 80) FROM conversation_messages
         WHERE conversation_id = ${TABLE}.id
         ORDER BY created_at DESC
         LIMIT 1
