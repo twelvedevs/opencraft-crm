@@ -2,7 +2,14 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     passWithNoTests: true,
     include: ['test/**/*.test.ts'],
+    setupFiles: ['./test/integration/setup.ts'],
   },
 });

@@ -1,18 +1,140 @@
 # Ralph Progress Log
-Started: Wed Apr  8 00:00:00 UTC 2026
+Started: Wed Apr  8 10:50:33 UTC 2026
+---
 
 ## Codebase Patterns
-- Pipeline service uses internal-auth (x-internal-api-key header), NOT JWT auth
-- Campaign service uses JWT auth via @ortho/auth-middleware requirePermission()
-- All services use ESM with `.js` extensions in imports (e.g., `./env.js`)
-- Fastify plugins are plain async functions (no fastify-plugin wrapper needed for encapsulated plugins)
-- Logger: `createLogger('crm-campaign')` from `@ortho/logger`
-- EventBus: `createEventBus()` from `@ortho/event-bus`, uses `EVENT_BUS_DRIVER` env var
-- vitest.config.ts needs `passWithNoTests: true` to avoid failing when no test files exist
-- Route plugins receive `{ db: Knex, eventBus: EventBus }` as opts and are registered with prefix
-- Migrations live outside `src/` — not typechecked by `tsc --noEmit`; use `loadExtensions: ['.ts']` in knexfile
-- Check constraints added via `knex.raw()` ALTER TABLE after `createTable()` (Knex has no native CHECK support)
-- tsconfig uses `module: NodeNext` and `moduleResolution: NodeNext`
-- @ortho/auth-middleware: requirePermission() used for route-level permission guards; stack multiple in preHandler array for manager-only routes
+- Campaign service uses `src/api.ts` (not `src/app.ts`) for the buildApp function per PRD spec
+- Auth: use `authPlugin` from `@ortho/auth-middleware` with `jwksUrl` and `allowedPaths: ['/health']` — requires `IDENTITY_JWKS_URL` env var
+- DB: use `knexLib` default import from `knex`, searchPath `['crm_campaigns', 'public']`
+- Logger: `createLogger('crm-campaign')` cast as `unknown as FastifyBaseLogger` for Fastify
+- All services export `destroy()` from db.ts for clean shutdown
+- Migrations: use `knex.schema.withSchema('crm_campaigns')` for tables, `knex.raw()` for CHECK constraints and indexes
+- knexfile.ts: uses `process.env['DATABASE_URL']` directly (not env.ts), with `schemaName: 'crm_campaigns'` for migration tracking
+- FK references within same schema use fully qualified: `.references('id').inTable('crm_campaigns.campaigns')`
+- State machine: use `validateTransition(status, action)` before any status change; use `targetStatus(status, action)` to get destination status
+- Service layer: pure functions (no DB), exported from `src/services/campaign-service.ts`; routes call these before repo writes
+- Routes: register as Fastify plugin `async function fooRoutes(app, opts: { db: Knex })`, registered with `{ prefix: '/campaigns', db }` in api.ts
+- Auth: use `requirePermission('campaigns:write')` as preHandler for all campaign routes; `requirePermission('campaigns:manage')` for manager-only routes
+- Integration tests: RSA keypair + JWKS mock on globalThis.fetch; `describe.skipIf(!HAS_DB)` to skip without Postgres; `pool: 'forks'` + `singleFork: true` in vitest config
+- Test factories: use direct DB insert (bypassing routes) via `insertCampaign(db, overrides)` to set up specific statuses
+---
 
+## 2026-04-08 - US-001
+- Scaffolded Campaign Service at apps/crm/campaign/
+- Files created: package.json, tsconfig.json, vitest.config.ts, src/env.ts, src/db.ts, src/api.ts, src/index.ts, Dockerfile
+- **Learnings for future iterations:**
+  - PRD specifies `IDENTITY_JWKS_URL` is needed for auth-middleware JWT plugin even though it's not in the env.ts acceptance criteria — added it as required
+  - The PRD names the file `api.ts` not `app.ts` (differs from lead/conversation which use `app.ts`)
+  - `passWithNoTests: true` in vitest config is critical for early stories before test files exist
+  - Campaign service package name is `@ortho/campaign-service` (not `@crm/campaign` like other CRM services)
+---
+
+## 2026-04-08 - US-002
+- Added @ortho/types additions for Campaign Service
+- Files changed: packages/@ortho/types/src/events.ts
+- Added: CampaignSentPayload, CampaignSentEvent, EmailCampaignCompletedPayload, EmailOpenedPayload interfaces
+- Added: occurred_at field to LeadStageChangedPayload
+- **Learnings for future iterations:**
+  - index.ts uses `export * from './events.js'` so new event interfaces are auto-exported — no index.ts changes needed
+  - Adding fields to existing interfaces (like LeadStageChangedPayload) is safe when no other services consume them yet — but check with `grep` first
+  - No other services currently reference LeadStageChangedPayload so the addition is non-breaking
+---
+
+## 2026-04-08 - US-003
+- Added `campaigns:manage` permission to `marketing_manager` and `super_admin` roles in @ortho/auth-middleware
+- Files changed: packages/@ortho/auth-middleware/src/permissions.ts
+- **Learnings for future iterations:**
+  - Permission additions are simple — just append to the ROLE_PERMISSIONS arrays in permissions.ts
+  - The auth-middleware package typechecks independently with `npx tsc --noEmit` from its directory
+  - Permissions follow `{resource}:{action}` naming convention (e.g. `campaigns:manage`, `campaigns:write`)
+---
+
+## 2026-04-08 - US-004
+- Created knexfile.ts and all 4 migration files for crm_campaigns schema
+- Files created: knexfile.ts, migrations/20260408000000_create_crm_campaigns_schema.ts, migrations/20260408000001_create_campaigns.ts, migrations/20260408000002_create_campaign_events_comments.ts, migrations/20260408000003_create_campaign_sends_recipients_conversions.ts
+- Tables: campaigns (with CHECK constraints + partial indexes), campaign_events, campaign_comments, campaign_sends, campaign_recipients (composite PK), campaign_conversions (unique constraint)
+- **Learnings for future iterations:**
+  - Migration pattern: use `knex.schema.withSchema('crm_campaigns').createTable()` for table creation, `knex.raw()` for CHECK constraints and indexes
+  - Foreign keys referencing same-schema tables use fully qualified names: `.references('id').inTable('crm_campaigns.campaigns')`
+  - Partial indexes use WHERE clause in knex.raw: `CREATE INDEX ... WHERE status = 'scheduled'`
+  - Composite primary keys: use `table.primary(['col1', 'col2'])` after column definitions
+  - knexfile.ts uses `process.env['DATABASE_URL']` (not importing env.ts) since migrations run via CLI
+---
+
+## 2026-04-08 - US-005
+- Created three repository modules: campaigns.repo.ts, campaign-events.repo.ts, campaign-comments.repo.ts
+- Files created: src/repositories/campaigns.repo.ts, src/repositories/campaign-events.repo.ts, src/repositories/campaign-comments.repo.ts
+- campaigns.repo: findById, create, update, list (with status[] + created_by filters, pagination), remove
+- campaign-events.repo: insertEvent, listByCampaignId
+- campaign-comments.repo: insertComment, listByCampaignId (with pagination + total count)
+- **Learnings for future iterations:**
+  - Repository pattern: export interfaces + named functions, use TABLE const, db passed as first arg (matches conversation repo pattern)
+  - No need for explicit `withSchema('crm_campaigns')` in repos — searchPath in db.ts handles it
+  - Use `db.fn.now()` for updated_at in update operations
+  - Cast pattern: `(row as Type) ?? null` for findById, `row as Type` for insert/update returning
+  - list() uses separate count query + data query approach, same as conversation repo
+---
+
+## 2026-04-08 - US-006
+- Created campaign state machine service with validateTransition, validateContentLock, validateRejectComment
+- Created unit tests covering all transition scenarios (59 tests)
+- Files created: src/services/campaign-service.ts, test/unit/campaign-service.test.ts
+- **Learnings for future iterations:**
+  - State machine uses a TRANSITIONS map (status → action → target status) for clean guard logic
+  - `targetStatus(currentStatus, action)` helper exported for routes to get the destination status after validation
+  - Content lock applies to statuses 'approved' and later (approved, scheduled, sending, completed, completed_with_errors, failed, cancelled)
+  - `scheduled_for` is intentionally NOT in the locked fields set — managers can reschedule without re-approval
+  - Terminal statuses (completed, completed_with_errors, failed, cancelled) have no outgoing transitions at all
+  - Sending can only transition via system actions (complete, complete-with-errors, fail) — no cancel from sending
+---
+
+## 2026-04-08 - US-007
+- Implemented Campaign CRUD routes: POST (create draft), GET (list with filters), GET /:id, PATCH (with content lock), DELETE (draft only)
+- Files created: src/routes/campaigns.ts
+- Files changed: src/api.ts (replaced stub routes with real campaignsRoutes plugin)
+- **Learnings for future iterations:**
+  - Route plugins receive `opts: { db: Knex }` and are registered with `{ prefix: '/campaigns', db }` in api.ts
+  - All campaign routes use `requirePermission('campaigns:write')` as preHandler (not requireRole)
+  - POST /campaigns validates exactly one of segment_id or audience_filter — check undefined (not null) since TypeBox Optional means the key may be absent
+  - PATCH uses `Object.keys(body)` to get field names for validateContentLock before passing to repo.update
+  - TypeBox `Type.Object({})` with additionalProperties works for audience_filter jsonb — Fastify doesn't strip unknown keys
+  - DELETE returns 200 (not 204) with `{ campaign_id, deleted: true }` per acceptance criteria
+---
+
+## 2026-04-08 - US-008
+- Implemented approval workflow routes: POST submit, approve, reject, cancel + Phase 2 stubs (schedule, unschedule, send-now → 501)
+- Files created: src/routes/workflow.ts
+- Files changed: src/api.ts (registered workflowRoutes plugin)
+- **Learnings for future iterations:**
+  - Workflow routes registered as a separate Fastify plugin under same `/campaigns` prefix — Fastify merges route paths correctly
+  - For manager-only routes, use `preHandler: [requirePermission('campaigns:write'), requirePermission('campaigns:manage')]` — both checks run in order; 403 returned if either fails
+  - Pattern: fetch campaign → validateTransition → repo.update status → insertEvent → return; reject also validates comment and inserts campaign_comments row
+  - Phase 2 stubs just return 501 with `{ error: 'Not Implemented' }` — clean placeholder for schedule/unschedule/send-now
+---
+
+## 2026-04-08 - US-009
+- Implemented POST and GET /campaigns/:id/comments routes
+- Files created: src/routes/comments.ts
+- Files changed: src/api.ts (registered commentsRoutes plugin)
+- POST returns 201 with comment_id, author_id, body, created_at; validates body non-empty; returns 404 if campaign not found
+- GET returns 200 with { comments, total }; supports limit/offset pagination (defaults 50/0); returns 404 if campaign not found
+- **Learnings for future iterations:**
+  - Comments routes follow same plugin pattern as campaigns and workflow — separate file, registered under same `/campaigns` prefix
+  - TypeBox `minLength: 1` on string schema provides validation at Fastify level, but additional trim check in handler is good defense-in-depth
+  - Route structure for sub-resources: `/:id/comments` registered under `/campaigns` prefix yields `/campaigns/:id/comments`
+---
+
+## 2026-04-08 - US-010
+- Created integration test suite for full approval workflow end-to-end
+- Files created: test/integration/setup.ts, test/integration/helpers.ts, test/integration/approval-workflow.test.ts
+- Files changed: vitest.config.ts (added setupFiles, pool:forks, singleFork), package.json (added fast-jwt devDependency)
+- 25 test cases covering: POST create, GET list (with status filter), GET by ID, PATCH (draft + content lock + scheduled_for), DELETE (draft + non-draft), submit, approve (manager + staff 403), reject (no comment 400 + with comment), cancel (draft + pending_review + sending 409), comments (create + list + 404), full e2e workflows
+- Tests use `describe.skipIf(!HAS_DB)` pattern — skip when no real Postgres, run when DATABASE_URL provided
+- **Learnings for future iterations:**
+  - Integration tests follow Lead service pattern: RSA keypair → JWKS mock → mockFetch on globalThis.fetch → buildTestApp with auth plugin
+  - `fast-jwt` devDependency is needed for `createSigner` to generate RS256 test JWTs (not bundled with campaign service by default)
+  - vitest config needs `pool: 'forks'` and `singleFork: true` for integration tests to avoid parallel DB conflicts
+  - `setupFiles` in vitest config runs before any test imports — use it to set all required env vars so env.ts doesn't throw
+  - Factory `insertCampaign()` inserts directly into DB (bypassing API routes) to set up specific statuses for testing transitions
+  - TRUNCATE must list tables in dependency order or use CASCADE to handle FK constraints
 ---
