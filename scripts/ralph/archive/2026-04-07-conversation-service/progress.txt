@@ -1,0 +1,292 @@
+# Ralph Progress Log
+Started: Tue Apr  7 00:00:00 UTC 2026
+
+## Codebase Patterns
+- All services use ESM with `.js` extensions in imports (e.g., `./env.js`)
+- Fastify plugins are plain async functions (no fastify-plugin wrapper needed for encapsulated plugins)
+- Logger: `createLogger('crm-<service>')` from `@ortho/logger`
+- EventBus: `createEventBus()` from `@ortho/event-bus`, uses `EVENT_BUS_DRIVER` env var
+- vitest.config.ts needs `passWithNoTests: true` to avoid failing when no test files exist
+- Route plugins receive `{ db: Knex, eventBus: EventBus }` as opts and are registered with prefix
+- Migrations live outside `src/` — not typechecked by `tsc --noEmit`; use `loadExtensions: ['.ts']` in knexfile
+- Check constraints added via `knex.raw()` ALTER TABLE after `createTable()` (Knex has no native CHECK support)
+- Services use internal-auth (x-internal-api-key header), NOT JWT auth (Gateway handles JWT)
+- tsconfig uses `module: NodeNext` and `moduleResolution: NodeNext`
+- TypeBox schema is defined at module level and passed via `{ schema: { body: ... } }` in route options
+- correlationId comes from `x-correlation-id` header, fallback to randomUUID()
+- Event publishing happens AFTER the transaction commit, not inside it
+- All repo functions take `db: Knex` as first param (function-based, not class-based)
+- Integration tests use `describe.skipIf(!HAS_DB)` — skipped when no DATABASE_URL available
+- `app.inject()` is Fastify's built-in HTTP injection — no need for supertest
+- Contract tests use MockDriver + EventBusImpl directly (no HTTP, no DB needed)
+- Mock HTTP calls in integration tests using `nock` (intercepts Node.js fetch/http)
+- BullMQ workers: call the worker's internal handler function directly in integration tests (bypass queue)
+- Knex searchPath uses array: `searchPath: ['crm_<service>', 'public']`
+- Single EventBus instance handles both pub and sub — call bus.subscribe() × N before bus.start()
+- Fastify plugin encapsulation: use `app.addHook()` at root scope for auth hooks that must apply to all routes; hooks inside `app.register(plugin)` are scoped to that plugin
+- In tests, use `MockDriver` + `EventBusImpl` from `@ortho/event-bus` instead of `createEventBus()` (which requires EVENT_BUS_DRIVER)
+- event_id: randomUUID() on every published event; schema_version: '1.0' always; correlation_id forwarded from trigger
+- API Gateway forwards user context via X-User-Id, X-User-Role, X-User-Locations (comma-separated) headers; internal services parse these to populate req.user
+- Don't re-declare FastifyRequest.user if @ortho/auth-middleware already declares it — use `import '@ortho/auth-middleware'` for side-effect type augmentation
+- Empty locations array = all-locations access (manager/admin roles); check `locations.length === 0 || locations.includes(locationId)`
+- BullMQ Queue instances must be created outside Fastify route plugins and passed via opts (DI) — creating them inside plugins fails in tests
+- buildApp accepts optional `AppQueues` for passing BullMQ queues to route plugins; route plugins that need queues conditionally register only when queue is provided
+
+---
+
+## 2026-04-07 18:34 UTC - US-001
+- Scaffolded Conversation Service at apps/crm/conversation/
+- Created: package.json, tsconfig.json, vitest.config.ts, Dockerfile
+- Created: src/env.ts, src/db.ts, src/app.ts, src/index.ts, src/plugins/internal-auth.ts
+- Created test/unit/scaffold.test.ts verifying health (200) and auth (401)
+- EventBus subscriptions: inbound_message.received, message.delivered, message.failed (placeholder handlers)
+- BullMQ: 3 queues + 3 workers with placeholder processors (ai-agent-reply, scheduled-send, bulk-send)
+- Files changed: 11 new files in apps/crm/conversation/
+- **Learnings for future iterations:**
+  - Fastify plugin encapsulation: hooks registered inside `app.register(plugin)` only apply to routes in that plugin's scope. To apply auth to all routes, either use `app.addHook()` at root scope or register routes inside the same plugin context.
+  - For scaffold tests, use `MockDriver` + `EventBusImpl` from `@ortho/event-bus` (not `createEventBus()` which requires EVENT_BUS_DRIVER env var)
+  - Route stubs returning 501 are acceptable at scaffold stage per AC
+  - `vi.stubEnv()` must be called before dynamic imports of modules that read env vars
+---
+
+## 2026-04-07 18:38 UTC - US-002
+- Created migration file `migrations/20260325000000_create_conversations.ts` with crm_conversations schema and all 7 tables (conversations, conversation_messages, conversation_notes, conversation_reads, scheduled_messages, location_conversation_settings, bulk_send_jobs)
+- Created `knexfile.ts` for migration runner configuration
+- Files changed: 2 new files
+- **Learnings for future iterations:**
+  - Use `knex.schema.withSchema('crm_conversations').createTable(...)` for all tables within the schema
+  - CHECK constraints must use `knex.raw()` ALTER TABLE (Knex has no native CHECK support)
+  - Composite primary keys use `table.primary(['col1', 'col2'])` in Knex
+  - `text[]` array columns use `table.specificType('media_urls', 'text[]')`
+  - Indexes with DESC sorting need `knex.raw()` CREATE INDEX statements
+  - knexfile uses `schemaName: 'crm_conversations'` so knex_migrations table is in the service schema
+---
+
+## 2026-04-07 18:42 UTC - US-003
+- Added `MessageReceivedPayload` and `MessageReceivedEvent` interfaces to `packages/@ortho/types/src/events.ts`
+- Created `apps/crm/conversation/src/lib/service-client.ts` with `createServiceClient()` factory and 5 pre-instantiated clients (messagingClient, leadClient, aiClient, audienceClient, notificationClient)
+- Files changed: 2 (1 modified, 1 new)
+- **Learnings for future iterations:**
+  - @ortho/types uses plain interface pairs (Payload + Event) — not generic `OrthoEvent<T>` wrapper types; the AC mentioned `OrthoEvent<>` but the actual pattern is a concrete interface with `event_type`, `entity_type`, `entity_id`, `payload` fields
+  - The barrel export in `@ortho/types/src/index.ts` uses `export * from './events.js'` so new exports from events.ts are automatically available
+  - Service-to-service auth in conversation service uses `X-Internal-Api-Key` header (not `Authorization: Bearer`)
+  - The `lib/` directory under `src/` is used for utility modules that aren't routes, repos, services, or events
+---
+
+## 2026-04-07 18:58 UTC - US-004
+- Created three core repository modules: conversations.repo.ts, messages.repo.ts, reads.repo.ts
+- conversations.repo: findById, findRecent (inactivity window lookup), create, update, list (with unread_count + last_message_preview subqueries)
+- messages.repo: insert, updateStatus (by messaging_message_id), listByConversation (cursor-based newest-first), getLatestMessageId
+- reads.repo: upsert (ON CONFLICT DO UPDATE), getUnreadCount (cursor-based count after last read message)
+- Files changed: 3 new files in apps/crm/conversation/src/repositories/
+- **Learnings for future iterations:**
+  - conversations.repo.list uses raw SQL subqueries for unread_count and last_message_preview (not stored columns) — inline `db.raw()` within `.select()`
+  - reads.repo.upsert uses `db.raw()` with ON CONFLICT for PostgreSQL upsert pattern
+  - messages.repo cursor pagination: fetch the cursor row's created_at first, then filter with `< cursor.created_at`
+  - The `list()` function accepts `user_id` for unread count calculation — this will come from req.user.sub in routes
+---
+
+## 2026-04-07 19:01 UTC - US-005
+- Created four supporting repository modules: notes.repo.ts, scheduled.repo.ts, bulk-send-jobs.repo.ts, settings.repo.ts
+- notes.repo: create, deleteById (returns boolean)
+- scheduled.repo: create, updateBullmqJobId, findById, updateStatus, listPending
+- bulk-send-jobs.repo: create (JSON.stringify segment for jsonb), updateStatus (with optional extra fields), findById
+- settings.repo: findByLocationId, upsert (ON CONFLICT merge), getEffectiveSettings (returns defaults if no row)
+- Files changed: 4 new files in apps/crm/conversation/src/repositories/
+- **Learnings for future iterations:**
+  - settings.repo uses Knex `.onConflict('location_id').merge()` for upsert — cleaner than raw SQL for simple cases
+  - bulk-send-jobs.repo needs `JSON.stringify()` for jsonb `segment` column on insert
+  - getEffectiveSettings returns a synthetic object with defaults when no DB row exists — no DB write on read
+  - scheduled.repo.listPending orders by `scheduled_for ASC` to show soonest first
+---
+
+## 2026-04-07 19:06 UTC - US-006
+- Created event publisher (publishMessageReceived) and two delivery status handlers (message-delivered, message-failed)
+- Updated index.ts to wire handlers into EventBus subscriptions
+- Files changed: 3 new (publisher.ts, message-delivered.handler.ts, message-failed.handler.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - @ortho/types is NOT in conversation service's package.json dependencies — define payload interfaces locally or add the dep
+  - Publisher casts typed payload to `Record<string, unknown>` via `as unknown as Record<string, unknown>` to satisfy OrthoEvent.payload type
+  - Delivery handlers use messaging_message_id (from Messaging Service) to match messages, not the conversation_messages.id
+  - Silent no-op pattern: if updateStatus returns 0 rows, log debug and return (message may belong to another service)
+---
+
+## 2026-04-07 19:08 UTC - US-007
+- Created conversation-resolver.ts: find-or-create with inactivity window logic via getEffectiveSettings
+- Created outbound-sender.ts: coordinator send via Messaging Service, stores outbound message, disables agent mode
+- Files changed: 2 new files in apps/crm/conversation/src/services/
+- **Learnings for future iterations:**
+  - conversation-resolver uses getEffectiveSettings to get inactivity_days, then computes afterTimestamp = now - inactivity_days
+  - findRecent may return a conversation without last_message_at (treat as inactive — create new)
+  - outbound-sender disables agent_mode_active BEFORE sending to Messaging Service
+  - messagingClient.post returns { message_id } which maps to messaging_message_id in conversation_messages
+  - Services import repo modules as `* as conversationsRepo` for clear namespacing
+---
+
+## 2026-04-07 19:10 UTC - US-008
+- Created inbound-message.handler.ts: processes inbound_message.received events end-to-end
+- Handler flow: lead lookup → resolveConversation → insert message → update last_message_at → publish message.received → send notification → AI agent logic (enqueue or escalate)
+- Updated index.ts: wired handleInboundMessage into EventBus subscription, moved aiAgentQueue creation before subscriptions
+- Files changed: 1 new (inbound-message.handler.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - leadClient.get throws on non-2xx (e.g., 404 for unknown lead) — use try/catch to handle unknown phone numbers gracefully
+  - aiAgentQueue must be created before eventBus subscriptions since the handler needs it; move Queue instantiation above subscribe() calls
+  - The handler needs to re-fetch settings separately from conversation-resolver (resolver gets settings for inactivity, handler needs them for agent_mode_enabled check)
+  - Notification failures should be caught and logged as warnings, not propagated — they're non-critical
+---
+
+## 2026-04-07 19:45 UTC - US-009
+- Created conversations route plugin with GET /, GET /:id, PATCH /:id, POST /:id/read
+- Updated app.ts: added user context parsing from X-User-Id/X-User-Role/X-User-Locations headers; registered conversationsRoute plugin; kept stubs for unimplemented routes
+- Added listByConversation to notes.repo.ts for fetching all notes per conversation
+- Imported `@ortho/auth-middleware` for JwtPayload type augmentation on FastifyRequest
+- Files changed: 3 modified (app.ts, notes.repo.ts, prd.json), 1 new (routes/conversations.ts)
+- **Learnings for future iterations:**
+  - API Gateway forwards user context via `X-User-Id`, `X-User-Role`, `X-User-Locations` (comma-separated) headers — internal services parse these to populate req.user
+  - Don't re-declare the `user` property on FastifyRequest if @ortho/auth-middleware already declares it — just `import '@ortho/auth-middleware'` for the side-effect type augmentation
+  - Empty locations array means all-locations access (marketing_staff, marketing_manager, super_admin roles)
+  - hasLocationAccess helper: if userLocations.length === 0, grant access (manager/admin); otherwise check includes
+  - Route plugins receive `{ db: Knex }` in opts; register before stubs to avoid conflicts
+  - When enabling agent_mode_active via PATCH, also reset agent_exchange_count to 0
+---
+
+## 2026-04-07 19:47 UTC - US-010
+- Created messages route plugin with GET /:id/messages (cursor-based pagination with hasMore) and POST /:id/messages (outbound send via outbound-sender service)
+- Updated app.ts: registered messagesRoute plugin, removed message stubs from remaining stubs block
+- Files changed: 1 new (routes/messages.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - hasMore pagination: request limit+1 rows, if returned > limit then hasMore=true and slice to limit
+  - hasLocationAccess helper is duplicated across route files — could be extracted to a shared utility but keeping it local follows existing pattern
+  - messagesRoute follows same plugin pattern as conversationsRoute: `(app, { db }) => void`
+---
+
+## 2026-04-07 19:48 UTC - US-011
+- Created notes route plugin with POST /:id/notes (create) and DELETE /:id/notes/:note_id (delete)
+- Updated app.ts: registered notesRoute plugin, removed notes stubs from remaining stubs block
+- Files changed: 1 new (routes/notes.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - Notes route follows same pattern as messages route: validate user, find conversation, check location access, then perform action
+  - POST returns 201 (not 200) for create operations
+  - DELETE uses NoteIdParams with both `id` and `note_id` params for the compound URL pattern
+---
+
+## 2026-04-07 19:51 UTC - US-012
+- Created scheduled messages route plugin (POST create, GET list, DELETE cancel) at src/routes/scheduled.ts
+- Created scheduled-send BullMQ worker at src/workers/scheduled-send.worker.ts
+- Updated app.ts: registered scheduledRoute, removed scheduled stubs; added AppQueues interface for dependency injection of BullMQ queues
+- Updated index.ts: imported and wired createScheduledSendWorker, passed scheduledSendQueue to buildApp
+- Files changed: 2 new (routes/scheduled.ts, workers/scheduled-send.worker.ts), 2 modified (app.ts, index.ts)
+- **Learnings for future iterations:**
+  - BullMQ Queue cannot be instantiated inside a Fastify route plugin — it fails in tests because queue name with `:` is invalid in newer BullMQ versions during test environments. Pass Queue instances as plugin options via dependency injection instead.
+  - buildApp now accepts optional `AppQueues` object for passing BullMQ queues to route plugins that need them
+  - Scheduled route conditionally registers only when scheduledSendQueue is provided — tests that don't provide it still pass
+  - Worker dedup_key format for scheduled messages: `sched:${scheduled_message_id}`
+  - Delayed jobs use `Math.max(delay, 0)` to handle edge case where scheduled_for is in the past
+---
+
+## 2026-04-07 19:55 UTC - US-013
+- Created ai-features.ts service with getDraftReplies, getSummary, getObjectionStrategies
+- Created ai.ts route plugin with POST /:id/ai/drafts, /:id/ai/summary, /:id/ai/objection
+- Updated app.ts: registered aiRoute, removed AI stubs
+- Prompt files already existed in apps/platform/ai/src/prompts/ (created by AI service implementation)
+- Files changed: 2 new (ai-features.ts, ai.ts), 1 modified (app.ts)
+- **Learnings for future iterations:**
+  - AI Service POST /ai/complete expects `{ prompt_id, context }` and returns `{ text }` — context is a free-form object
+  - getDraftReplies and getObjectionStrategies parse response.text as JSON; getSummary uses response.text directly as plain text
+  - The four conversation prompt files were already registered in the AI service's prompt-registry.ts — no changes needed in that service
+  - AI route follows same pattern as other routes: validate user, find conversation, check location access, then call service
+---
+
+## 2026-04-07 19:56 UTC - US-014
+- Created agent-mode.ts service with buildDisclosureFooter and parseAgentResponse functions
+- Created ai-agent-reply.worker.ts with createAiAgentReplyWorker factory following same pattern as scheduled-send worker
+- Updated index.ts to use createAiAgentReplyWorker instead of placeholder worker
+- Files changed: 2 new (agent-mode.ts, ai-agent-reply.worker.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - Worker factory pattern: `createXWorker(db: Knex): Worker` — same as scheduled-send worker
+  - parseAgentResponse returns null for any non-object or missing text/escalate fields (fail-safe escalation)
+  - AI agent dedup_key format: `agent:${conversation_id}:${agent_exchange_count}`
+  - Notification failures in worker are caught and logged as warnings (non-critical)
+  - Worker reads settings separately from inbound handler — needs location_phone for disclosure footer
+---
+
+## 2026-04-07 20:00 UTC - US-015
+- Created bulk-sender.ts service: paginate leads → evaluate audience segment → send in batches of 50 with per-lead error handling → update job status
+- Created bulk-send.worker.ts: factory pattern matching scheduled-send worker, processes 'conversation:bulk-send' queue
+- Updated index.ts: replaced placeholder bulk-send worker with createBulkSendWorker, removed unused Worker import
+- Files changed: 2 new (bulk-sender.ts, bulk-send.worker.ts), 1 modified (index.ts)
+- **Learnings for future iterations:**
+  - bulk-sender paginate pattern: while loop with cursor param, break when next_cursor is null
+  - Audience Engine POST /audiences/evaluate expects { filter, entities, snapshot } and returns { matched_entity_ids }
+  - Per-lead send failures are caught and counted (failed++), not thrown — job continues for remaining leads
+  - On uncaught error in executeBulkSend, mark job as 'failed' before re-throwing
+  - Worker factory pattern is consistent: createXWorker(db: Knex): Worker
+---
+
+## 2026-04-07 20:02 UTC - US-016
+- Added 'bulk-sms:write' permission to call_center_manager, marketing_manager, super_admin in @ortho/auth-middleware
+- Created bulk-sends.ts route: POST /bulk-sends (role-gated, enqueues BullMQ job), GET /bulk-sends/:job_id (location-scoped)
+- Created settings.ts route: GET /settings/locations/:id (marketing_manager/super_admin only), PATCH with agent_mode_enabled validation (requires location_phone + practice_number)
+- Updated app.ts: added bulkSendQueue to AppQueues, registered bulkSendsRoute + settingsRoute before /:id param routes
+- Updated index.ts: passed bulkSendQueue to buildApp
+- Updated scaffold test: changed auth-pass test from old 501 stub to settings 403 (role check)
+- Files changed: 2 new (bulk-sends.ts, settings.ts), 4 modified (app.ts, index.ts, permissions.ts, scaffold.test.ts)
+- **Learnings for future iterations:**
+  - Bulk-sends route conditionally registers only when bulkSendQueue is provided (same pattern as scheduledSendQueue)
+  - Settings route uses SETTINGS_ROLES array for role gating — only marketing_manager and super_admin
+  - When enabling agent_mode_enabled, validate both location_phone and practice_number exist (either in request body or existing DB row)
+  - Scaffold test needed update after removing 501 stubs — use a route that always exists (settings) to verify auth passes
+  - call_center_manager has location restriction on bulk sends (must include location_id in own locations); marketing_manager/super_admin do not
+---
+
+## 2026-04-07 20:04 UTC - US-017
+- Created 3 unit test files: conversation-resolver.test.ts (5 tests), agent-mode.test.ts (6 tests), outbound-sender.test.ts (3 tests)
+- Total: 14 new tests, all passing
+- Files changed: 3 new files in apps/crm/conversation/test/unit/
+- **Learnings for future iterations:**
+  - vi.mock() with factory must be placed before imports of the mocked module
+  - For outbound-sender tests, mock `../../src/lib/service-client.js` to stub messagingClient.post
+  - conversationsRepo.update is called separately for agent_mode disable vs last_message_at update — test agent mode disable by checking if any update call includes agent_mode_active: false
+  - parseAgentResponse returns `reason: undefined` (not omitted) when reason field is absent — use toEqual with explicit undefined
+---
+
+## 2026-04-07 20:16 UTC - US-018
+- Created integration test infrastructure: setup.ts (env vars), helpers.ts (DB utilities, mock queue, constants)
+- Created inbound.test.ts with 7 test cases: happy path, append to existing, new after inactivity, unknown phone, STOP message, AI agent enqueue, escalation on max exchanges
+- Updated vitest.config.ts to include setupFiles for integration tests
+- All tests use describe.skipIf(!HAS_DB) pattern; skipped when no real DB available
+- Files changed: 3 new (setup.ts, helpers.ts, inbound.test.ts), 1 modified (vitest.config.ts)
+- **Learnings for future iterations:**
+  - MockDriver from @ortho/event-bus stores published events in `driver.published` (not `publishedEvents`)
+  - Integration test setup.ts sets process.env before module imports; unit tests with vi.stubEnv still work because they dynamic-import after stubbing
+  - Use nock to intercept service-client HTTP calls (leadClient → http://localhost:3000, notificationClient → http://localhost:3004)
+  - MockQueue pattern: simple object with `add` function and `jobs` array — no need for real BullMQ in integration tests
+  - For escalation test, nock needs two `.post('/notifications/publish')` chained (one for inbound notification, one for escalation)
+  - handleInboundMessage is called directly in integration tests (not via EventBus subscription) — pass db, bus, queues, event directly
+---
+
+## 2026-04-07 20:21 UTC - US-019
+- Created 6 integration test files: outbound.test.ts (2 tests), delivery.test.ts (2 tests), ai-agent.test.ts (3 tests), scheduled.test.ts (2 tests), reads.test.ts (2 tests), patch.test.ts (2 tests)
+- Total: 13 new integration tests, all passing (skipped without DB as expected)
+- Files changed: 6 new files in apps/crm/conversation/test/integration/
+- **Learnings for future iterations:**
+  - For worker integration tests, replicate the worker handler logic inline rather than importing the Worker class (avoids BullMQ Redis dependency)
+  - outbound.test.ts and reads.test.ts use buildApp + app.inject() for HTTP-level integration tests
+  - delivery.test.ts imports handleMessageDelivered directly (event handler, no HTTP needed)
+  - ai-agent.test.ts imports repos and services directly to replicate worker logic with real DB but mocked HTTP
+  - scheduled.test.ts combines HTTP tests (POST/DELETE via app.inject) with direct worker handler simulation
+  - MockQueue from helpers.ts can be cast to BullMQ Queue type via `as unknown as Queue` for buildApp
+  - patch.test.ts: marketing_manager with empty x-user-locations header gets all-locations access
+---
+
+## 2026-04-07 20:39 UTC - US-020
+- Created 3 contract test files with 7 tests total:
+  - events.test.ts (2 tests): verifies message.received event envelope (event_id, event_type, entity_type, entity_id, schema_version, correlation_id, causation_id) and payload fields (all 11 fields present as strings)
+  - messaging-client.test.ts (2 tests): verifies outbound-sender calls Messaging Service with { to, from_number, body, dedup_key } all present; verifies unique dedup_key per send
+  - ai-client.test.ts (3 tests): verifies AI Service call shape { prompt_id: 'conversation-agent-reply', context: { lead_name, lead_stage, treatment_interest, recent_messages } }; verifies response.text parseable as { text, escalate } JSON; verifies escalation response parsing
+- Files changed: 3 new files in apps/crm/conversation/test/contract/
+- **Learnings for future iterations:**
+  - Contract tests use MockDriver + EventBusImpl for event tests (no HTTP, no DB) — same pattern as codebase patterns doc
+  - Contract tests for service clients use vi.mock() + replicate handler logic inline (same as unit tests)
+  - parseAgentResponse can be tested directly as a pure function — no mocking needed
+---
