@@ -1,0 +1,186 @@
+{
+  "project": "Ortho CRM — Campaign Service Phase 1",
+  "branchName": "ralph/campaign-service-phase-1",
+  "description": "Campaign Service Phase 1 — CRUD + approval workflow (draft → pending_review → approved → cancelled), comment thread, @ortho/types additions, @ortho/auth-middleware campaigns:manage permission, DB schema + migrations, state machine guards, and approval workflow integration tests.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Service scaffold — package.json, tsconfig, env, db, api, index, Dockerfile",
+      "description": "As a developer, I need the Campaign Service API process bootstrapped with Fastify, Knex (searchPath: crm_campaigns), JWT auth middleware, and a /health route, so that the API process can start and handle requests.",
+      "acceptanceCriteria": [
+        "apps/crm/campaign/package.json created: name '@ortho/campaign-service', type 'module', scripts: build/dev/dev:worker/start:api/start:worker/test/test:watch/typecheck; dependencies: fastify ^5, @fastify/sensible ^6, knex ^3, pg ^8, @sinclair/typebox ^0.34, @ortho/auth-middleware file:../../../packages/@ortho/auth-middleware, @ortho/event-bus file:../../../packages/@ortho/event-bus, @ortho/logger file:../../../packages/@ortho/logger, @ortho/types file:../../../packages/@ortho/types, bullmq, ioredis; devDependencies: typescript ^5, tsx ^4, vitest ^2, @types/node ^22, @types/pg ^8",
+        "apps/crm/campaign/tsconfig.json: standalone config, module NodeNext, moduleResolution NodeNext, target ES2022, strict true, outDir dist",
+        "apps/crm/campaign/vitest.config.ts: passWithNoTests: true, test.include: ['test/**/*.test.ts']",
+        "apps/crm/campaign/src/env.ts: exports const env with DATABASE_URL (required), PORT (optional, default 3000), REDIS_URL (required), BULLMQ_REDIS_URL (required), SQS_QUEUE_URL (required), EVENTBRIDGE_BUS_NAME (required), AUDIENCE_ENGINE_URL (required), LEAD_SERVICE_URL (required), EMAIL_SERVICE_URL (required), TEMPLATE_SERVICE_URL (required), LOG_LEVEL (optional, default 'info')",
+        "apps/crm/campaign/src/db.ts: exports default knex instance with client 'pg', connection env.DATABASE_URL, searchPath ['crm_campaigns', 'public']",
+        "apps/crm/campaign/src/api.ts: exports async buildApp(db: Knex): Promise<FastifyInstance>; registers @fastify/sensible; registers @ortho/auth-middleware JWT plugin; registers GET /health route returning { ok: true }; registers all route plugins under prefix '/campaigns' (stubs returning 501 are acceptable at this stage)",
+        "apps/crm/campaign/src/index.ts: creates db, builds app via buildApp(db), calls app.listen({ port: env.PORT, host: '0.0.0.0' }); SIGTERM handler: app.close() then process.exit(0)",
+        "apps/crm/campaign/Dockerfile: FROM node:24-alpine, WORKDIR /app, copies package.json + dist, RUN npm ci --omit=dev, CMD node dist/index.js",
+        "GET /health returns 200 { ok: true } without authentication",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "@ortho/types additions — CampaignSentEvent, EmailCampaignCompletedPayload, EmailOpenedPayload amendment, LeadStageChangedPayload occurred_at",
+      "description": "As a developer, I need the four @ortho/types additions and amendments from spec Section 11 so that Campaign Service handlers and publishers have correct shared TypeScript types.",
+      "acceptanceCriteria": [
+        "packages/@ortho/types/src/events.ts: add CampaignSentPayload interface with fields campaign_id: string, location_id: string, sent_count: number, template_id: string, completed_at: string",
+        "packages/@ortho/types/src/events.ts: add CampaignSentEvent interface with fields event_type: 'campaign.sent', occurred_at: string, payload: CampaignSentPayload",
+        "packages/@ortho/types/src/events.ts: add EmailCampaignCompletedPayload interface with fields job_id: string, status: 'completed' | 'completed_with_errors' | 'failed' | 'cancelled', sent_count: number, failed_count: number, total_recipients: number, location_id: string, completed_at: string",
+        "packages/@ortho/types/src/events.ts: add EmailOpenedPayload interface (or extend existing) with at minimum fields campaign_job_id: string, entity_type: string, entity_id: string (plus any existing fields already present)",
+        "packages/@ortho/types/src/events.ts: add occurred_at: string field to existing LeadStageChangedPayload interface",
+        "packages/@ortho/types/src/index.ts: exports CampaignSentPayload, CampaignSentEvent, EmailCampaignCompletedPayload, EmailOpenedPayload (if not already re-exported from events.ts)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "@ortho/auth-middleware — add campaigns:manage permission",
+      "description": "As a developer, I need the campaigns:manage permission added to marketing_manager and super_admin roles so that manager-only campaign routes can enforce it via requirePermission().",
+      "acceptanceCriteria": [
+        "packages/@ortho/auth-middleware/src/permissions.ts: ROLE_PERMISSIONS.marketing_manager includes 'campaigns:manage'",
+        "packages/@ortho/auth-middleware/src/permissions.ts: ROLE_PERMISSIONS.super_admin includes 'campaigns:manage'",
+        "ROLE_PERMISSIONS.marketing_staff does NOT include 'campaigns:manage'",
+        "ROLE_PERMISSIONS.call_center_agent does NOT include 'campaigns:manage'",
+        "ROLE_PERMISSIONS.call_center_manager does NOT include 'campaigns:manage'",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Database migrations — crm_campaigns schema + all six tables + indexes",
+      "description": "As a developer, I need all Campaign Service migrations (schema + campaigns + campaign_sends + campaign_recipients + campaign_conversions + campaign_events + campaign_comments) with all columns, constraints, and indexes from spec Section 4.",
+      "acceptanceCriteria": [
+        "apps/crm/campaign/knexfile.ts: exports default config with client 'pg', connection DATABASE_URL from env, migrations.directory './migrations', migrations.loadExtensions ['.ts'], searchPath ['crm_campaigns', 'public']",
+        "migrations/20260408000000_create_crm_campaigns_schema.ts: CREATE SCHEMA IF NOT EXISTS crm_campaigns; set search_path",
+        "migrations/20260408000001_create_campaigns.ts: creates campaigns table with all columns from spec Section 4 (id uuid PK, name, status DEFAULT 'draft', template_id, subject, segment_id, audience_filter jsonb, audience_snapshot_id, scheduled_for, orchestrate_job_id, ab_enabled DEFAULT false, ab_mode, ab_test_split_pct, ab_winner_delay_hours DEFAULT 4, ab_variant_a_subject, ab_variant_b_subject, ab_phase, ab_winner, ab_decision_at, ab_opens_a DEFAULT 0, ab_opens_b DEFAULT 0, ab_winner_job_id, created_by uuid NOT NULL, approved_by, approved_at, sent_at, completed_at, created_at DEFAULT now(), updated_at DEFAULT now()); adds CHECK constraints for campaign_subject_check and campaign_audience_check via knex.raw ALTER TABLE; creates indexes: (status), (scheduled_for, status) WHERE status = 'scheduled', (ab_phase) WHERE ab_phase = 'testing'",
+        "migrations/20260408000002_create_campaign_events_comments.ts: creates campaign_events table (id uuid PK, campaign_id uuid FK NOT NULL, from_status, to_status NOT NULL, actor_id uuid, comment, created_at DEFAULT now()) with index on campaign_id; creates campaign_comments table (id uuid PK, campaign_id uuid FK NOT NULL, author_id uuid NOT NULL, body NOT NULL, created_at DEFAULT now()) with index on campaign_id",
+        "migrations/20260408000003_create_campaign_sends_recipients_conversions.ts: creates campaign_sends table (id uuid PK, campaign_id FK NOT NULL, location_id NOT NULL, variant, subject_used NOT NULL, email_job_id uuid, email_job_ref text UNIQUE NOT NULL, status DEFAULT 'pending', total_recipients DEFAULT 0, sent_count DEFAULT 0, failed_count DEFAULT 0, started_at, completed_at) with indexes on (campaign_id, status), (campaign_id, variant), (email_job_id); creates campaign_recipients table (campaign_id FK NOT NULL, lead_id NOT NULL, email NOT NULL, location_id NOT NULL, variant, sent_at, PRIMARY KEY (campaign_id, lead_id)) with indexes on (lead_id, sent_at), (campaign_id), (campaign_id, variant); creates campaign_conversions table (id uuid PK, campaign_id FK NOT NULL, lead_id NOT NULL, stage_to NOT NULL, pipeline NOT NULL, converted_at NOT NULL, UNIQUE(campaign_id, lead_id)) with index on campaign_id",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Repositories — campaigns, campaign-events, campaign-comments",
+      "description": "As a developer, I need the three Phase 1 repository modules so that route handlers have a typed DB access layer without cross-service table reads.",
+      "acceptanceCriteria": [
+        "apps/crm/campaign/src/repositories/campaigns.repo.ts: exports findById(db, id): Promise<Campaign | null>; create(db, data): Promise<Campaign>; update(db, id, data): Promise<Campaign>; list(db, filters: { status?: string[], created_by?: string, limit: number, offset: number }): Promise<{ items: Campaign[], total: number }>; remove(db, id): Promise<void>",
+        "apps/crm/campaign/src/repositories/campaign-events.repo.ts: exports insertEvent(db, event: { campaign_id, from_status, to_status, actor_id?, comment? }): Promise<CampaignEvent>; listByCampaignId(db, campaign_id): Promise<CampaignEvent[]>",
+        "apps/crm/campaign/src/repositories/campaign-comments.repo.ts: exports insertComment(db, comment: { campaign_id, author_id, body }): Promise<CampaignComment>; listByCampaignId(db, campaign_id, opts: { limit: number, offset: number }): Promise<{ comments: CampaignComment[], total: number }>",
+        "All repos use db.withSchema('crm_campaigns') or rely on searchPath configured in db.ts",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Campaign state machine service + unit tests",
+      "description": "As a developer, I need the campaign-service.ts module with all state transition guards and validation logic, plus unit tests covering every guard scenario, so that route handlers delegate all state logic to one place.",
+      "acceptanceCriteria": [
+        "apps/crm/campaign/src/services/campaign-service.ts: exports validateTransition(currentStatus: string, action: string): { ok: boolean, error?: string, httpStatus?: number } — covers all valid transitions: draft→pending_review (submit), pending_review→approved (approve), pending_review→draft (reject), approved→scheduled (schedule), scheduled→approved (unschedule), approved→sending (send-now), sending→completed|completed_with_errors|failed (system), draft|pending_review|approved|scheduled→cancelled (cancel)",
+        "validateTransition returns 409 conflict for all invalid transitions (e.g. draft→approved, sending→draft, completed→draft, cancelled→draft)",
+        "exports validateContentLock(currentStatus: string, patchFields: string[]): { ok: boolean, error?: string } — returns conflict error if status is 'approved' or later AND any of template_id, subject, segment_id, audience_filter, ab_enabled, ab_mode, ab_test_split_pct, ab_variant_a_subject, ab_variant_b_subject appear in patchFields; scheduled_for is always allowed in approved/scheduled",
+        "exports validateRejectComment(comment: string | undefined): { ok: boolean, error?: string } — returns 400 if comment is missing or empty string",
+        "test/unit/campaign-service.test.ts covers: all valid transitions pass; invalid transitions (e.g. draft→approved, completed→draft) return conflict; content fields locked in approved state; scheduled_for not locked in approved state; reject without comment returns 400; cancel allowed from draft, pending_review, approved, scheduled; cancel returns 409 from sending, completed, completed_with_errors, failed, cancelled",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Campaign CRUD routes — POST, GET list, GET by ID, PATCH, DELETE",
+      "description": "As a marketing staff member, I want to create, view, update, and delete draft campaigns so that I can manage the campaign authoring lifecycle.",
+      "acceptanceCriteria": [
+        "apps/crm/campaign/src/routes/campaigns.ts: registers POST /campaigns — creates draft; TypeBox body schema: { name: string, template_id: string, subject?: string, segment_id?: string, audience_filter?: object, ab_test?: { enabled: boolean, mode: 'holdout'|'full_split', variant_a_subject: string, variant_b_subject: string, test_split_pct?: number, winner_delay_hours?: number } }; returns 201 { campaign_id, status: 'draft' }; writes campaign_events row (from_status: null, to_status: 'draft')",
+        "GET /campaigns: TypeBox query schema: status? (comma-separated), created_by? (uuid), limit? (default 20), offset? (default 0); returns 200 { items: Campaign[], total: number }",
+        "GET /campaigns/:id: returns 200 full campaign object or 404",
+        "PATCH /campaigns/:id: accepts partial campaign fields; calls validateContentLock — returns 409 if content fields attempted on approved+ campaign; returns 200 { campaign_id, status, updated_at }; updates updated_at",
+        "DELETE /campaigns/:id: returns 200 if status = 'draft'; returns 409 if status ≠ 'draft'",
+        "All five routes require requirePermission('campaigns:write') preHandler",
+        "POST validates that exactly one of segment_id or audience_filter is provided — returns 400 if both or neither",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Approval workflow routes — submit, approve, reject, cancel (schedule/send-now/unschedule stubs)",
+      "description": "As a marketing staff member or manager, I want submit/approve/reject/cancel routes so that campaigns can move through the review workflow.",
+      "acceptanceCriteria": [
+        "apps/crm/campaign/src/routes/workflow.ts: POST /campaigns/:id/submit — campaigns:write; calls validateTransition('draft', 'submit'); updates status → pending_review; inserts campaign_events row; returns 200 { campaign_id, status }; returns 409 if status ≠ 'draft'",
+        "POST /campaigns/:id/approve — preHandler: [campaigns:write, campaigns:manage]; body: { comment?: string }; calls validateTransition('pending_review', 'approve'); updates status → approved, approved_by, approved_at; inserts campaign_events row; if comment provided also inserts campaign_comments row; returns 200 { campaign_id, status }; returns 403 if missing campaigns:manage; returns 409 if status ≠ 'pending_review'",
+        "POST /campaigns/:id/reject — preHandler: [campaigns:write, campaigns:manage]; body: { comment: string }; calls validateRejectComment; calls validateTransition('pending_review', 'reject'); updates status → draft; inserts campaign_events row; inserts campaign_comments row; returns 200 { campaign_id, status }; returns 400 if comment missing; returns 403 if missing campaigns:manage; returns 409 if status ≠ 'pending_review'",
+        "POST /campaigns/:id/cancel — preHandler: [campaigns:write, campaigns:manage]; body: { reason?: string }; calls validateTransition(currentStatus, 'cancel'); updates status → cancelled; inserts campaign_events row; returns 200 { campaign_id, status }; returns 403 if missing campaigns:manage; returns 409 if status ∈ sending|completed|completed_with_errors|failed|cancelled",
+        "POST /campaigns/:id/schedule, DELETE /campaigns/:id/schedule, POST /campaigns/:id/send-now return 501 Not Implemented (Phase 2 stubs)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Comments routes — POST and GET /campaigns/:id/comments",
+      "description": "As a marketing staff member, I want to add and read review comments on a campaign so that I can collaborate during the approval process.",
+      "acceptanceCriteria": [
+        "apps/crm/campaign/src/routes/comments.ts: POST /campaigns/:id/comments — requires campaigns:write; TypeBox body: { body: string }; inserts comment via campaign-comments.repo with author_id from JWT; returns 201 { comment_id, author_id, body, created_at }; returns 404 if campaign not found; returns 400 if body is empty",
+        "GET /campaigns/:id/comments — requires campaigns:write; TypeBox query: limit? (default 50), offset? (default 0); returns 200 { comments: [{ id, campaign_id, author_id, body, created_at }], total: N }; returns 404 if campaign not found",
+        "Route is registered under the campaigns route prefix so paths are /campaigns/:id/comments",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Integration tests — approval workflow end-to-end",
+      "description": "As a developer, I need integration tests covering the full approval workflow (CRUD + submit + approve + reject + cancel + comments) against a real Postgres database so that the service's correctness can be verified before Phase 2.",
+      "acceptanceCriteria": [
+        "test/helpers/factories.ts: exports insertCampaign(db, overrides?): Promise<Campaign> for creating campaigns at any status; insertCampaignEvent(db, overrides?): Promise<CampaignEvent>; makeJwtToken(role: 'marketing_staff' | 'marketing_manager'): string — returns signed JWT token accepted by @ortho/auth-middleware",
+        "test/integration/approval-workflow.test.ts: POST /campaigns → 201 draft with campaign_events row from_status=null to_status='draft'",
+        "GET /campaigns → 200 with items array and total; filters by status work",
+        "GET /campaigns/:id → 200 with full campaign; 404 for unknown id",
+        "PATCH /campaigns/:id (draft) → 200, fields updated",
+        "PATCH /campaigns/:id (approved, content field) → 409 content locked",
+        "PATCH /campaigns/:id (approved, scheduled_for) → 200 updated",
+        "DELETE /campaigns/:id (draft) → 200",
+        "DELETE /campaigns/:id (non-draft) → 409",
+        "POST /campaigns/:id/submit → 200 pending_review; 409 on second submit",
+        "POST /campaigns/:id/approve (marketing_manager token) → 200 approved; approved_by set; campaign_events row written",
+        "POST /campaigns/:id/approve (marketing_staff token) → 403",
+        "POST /campaigns/:id/reject (no comment) → 400",
+        "POST /campaigns/:id/reject (with comment, marketing_manager) → 200 draft; campaign_comments row written",
+        "POST /campaigns/:id/cancel from draft → 200 cancelled",
+        "POST /campaigns/:id/cancel from pending_review → 200 cancelled (no reject needed first)",
+        "POST /campaigns/:id/cancel from sending status → 409",
+        "POST /campaigns/:id/comments → 201 with comment; GET /campaigns/:id/comments → 200 with comment in list",
+        "Tests use real Postgres (DATABASE_URL from env or test config); external services not called",
+        "Tests pass"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

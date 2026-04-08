@@ -1,0 +1,18 @@
+# Ralph Progress Log
+Started: Wed Apr  8 00:00:00 UTC 2026
+
+## Codebase Patterns
+- Pipeline service uses internal-auth (x-internal-api-key header), NOT JWT auth
+- Campaign service uses JWT auth via @ortho/auth-middleware requirePermission()
+- All services use ESM with `.js` extensions in imports (e.g., `./env.js`)
+- Fastify plugins are plain async functions (no fastify-plugin wrapper needed for encapsulated plugins)
+- Logger: `createLogger('crm-campaign')` from `@ortho/logger`
+- EventBus: `createEventBus()` from `@ortho/event-bus`, uses `EVENT_BUS_DRIVER` env var
+- vitest.config.ts needs `passWithNoTests: true` to avoid failing when no test files exist
+- Route plugins receive `{ db: Knex, eventBus: EventBus }` as opts and are registered with prefix
+- Migrations live outside `src/` — not typechecked by `tsc --noEmit`; use `loadExtensions: ['.ts']` in knexfile
+- Check constraints added via `knex.raw()` ALTER TABLE after `createTable()` (Knex has no native CHECK support)
+- tsconfig uses `module: NodeNext` and `moduleResolution: NodeNext`
+- @ortho/auth-middleware: requirePermission() used for route-level permission guards; stack multiple in preHandler array for manager-only routes
+
+---
