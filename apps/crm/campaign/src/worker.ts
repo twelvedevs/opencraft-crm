@@ -4,8 +4,7 @@ import { destroy } from './db.js';
 
 const log = createLogger('crm-campaign-worker');
 
-// Workers will be imported and started here as they are implemented
-// e.g. import './workers/campaign-orchestrate.worker.js';
+import './workers/campaign-orchestrate.worker.js';
 
 // SQS consumer will be started here once implemented
 // e.g. startConsumer(db, bus);
