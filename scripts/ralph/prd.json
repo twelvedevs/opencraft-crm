@@ -1,0 +1,240 @@
+{
+  "project": "Ortho CRM — Referral Service",
+  "branchName": "ralph/referral-service",
+  "description": "Referral Service (apps/crm/referral) — two-program referral lifecycle: unique link generation, click tracking, referred-lead attribution via event worker, reward tracking, doctor portal, leaderboard",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Update @ortho/types and @ortho/auth-middleware for Referral Service",
+      "description": "As a developer, I need shared type definitions and RBAC permissions updated so all downstream stories compile cleanly.",
+      "acceptanceCriteria": [
+        "In packages/@ortho/types: rename LeadStageChangedPayload field occurred_at → transitioned_at",
+        "In packages/@ortho/types: extend LeadConvertedPayload with to_pipeline: 'in_treatment' | 'in_retention' and converted_at: string",
+        "In packages/@ortho/types: add ReferralConvertedPayload interface with fields referral_id, lead_id, referrer_id, referrer_type, location_id, converted_at (all string)",
+        "In packages/@ortho/types: add ReferrerCreatedPayload interface with fields referrer_id, referrer_type: 'patient', lead_id, location_id, referral_link_id, referral_code, referral_link_url, created_at (all string)",
+        "In packages/@ortho/types: add ReferrerCreatedEvent type wrapping ReferrerCreatedPayload following existing *Event conventions in the package",
+        "In packages/@ortho/auth-middleware: add referrals:read to ROLE_PERMISSIONS for all five roles (call_center_agent, call_center_manager, marketing_staff, marketing_manager, super_admin)",
+        "In packages/@ortho/auth-middleware: add referrals:write to ROLE_PERMISSIONS for marketing_staff, marketing_manager, super_admin",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Scaffold apps/crm/referral project and create DB migrations",
+      "description": "As a developer, I need the service scaffolding and database schema so all subsequent stories have a foundation to build on.",
+      "acceptanceCriteria": [
+        "Directory apps/crm/referral/ created with src/{routes/public,services,repositories,handlers,events,clients}/, migrations/, test/{unit,integration}/",
+        "package.json with dependencies: fastify, @sinclair/typebox, knex, pg, @ortho/db, @ortho/event-bus, @ortho/auth-middleware, @ortho/logger, @ortho/types; devDependencies: typescript, vitest, tsx",
+        "tsconfig.json set to ESM (module: NodeNext, moduleResolution: NodeNext)",
+        "Dockerfile with two CMD targets: node dist/index.js (HTTP) and node dist/worker.js (worker)",
+        "src/env.ts exports typed, validated env config reading: DATABASE_URL, PORT, NODE_ENV, IDENTITY_JWKS_URL, LEAD_SERVICE_URL, LEAD_SERVICE_API_KEY, MESSAGING_SERVICE_URL, DEFAULT_REFERRAL_LANDING_URL, REFERRAL_BASE_URL, EVENT_BUS_DRIVER, SQS_QUEUE_URL, AWS_REGION — no REDIS_URL",
+        "Migration 001: CREATE SCHEMA crm_referrals",
+        "Migration 002: CREATE TABLE crm_referrals.referrers with all columns and indexes from spec Section 4 (including partial unique index on lead_id where referrer_type='patient')",
+        "Migration 003: CREATE TABLE crm_referrals.referral_links with all columns and indexes from spec Section 4",
+        "Migration 004: CREATE TABLE crm_referrals.referrals with all columns and indexes from spec Section 4",
+        "Migration 005: CREATE TABLE crm_referrals.reward_events with all columns, unique constraint, and indexes from spec Section 4",
+        "Migration 006: CREATE TABLE crm_referrals.portal_tokens with all columns, unique constraints, and indexes from spec Section 4",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Implement all five repositories",
+      "description": "As a developer, I need typed repository classes for all five tables so services can perform DB operations without raw SQL scattered across the codebase.",
+      "acceptanceCriteria": [
+        "src/repositories/referrer.repo.ts: findById, findByLeadId, findByLocationAndType (paginated cursor), create, update, updateStatus",
+        "src/repositories/referral-link.repo.ts: findByCode, findActiveByReferrerId, findAllByReferrerId, create, deactivateAllForReferrer, updateStatus, incrementClickCount (fire-and-forget; does not throw)",
+        "src/repositories/referral.repo.ts: findByLeadId, findByReferrerId (with status filter, paginated cursor), findById, findByLocationId (paginated cursor), create (with ON CONFLICT lead_id DO NOTHING), updateStatus",
+        "src/repositories/reward.repo.ts: findById, findByReferralId, listByStatus (paginated cursor, location-scoped), create (with ON CONFLICT referral_id DO NOTHING), markIssued",
+        "src/repositories/portal-token.repo.ts: findByToken, upsertForReferrer, findByReferrerId",
+        "All repositories accept a Knex instance; no hardcoded DB connections",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement link service, lead-service client, and event publisher",
+      "description": "As a developer, I need code generation, click tracking, code resolution, the Lead Service HTTP client, and EventBridge publisher wired up so handler and route stories can depend on them.",
+      "acceptanceCriteria": [
+        "src/clients/lead-service.client.ts: getLeadById(leadId) calls GET /leads/:id with LEAD_SERVICE_API_KEY header; returns { first_name, last_name, phone, location_id }; throws on non-2xx",
+        "src/services/link.service.ts: generateCode() produces 8-char [A-Za-z0-9] string; createLink(referrerId, redirectUrl, createdBy?) generates unique code with up to 5 retries on collision, throws 500 on 5 consecutive collisions; deactivateAllForReferrer(referrerId); resolveCode(code) returns { referrer_id, referral_link_id, referrer_type, referrer_name } or null for unknown/inactive; recordClick(code) increments click_count (fire-and-forget — redirect always proceeds regardless)",
+        "src/events/publisher.ts: publishReferralConverted(payload: ReferralConvertedPayload) and publishReferrerCreated(payload: ReferrerCreatedPayload) using @ortho/event-bus; event envelope follows existing *Event conventions",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement referrer, referral, reward, and notification services",
+      "description": "As a developer, I need domain services for referrer lifecycle, referral tracking, reward state transitions, and SMS message building so routes and handlers can delegate business logic cleanly.",
+      "acceptanceCriteria": [
+        "src/services/referrer.service.ts: createDoctorReferrer(body) creates referrers row + auto-generates initial referral_links row using DEFAULT_REFERRAL_LANDING_URL; updateDoctorInfo(id, body) updates mutable doctor fields only (name, phone, email, practice_name, address); updateStatus(id, status); getWithSummary(id) returns referrer + active link + summary counts (total_referrals, exams_scheduled, cases_started); list(filters, cursor) location-scoped paginated list",
+        "src/services/referral.service.ts: createFromEvent(payload) delegates to referral.repo.create; advanceToExamScheduled(leadId, transitionedAt); advanceToConverted(leadId, convertedAt); updateNotificationPrefs(id, prefs); getById(id); list(filters, cursor) location-scoped",
+        "src/services/reward.service.ts: issueReward(id, { reward_type, reward_amount?, reward_notes?, issuedBy }) — throws 400 if already issued (status='issued'), throws 400 if reward_type absent; sets issued_at=now(), issued_by=issuedBy; list(filters, cursor) location-scoped paginated",
+        "src/services/notification.service.ts: buildExamScheduledMessage(referrer) returns SMS string; buildConversionMessage(referrer) returns SMS string; sendExamNotification(referral, referrer) — skips if referrer_type='doctor', phone null, or notify_on_exam=false; calls POST /messages/send on Messaging Service with dedup_key='referral_exam_notify:{referral_id}'; sendConversionNotification(referral, referrer) — same guards + dedup_key='referral_conversion_notify:{referral_id}'",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Implement lead-created and lead-stage-changed event handlers",
+      "description": "As a developer, I need the first two event handlers so referred lead creation and exam scheduling advances referral status correctly.",
+      "acceptanceCriteria": [
+        "src/handlers/lead-created.ts: skips if payload.referrer_id or payload.referral_code is null; resolves referral_link_id from payload.referral_code via referral-link repo (not from active link lookup); logs warn + skips if code not found in DB; inserts referrals row with ON CONFLICT (lead_id) DO NOTHING (idempotent)",
+        "src/handlers/lead-stage-changed.ts: skips if payload.pipeline != 'new_patient' OR payload.stage_to != 'exam_scheduled'; looks up referral by lead_id — skips if not found; sets status='exam_scheduled', exam_scheduled_at=payload.transitioned_at (not occurred_at); calls notification.service.sendExamNotification with referrer; dedup_key on Messaging Service prevents duplicate SMS on redelivery",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Implement lead-converted handler (both branches) and worker.ts",
+      "description": "As a developer, I need the lead-converted handler (Branch A: contract signed; Branch B: treatment complete → patient referrer creation) and the worker entry point so the event consumer ECS task is deployable.",
+      "acceptanceCriteria": [
+        "src/handlers/lead-converted.ts Branch A (to_pipeline='in_treatment'): looks up referral by lead_id — skips if not found; sets status='converted', converted_at=payload.converted_at; inserts reward_events row (ON CONFLICT referral_id DO NOTHING); calls notification.service.sendConversionNotification; publishes referral.converted post-commit",
+        "src/handlers/lead-converted.ts Branch B (to_pipeline='in_retention'): checks for existing referrers row for lead_id — skips if already exists (idempotent); calls lead-service.client.getLeadById; inserts referrers row (referrer_type='patient', created_by=null); generates referral_links row with code + DEFAULT_REFERRAL_LANDING_URL; publishes referrer.created with referral_link_url = REFERRAL_BASE_URL + '/referrals/r/' + code (NOT landing page URL with ?ref=); on Lead Service call failure: logs error + rethrows (dead-letters the job)",
+        "src/worker.ts: uses @ortho/event-bus .subscribe() + .start(); registers handlers for lead.created, lead.stage_changed, lead.converted; no BullMQ, no Redis",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Implement public routes (click redirect, code resolution, doctor portal)",
+      "description": "As a developer, I need the three public endpoints registered in a Fastify encapsulated scope without authPlugin so the form widget and doctor portal work without authentication.",
+      "acceptanceCriteria": [
+        "src/routes/public/links.ts: GET /referrals/r/:code — active code: recordClick (fire-and-forget), redirect 302 to redirect_url+'?ref='+code; inactive code: redirect 302 to redirect_url (no ?ref=, no click increment); unknown code: 404",
+        "src/routes/public/links.ts: GET /referrals/links/:code — 200 with { referrer_id, referral_link_id, referrer_type, referrer_name }; 404 for unknown or inactive code",
+        "src/routes/public/portal.ts: GET /referrals/portal/:token — 200 with { referrer: { id, name, practice_name, location_id }, stats: { total_referrals, exams_scheduled, cases_started }, referrals: [{ id, status, exam_scheduled_at, converted_at }] }; lead_id omitted from referrals array; stats computed from referrals table as lifetime totals; 404 for unknown token",
+        "Both files registered via fastify.register(async (app) => { ... }) encapsulated scope — authPlugin NOT registered inside this scope",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement staff routes: referrers, referral-links, portal-token",
+      "description": "As a developer, I need the referrer and referral-link management endpoints so staff can create doctor referrers, manage links, and generate portal tokens.",
+      "acceptanceCriteria": [
+        "src/routes/referrers.ts: POST /referrals/referrers (referrals:write) — creates doctor referrer + initial link; returns 201 with referrer + link; 400 if referrer_type != 'doctor'",
+        "src/routes/referrers.ts: GET /referrals/referrers (referrals:read) — paginated cursor, filters: location_id, referrer_type, status; location-scoped",
+        "src/routes/referrers.ts: GET /referrals/referrers/:id (referrals:read) — full record with active link + summary counts",
+        "src/routes/referrers.ts: PATCH /referrals/referrers/:id (referrals:write) — updates doctor contact fields only; 400 if attempting to change lead_id, referrer_type, or location_id",
+        "src/routes/referrers.ts: PATCH /referrals/referrers/:id/status (referrals:write) — { status: 'active'|'inactive' }; does not auto-deactivate links",
+        "src/routes/referrers.ts: POST /referrals/referrers/:id/portal-token (referrals:write) — generates/replaces portal token via UPSERT; returns { token, portal_url }; 400 if referrer_type='patient'",
+        "src/routes/referral-links.ts: POST /referrals/referrers/:id/links (referrals:write) — generates new link, deactivates existing active link; returns new link with code and full redirect URL",
+        "src/routes/referral-links.ts: GET /referrals/referrers/:id/links (referrals:read) — all links (active + inactive) with click_count",
+        "src/routes/referral-links.ts: PATCH /referrals/links/:id/status (referrals:write) — activating deactivates other active links for same referrer",
+        "All staff routes validate JWT via requirePermission from @ortho/auth-middleware",
+        "Error shape: { error: '<message>' } for all 4xx/5xx",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Implement staff routes: referrals, rewards, leaderboard, and index.ts HTTP server",
+      "description": "As a developer, I need the referral tracking, reward, and leaderboard endpoints plus the HTTP server entry point so the service is fully runnable.",
+      "acceptanceCriteria": [
+        "src/routes/referrals.ts: GET /referrals (referrals:read) — paginated cursor, filters: referrer_id, status, location_id, created_after, created_before; location-scoped",
+        "src/routes/referrals.ts: GET /referrals/:id (referrals:read) — full referral record including reward_event if exists",
+        "src/routes/referrals.ts: PATCH /referrals/:id/notifications (referrals:read) — body: { notify_on_exam?, notify_on_conversion? }",
+        "src/routes/rewards.ts: GET /referrals/rewards (referrals:read) — paginated cursor, filters: status, location_id, referrer_id; default sort created_at ASC; location-scoped",
+        "src/routes/rewards.ts: PATCH /referrals/rewards/:id (referrals:write) — body: { status: 'issued', reward_type, reward_amount?, reward_notes? }; 400 if already issued; 400 if reward_type absent; sets issued_at=now(), issued_by=JWT sub",
+        "src/routes/leaderboard.ts: GET /referrals/leaderboard (referrals:read) — query params: referrer_type, location_id, period_start, period_end, limit (default 20 max 100); ranked by cases_started DESC; period uses converted_at for cases_started, exam_scheduled_at for exams_scheduled, created_at for total_referrals; location-scoped",
+        "src/index.ts: Fastify server with @ortho/logger, @ortho/auth-middleware, public encapsulated scope (no auth), staff routes (with auth); listens on PORT from env",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Unit tests: link service, notification service, reward service",
+      "description": "As a developer, I need unit tests for the three services with pure/mockable logic so CI catches regressions in code generation, message building, and reward state transitions.",
+      "acceptanceCriteria": [
+        "test/unit/link.service.test.ts: generateCode() returns exactly 8 characters matching /^[A-Za-z0-9]{8}$/; createLink retries on collision up to 5 times; createLink throws 500 error after 5 consecutive code collisions",
+        "test/unit/notification.service.test.ts: buildExamScheduledMessage returns correct string with referrer first name; buildConversionMessage returns correct string with referrer first name; sendExamNotification skips when notify_on_exam=false; sendExamNotification skips when referrer_type='doctor'; sendExamNotification skips when phone is null; sendConversionNotification same guard conditions",
+        "test/unit/reward.service.test.ts: issueReward throws 400 when reward already issued (status='issued'); issueReward throws 400 when reward_type absent; issueReward sets issued_at to current time and issued_by to provided userId",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Integration tests: event handlers against real Postgres (external HTTP mocked)",
+      "description": "As a developer, I need integration tests for all three event handlers using real Postgres so DB logic, idempotency, and conditional branching are verified without mocking the database.",
+      "acceptanceCriteria": [
+        "External HTTP dependencies (lead-service.client.ts and Messaging Service fetch calls in notification.service.ts) mocked via vi.mock at module level — no HTTP in integration tests",
+        "test/integration/lead-created.handler.test.ts: referrals row created pinned to the specific referral_link matching referral_code; unknown code → log warn + skip (no row created); null referrer_id → skip; idempotent on duplicate delivery (ON CONFLICT DO NOTHING)",
+        "test/integration/lead-stage-changed.handler.test.ts: status advances to exam_scheduled; exam_scheduled_at set from payload.transitioned_at; SMS called with dedup_key='referral_exam_notify:{referral_id}' for patient referrer; no SMS for doctor referrer; non-exam_scheduled stage skipped; pipeline != new_patient skipped; missing referral record skipped; second delivery with same event does not send duplicate SMS (dedup_key)",
+        "test/integration/lead-converted.handler.test.ts Branch A: status=converted; converted_at matches payload.converted_at; reward_events row created with status=pending; referral.converted published; SMS called with dedup_key='referral_conversion_notify:{referral_id}'; idempotent on second delivery",
+        "test/integration/lead-converted.handler.test.ts Branch B: referrers row + referral_links row created; referrer.created published with referral_link_url containing '/referrals/r/' + code (not a ?ref= URL); idempotent (second delivery skips when referrers row already exists); Lead Service call failure re-throws (dead-letters)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Integration tests: API endpoints against real Postgres",
+      "description": "As a developer, I need integration tests for the HTTP API covering public routes, rewards, leaderboard, and portal-token so route-level business rules are verified end-to-end.",
+      "acceptanceCriteria": [
+        "test/integration/public-routes.test.ts — GET /referrals/r/:code active: 302 to redirect_url+'?ref=:code' + click_count incremented; inactive code: 302 to redirect_url (no ?ref=) + no increment; unknown: 404",
+        "test/integration/public-routes.test.ts — GET /referrals/links/:code: 200 with referrer_id, referral_link_id, referrer_type, referrer_name; 404 for inactive; 404 for unknown",
+        "test/integration/public-routes.test.ts — GET /referrals/portal/:token: 200 with correct referrer, stats (total_referrals/exams_scheduled/cases_started computed correctly from referrals rows), referrals array without lead_id; 404 for unknown token",
+        "test/integration/rewards.test.ts — PATCH /referrals/rewards/:id pending→issued: reward_type/issued_at/issued_by set correctly; 400 on double-issue; 400 when reward_type absent",
+        "test/integration/leaderboard.test.ts — GET /referrals/leaderboard: ranked by cases_started DESC; referrer_type filter applied; period_start/period_end scoping uses correct date columns per metric (converted_at/exam_scheduled_at/created_at); location scoping excludes other locations",
+        "test/integration/portal-token.test.ts — POST /referrals/referrers/:id/portal-token: token generated and portal_url returned; regeneration replaces previous token (UPSERT); 400 if referrer_type='patient'",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Contract tests: event payload validation",
+      "description": "As a developer, I need contract tests verifying incoming payload shapes and outgoing event completeness so deploy-time incompatibilities are caught before they reach production.",
+      "acceptanceCriteria": [
+        "test/contract/event-payloads.test.ts: incoming lead.created — TypeBox schema validates that referrer_id, referrer_type, referral_code fields are present (even if nullable); a synthetic event missing these fields fails TypeBox validation",
+        "test/contract/event-payloads.test.ts: outgoing referral.converted payload — all required fields present (referral_id, lead_id, referrer_id, referrer_type, location_id, converted_at)",
+        "test/contract/event-payloads.test.ts: outgoing referrer.created payload — all required fields present (referrer_id, lead_id, location_id, referral_link_id, referral_code, referral_link_url); referral_link_url matches pattern */referrals/r/<code> (contains redirect endpoint path, NOT a landing page URL with ?ref= baked in)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
