@@ -1,0 +1,140 @@
+# Ralph Progress Log
+Started: Thu Apr  9 06:21:42 UTC 2026
+---
+
+## Codebase Patterns
+- Repository files follow `{table-name}.repo.ts` naming, export a `TABLE` constant, use `Knex` param, and cast rows with `as Interface`
+- Use `onConflict(['col1', 'col2']).ignore()` for upsert-with-ignore pattern in Knex
+- No `withSchema()` in repo queries — the search_path handles schema resolution at connection level
+- Integration tests use `describe.skipIf(!HAS_DB)` guard pattern
+- Migrations use `withSchema('crm_campaigns')` but repos do not
+- `bulkInsert` omits sent_at (defaults to NULL); use `bulkInsertFull` when rows need explicit sent_at values (e.g., A/B recipient inserts)
+- A/B split helper: `sendVariant()` private function in send-orchestrator.ts handles Email Service POST for any variant
+- Export `processJob` from worker files to enable direct invocation in integration tests without BullMQ
+- BullMQ v5 forbids colons in queue names (`Queue name cannot contain :`); importing worker files that create `new Worker(...)` at module level will throw at import time — for integration tests, replicate processJob logic in a test helper instead of importing the worker module
+- When a worker needs to enqueue jobs on another queue, import `Queue` from bullmq and instantiate with the target queue constant
+- For unit-testing handlers that query Knex directly (not via repo), mock db as a thenable chain: `chain.then = vi.fn((resolve) => resolve(rows))` so `await db('table').select().where()` resolves correctly
+
+---
+
+## 2026-04-09 - US-019
+- Implemented `campaign-conversions.repo.ts` with `CampaignConversion` interface, `insertConversion` (ON CONFLICT DO NOTHING), and `listByCampaignId` (paginated with total count)
+- Files changed: `apps/crm/campaign/src/repositories/campaign-conversions.repo.ts` (new)
+- **Learnings for future iterations:**
+  - Existing repos use a simple pattern: interface + TABLE constant + exported async functions taking `db: Knex` as first param
+  - `listByCampaignId` uses `Promise.all` for parallel count + rows query — this pattern can be reused for paginated list endpoints
+  - The `campaign_conversions` table has a unique constraint on `(campaign_id, lead_id)` — use `.onConflict().ignore()` for idempotent inserts
+---
+
+## 2026-04-09 - US-020
+- Implemented `ab-winner.ts` pure function service with `selectWinner(opensA, countA, opensB, countB)` returning 'A' or 'B'
+- Created unit tests with 6 cases: A wins, B wins, tie→A, both zero→A, countA=0 with B opens→B, countB=0 with A opens→A
+- Files changed: `apps/crm/campaign/src/services/ab-winner.ts` (new), `apps/crm/campaign/test/unit/ab-winner.test.ts` (new)
+- **Learnings for future iterations:**
+  - Pure function services with no dependencies are the simplest pattern — no Knex, no env, just inputs→output
+  - The `selectWinner` function handles division-by-zero by treating 0-count sides as rate=0, ties go to A
+  - This function will be consumed by both `ab-winner-select.worker.ts` and `email-campaign-completed.handler.ts` in future stories
+---
+
+## 2026-04-09 - US-021
+- Implemented `orchestrateAB` in `send-orchestrator.ts` handling both holdout and full_split modes
+- Added `bulkInsertFull` to `campaign-recipients.repo.ts` for inserting rows with explicit `sent_at` values
+- Added `sendVariant` private helper function to DRY up Email Service POST calls
+- Created unit tests: holdout floor rounding (101 leads → A=10, B=10, holdout=81), full_split 50/50 (101 → A=50, B=51), holdout sent_at=NULL assertion, crash recovery guard
+- Files changed: `apps/crm/campaign/src/services/send-orchestrator.ts`, `apps/crm/campaign/src/repositories/campaign-recipients.repo.ts`, `apps/crm/campaign/test/unit/send-orchestrator-ab.test.ts` (new)
+- **Learnings for future iterations:**
+  - The `orchestrateAB` function follows same pattern as `orchestrateNonAB`: fetch→422 check→transaction(sends+recipients)
+  - Crash recovery uses per-variant `findByEmailJobRef` checks with job_ref format `{campaign_id}:{location_id}:{variant}`
+  - Holdout recipients get `variant='holdout'` and `sent_at=NULL`; A/B recipients get `sent_at=now()`
+  - On 422 from Email Service for any variant, the entire location is skipped (continue to next)
+  - Future US-022 will consume `orchestrateAB` from the campaign-orchestrate worker and route based on `campaign.ab_enabled`
+---
+
+## 2026-04-09 - US-022
+- Updated `campaign-orchestrate.worker.ts` to route A/B campaigns (`ab_enabled=true`) to `orchestrateAB`, non-A/B to `orchestrateNonAB`
+- After holdout orchestration: enqueues delayed BullMQ job on `AB_WINNER_QUEUE`, sets `ab_phase='testing'`, stores `ab_winner_job_id`
+- After full_split orchestration: sets `ab_phase='complete'` immediately (no delayed winner selection)
+- Created `ab-winner-select.worker.ts`: loads campaign, guards on `status='sending' AND ab_phase='testing'`, computes winner via `selectWinner`, updates campaign, dispatches holdout sends grouped by location with crash recovery
+- Updated `email-campaign-completed.handler.ts`: after determining terminal status, computes retrospective `ab_winner` for `full_split` campaigns where `ab_winner` is null
+- Imported `ab-winner-select.worker.ts` as side-effect import in `worker.ts`
+- `AB_WINNER_QUEUE` constant was already defined in `connection.ts` from a prior phase
+- Files changed: `src/workers/campaign-orchestrate.worker.ts`, `src/workers/ab-winner-select.worker.ts` (new), `src/handlers/email-campaign-completed.handler.ts`, `src/worker.ts`
+- **Learnings for future iterations:**
+  - The `ab-winner-select` worker queries `campaign_recipients` directly (not via repo) to get all holdout recipients, then groups by `location_id` in JS — the existing `findByCampaignAndVariant` is paginated and not suitable for bulk location grouping
+  - The `processJob` function is exported from `ab-winner-select.worker.ts` to enable direct invocation in integration tests without going through BullMQ
+  - `Queue` must be imported alongside `Worker` from bullmq when a worker needs to enqueue jobs on a different queue (e.g., orchestrate worker enqueuing ab-winner-select jobs)
+  - The holdout send uses `recipientsRepo.updateSentAt` to mark holdout recipients as sent per location, matching the existing pattern
+  - Full_split retrospective winner uses the same `selectWinner` pure function as the holdout path, with `total_recipients` summed from `allSends` grouped by variant
+---
+
+## 2026-04-09 - US-023
+- Created `email-opened.handler.ts`: looks up campaign_sends by `campaign_job_id`, guards on `status='sending' AND ab_phase='testing'`, increments `ab_opens_a` or `ab_opens_b` based on variant
+- Created `lead-stage-changed.handler.ts`: queries `campaign_recipients` directly for leads with `sent_at` within 7-day window of `occurred_at`, calls `insertConversion` for each matching campaign
+- Updated `sqs-consumer.ts`: subscribes to `email.opened` and `lead.stage_changed` events alongside existing `email.campaign_completed`
+- Created `test/unit/email-opened.test.ts` (6 test cases) and `test/unit/lead-stage-changed.test.ts` (6 test cases)
+- Files changed: `src/handlers/email-opened.handler.ts` (new), `src/handlers/lead-stage-changed.handler.ts` (new), `src/handlers/sqs-consumer.ts`, `test/unit/email-opened.test.ts` (new), `test/unit/lead-stage-changed.test.ts` (new)
+- **Learnings for future iterations:**
+  - Event handlers that don't publish events don't need the `bus` parameter — `handleEmailOpened` and `handleLeadStageChanged` only take `(payload, db)`
+  - The `lead-stage-changed` handler queries `campaign_recipients` directly (not via repo) because it needs a `DISTINCT campaign_id` query with date arithmetic that doesn't match any existing repo method
+  - For mocking Knex query builders in unit tests, use a thenable chain pattern: mock object with `.then()` that resolves to rows, so `await db('table').select().where()...` works without counting method calls
+  - The sqs-consumer follows a simple pattern: `bus.subscribe(eventName, async (event) => { cast payload; call handler })` — no routing logic needed
+---
+
+## 2026-04-09 - US-024
+- Created `src/routes/diagnostics.ts` as a Fastify plugin with 5 endpoints:
+  - `GET /:id/sends` — returns campaign send details via `sendsRepo.findAllByCampaignId`
+  - `GET /:id/conversions` — paginated conversions via `conversionsRepo.listByCampaignId`
+  - `GET /:id/events` — campaign event history via `eventsRepo.listByCampaignId`
+  - `POST /:id/test-send` — renders template + sends single email; 409 for terminal statuses
+  - `POST /:id/spam-check` — renders template + calls Email Service spam-check endpoint
+- Registered `diagnosticsRoutes` in `src/api.ts` with prefix `/campaigns`
+- Files changed: `src/routes/diagnostics.ts` (new), `src/api.ts`
+- **Learnings for future iterations:**
+  - Route plugins all follow the same `(app, opts: { db: Knex })` signature and are registered with `prefix: '/campaigns'` in api.ts
+  - Terminal status guard uses `['completed', 'completed_with_errors', 'failed', 'cancelled']` — same set used in campaign-service.ts state machine
+  - External service calls (Template + Email) use native `fetch` with `Content-Type: application/json` — no shared HTTP client wrapper
+  - For proxy-style endpoints (test-send, spam-check), return 502 on upstream failures to distinguish from local 4xx errors
+---
+
+## 2026-04-09 - US-025
+- Created `test/integration/ab-orchestration.test.ts` with `describe.skipIf(!HAS_DB || !HAS_REDIS)` guard
+- 4 integration test cases:
+  1. A/B holdout happy path: 200 leads (100/location), 10% split → orchestrateAB → winner select → holdout dispatch → all completions → terminal status
+  2. A/B full_split happy path: 200 leads, 50/50 split → all sent immediately → retrospective winner computed on final completion
+  3. Cancel in sending state (A/B in progress) → 409 (state machine blocks cancel from sending)
+  4. ab-winner-select for cancelled campaign → ACK clean, no DB mutations
+- Used `fireABWorkerLogic` helper (mirrors real worker: status transition → audience resolution → orchestrateAB → ab_phase update)
+- Used `fireABWinnerSelect` helper (replicates processJob logic from ab-winner-select.worker.ts using test's Knex instance)
+- Files changed: `test/integration/ab-orchestration.test.ts` (new)
+- **Learnings for future iterations:**
+  - BullMQ v5.73.1 forbids colons in queue names — importing worker modules that create `new Worker(...)` at module level throws `Queue name cannot contain :`. Replicate processJob logic in test helpers instead of importing worker files directly.
+  - The `createServiceFetchMock` pattern from orchestration.test.ts works well for A/B tests — the auto-incrementing `email-job-${counter}` covers multiple variants per location without needing an explicit map.
+  - For A/B holdout tests, the `fireABWinnerSelect` helper must replicate the full holdout dispatch logic (fetch recipients, group by location, POST Email Service, insert sends, update sent_at) to test the complete flow.
+  - The state machine explicitly blocks cancel from sending state — `sending` only allows `complete`, `complete-with-errors`, and `fail` transitions.
+---
+
+## 2026-04-09 - US-026
+- Created `test/integration/attribution.test.ts` with 7 integration test cases across 2 describe blocks:
+  - Conversion attribution (5 tests): within 7-day window, outside 7-day window, holdout lead (sent_at=NULL), duplicate stage change (ON CONFLICT DO NOTHING), late SQS processing (occurred_at anchor)
+  - A/B open tracking (2 tests): increment ab_opens_a/ab_opens_b on email.opened events, no-op after ab_phase='complete'
+- Files changed: `test/integration/attribution.test.ts` (new)
+- **Learnings for future iterations:**
+  - Integration tests for handlers that don't need Fastify (no HTTP endpoints) can skip `buildTestApp()` — just use `getDb()` directly with `runMigrations()` and `truncateTables()`
+  - The `daysAgo(n)` / `daysAfter(base, n)` helper pattern is useful for date arithmetic in attribution window tests
+  - `toBeCloseTo(value, -3)` works well for comparing timestamps with millisecond tolerance (precision=-3 means tolerance of 500ms)
+  - The `insertRecipient` helper directly inserts into `campaign_recipients` table — simpler than going through the repo for test setup
+---
+
+## 2026-04-09 - US-027
+- Created `test/unit/contracts.test.ts` with 9 contract tests using `@sinclair/typebox` `Type` + `Value.Check()`
+- Covers all 9 payload contracts:
+  - Outbound: POST /audiences/segments/:id/evaluate, POST /audiences/evaluate (inline), GET /leads, GET /leads?ids=..., POST /emails/campaigns/send, campaign.sent EventBridge payload
+  - Inbound: email.campaign_completed, email.opened, lead.stage_changed
+- Each test defines a TypeBox schema, creates a fixture object matching actual codebase usage, and asserts `Value.Check(schema, fixture) === true`
+- Files changed: `apps/crm/campaign/test/unit/contracts.test.ts` (new)
+- **Learnings for future iterations:**
+  - `@sinclair/typebox` is already a dependency — use `Type` from `@sinclair/typebox` and `Value` from `@sinclair/typebox/value` (separate import path)
+  - Use `Type.Object({}, { additionalProperties: true })` for open-ended objects like filter payloads
+  - Use `Type.Object({ ... }, { additionalProperties: true })` on response items when only certain fields are required but extras may exist
+  - Contract test fixtures should mirror actual values produced/consumed by the codebase (e.g., `entity_type: 'campaign'` not just any string)
+---

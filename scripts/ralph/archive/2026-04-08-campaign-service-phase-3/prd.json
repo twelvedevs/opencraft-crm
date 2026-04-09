@@ -1,0 +1,180 @@
+{
+  "project": "Ortho CRM — Campaign Service",
+  "branchName": "ralph/campaign-service-phase-3",
+  "description": "Campaign Service Phase 3 — A/B Testing, Conversion Attribution, and Diagnostics",
+  "userStories": [
+    {
+      "id": "US-019",
+      "title": "campaign-conversions repository",
+      "description": "As a developer, I need a repository for campaign conversion records to support 7-day conversion attribution inserts and paginated queries.",
+      "acceptanceCriteria": [
+        "Create src/repositories/campaign-conversions.repo.ts in apps/crm/campaign",
+        "Export CampaignConversion interface with fields: id (uuid), campaign_id (uuid), lead_id (string), stage_to (string), pipeline (string), converted_at (Date)",
+        "Export insertConversion(db: Knex, data: Omit<CampaignConversion, 'id'>): Promise<void> — inserts with ON CONFLICT (campaign_id, lead_id) DO NOTHING",
+        "Export listByCampaignId(db: Knex, campaignId: string, opts: { limit: number; offset: number }): Promise<{ conversions: CampaignConversion[]; total: number }>",
+        "Use TABLE constant = 'campaign_conversions' (no withSchema needed — searchPath handles it)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "ab-winner pure function service + unit tests",
+      "description": "As a developer, I need a pure function to compute the A/B test winner from open rate data, used by both the ab-winner-select worker and the email.campaign_completed handler for full_split retrospective winner selection.",
+      "acceptanceCriteria": [
+        "Create src/services/ab-winner.ts in apps/crm/campaign",
+        "Export selectWinner(opensA: number, countA: number, opensB: number, countB: number): 'A' | 'B'",
+        "Returns 'A' when rate_a >= rate_b (ties go to A)",
+        "Returns 'B' when rate_b > rate_a",
+        "Returns 'A' when countA = 0 AND countB = 0 (degenerate case — no division by zero)",
+        "Returns winner based on open rate when one side has zero recipients: if countA=0, countB>0, opensB>0 → return 'B'",
+        "Create test/unit/ab-winner.test.ts with ≥6 test cases: A wins, B wins, tie→A, both zero→A, countA=0 with B opens→B, countB=0 with A opens→A",
+        "Typecheck passes; tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "A/B orchestration paths in send-orchestrator.ts + unit tests",
+      "description": "As a developer, I need the send orchestrator to handle A/B holdout and full_split modes — splitting recipients by variant, submitting Email Service calls per location+variant, and inserting campaign_sends and campaign_recipients rows.",
+      "acceptanceCriteria": [
+        "Add orchestrateAB(db: Knex, campaign: Campaign, groupedByLocation: Map<string, LeadContact[]>, env: Env): Promise<void> to src/services/send-orchestrator.ts",
+        "Holdout mode (campaign.ab_mode = 'holdout'): per location, split leads using floor(n * ab_test_split_pct / 100) for A and B groups; remainder goes to holdout",
+        "Holdout: POST /emails/campaigns/send for A group (email_job_ref: '{campaign_id}:{location_id}:A', entity_type: 'campaign', entity_id: campaign_id)",
+        "Holdout: POST /emails/campaigns/send for B group (email_job_ref: '{campaign_id}:{location_id}:B')",
+        "Holdout: INSERT campaign_sends row for A and B variants with sent_at = now(); INSERT campaign_recipients with variant='holdout' and sent_at=NULL for holdout leads",
+        "On 422 from Email Service for either variant: INSERT campaign_sends with status='failed', continue to next location",
+        "Full_split mode (campaign.ab_mode = 'full_split'): split leads 50/50 using floor(n/2) for A, remainder for B; both sent immediately; campaign_recipients inserted with sent_at=now() for all",
+        "Crash recovery: skip location+variant combos where campaign_sends row already exists for that email_job_ref (use findByEmailJobRef from campaign-sends repo)",
+        "Each location's campaign_sends INSERT and campaign_recipients bulk INSERT wrapped in a single DB transaction",
+        "Create test/unit/send-orchestrator-ab.test.ts with unit tests: floor rounding (101 leads, test_split_pct=10 → A=10, B=10, holdout=81); full_split floor(n/2) (101 leads → A=50, B=51); holdout recipients have sent_at=NULL in INSERT; crash recovery guard skips existing email_job_ref",
+        "Typecheck passes; tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "campaign-orchestrate worker A/B routing + ab-winner-select worker + email-campaign-completed full_split winner",
+      "description": "As a developer, I need the orchestrate worker to route A/B campaigns to orchestrateAB, the ab-winner-select worker to select winners and dispatch holdout sends, and the completion handler to compute full_split winners retrospectively.",
+      "acceptanceCriteria": [
+        "Update src/workers/campaign-orchestrate.worker.ts: after empty-audience guard, route to orchestrateAB when campaign.ab_enabled = true, orchestrateNonAB otherwise",
+        "After orchestrateAB for holdout mode: UPDATE campaigns SET ab_phase='testing', ab_decision_at=now() + ab_winner_delay_hours hours; enqueue ab-winner-select delayed BullMQ job with delay=ab_winner_delay_hours * 3600000 ms; UPDATE campaigns SET ab_winner_job_id = job.id",
+        "After orchestrateAB for full_split mode: UPDATE campaigns SET ab_phase='complete'",
+        "Add AB_WINNER_QUEUE = 'campaign:ab-winner-select' constant to src/queue/connection.ts",
+        "Create src/workers/ab-winner-select.worker.ts with a BullMQ Worker on AB_WINNER_QUEUE",
+        "ab-winner-select step 1: load campaign; if status !== 'sending' OR ab_phase !== 'testing' → log + ACK (return)",
+        "ab-winner-select step 2: compute winner — SELECT SUM(total_recipients) from campaign_sends WHERE campaign_id=? AND variant='A'/'B'; call selectWinner(campaign.ab_opens_a, count_a, campaign.ab_opens_b, count_b)",
+        "ab-winner-select step 3: UPDATE campaigns SET ab_winner=winner, ab_phase='complete', ab_decision_at=now()",
+        "ab-winner-select step 4-5: SELECT campaign_recipients WHERE campaign_id=? AND variant='holdout'; group by location_id; for each location: skip if campaign_sends row for '{campaign_id}:{location_id}:holdout' already exists; POST /emails/campaigns/send for holdout recipients (job_ref: '{campaign_id}:{location_id}:holdout', subject_template: winning subject); INSERT campaign_sends (variant: 'holdout'); UPDATE campaign_recipients SET sent_at=now() WHERE campaign_id=? AND variant='holdout' AND location_id=?",
+        "Import src/workers/ab-winner-select.worker.ts as side-effect import in src/worker.ts",
+        "Update src/handlers/email-campaign-completed.handler.ts: after determining terminal_status, if campaign.ab_mode = 'full_split' AND campaign.ab_winner IS NULL, compute retrospective winner using selectWinner(campaign.ab_opens_a, count_a, campaign.ab_opens_b, count_b) where count_a/count_b are SUM(total_recipients) from campaign_sends by variant; include ab_winner in the campaigns.update() call",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "email.opened + lead.stage-changed handlers + sqs-consumer update + unit tests",
+      "description": "As a developer, I need event handlers for A/B open tracking and 7-day conversion attribution, wired into the SQS consumer alongside the existing email.campaign_completed handler.",
+      "acceptanceCriteria": [
+        "Create src/handlers/email-opened.handler.ts: export handleEmailOpened(payload: EmailOpenedPayload, db: Knex): Promise<void>",
+        "email.opened step 1: look up campaign_sends by email_job_id = payload.campaign_job_id via sendsRepo.findByEmailJobId; if not found → return (ACK, not Campaign Service job)",
+        "email.opened step 2: load campaign; if campaign.status !== 'sending' OR campaign.ab_phase !== 'testing' → return (no-op: late opens or non-A/B)",
+        "email.opened step 3: if send.variant='A' → UPDATE campaigns SET ab_opens_a = ab_opens_a + 1 WHERE id=?; if variant='B' → SET ab_opens_b = ab_opens_b + 1; if variant='holdout' or null → return (no-op)",
+        "Create src/handlers/lead-stage-changed.handler.ts: export handleLeadStageChanged(payload: LeadStageChangedPayload, db: Knex): Promise<void>",
+        "lead.stage-changed step 1: SELECT DISTINCT campaign_id FROM campaign_recipients WHERE lead_id = payload.lead_id AND sent_at IS NOT NULL AND sent_at > (occurred_at::timestamptz - interval '7 days')",
+        "lead.stage-changed step 2: for each matching campaign_id call insertConversion(db, { campaign_id, lead_id: payload.lead_id, stage_to: payload.stage_to, pipeline: payload.pipeline, converted_at: new Date(payload.occurred_at) }) — ON CONFLICT DO NOTHING is handled in the repo",
+        "Update src/handlers/sqs-consumer.ts: subscribe to all three events — email.campaign_completed (existing), email.opened, lead.stage_changed; pass db to all handlers",
+        "Create test/unit/email-opened.test.ts with ≥4 test cases using vi.mock() for repos: variant=A → ab_opens_a increment called; variant=B → ab_opens_b increment called; variant=holdout → no update; ab_phase!='testing' → no update",
+        "Create test/unit/lead-stage-changed.test.ts with ≥5 test cases: within 7-day window → insertConversion called; outside 7-day window → no insertConversion call; sent_at=NULL (holdout) → no conversion (empty SELECT result); occurred_at anchor used (not now()); no-op for unknown lead (empty result set)",
+        "Typecheck passes; tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Diagnostics routes (sends, conversions, events, test-send, spam-check)",
+      "description": "As a marketing staff member, I want to inspect campaign send details, conversion stats, event history, and run test sends and spam checks.",
+      "acceptanceCriteria": [
+        "Create src/routes/diagnostics.ts as a Fastify plugin: async function diagnosticsRoutes(app, opts: { db: Knex })",
+        "GET /campaigns/:id/sends: auth requirePermission('campaigns:write'); 404 if campaign not found; returns 200 { sends: [{ id, location_id, variant, subject_used, status, total_recipients, sent_count, failed_count, completed_at }] } using sendsRepo.findAllByCampaignId",
+        "GET /campaigns/:id/conversions: auth requirePermission('campaigns:write'); 404 if campaign not found; query params limit (default 100) + offset (default 0); returns 200 { conversions: [...], total: N }",
+        "GET /campaigns/:id/events: auth requirePermission('campaigns:write'); 404 if campaign not found; returns 200 { events: [{ from_status, to_status, actor_id, comment, created_at }] } using listByCampaignId from campaign-events repo",
+        "POST /campaigns/:id/test-send: auth requirePermission('campaigns:write'); body { to_email: string, context: Record<string,unknown> }; 404 if campaign not found; 409 if status IN ('completed','completed_with_errors','failed','cancelled'); renders template via POST {env.TEMPLATE_SERVICE_URL}/templates/render with { template_id, context }; sends via POST {env.EMAIL_SERVICE_URL}/emails/send with rendered body; returns 200 { message: 'Test email sent' }",
+        "POST /campaigns/:id/spam-check: auth requirePermission('campaigns:write'); 404 if campaign not found; 409 if campaign in terminal state; renders template sample via POST {env.TEMPLATE_SERVICE_URL}/templates/render; calls POST {env.EMAIL_SERVICE_URL}/emails/spam-check with rendered content; returns 200 { score, threshold, passed, issues }",
+        "Register diagnosticsRoutes in src/api.ts with prefix '/campaigns' and db option",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Integration tests — A/B holdout + full_split + cancel edge cases",
+      "description": "As a developer, I need integration tests covering the full A/B testing orchestration paths to verify correct split, winner selection, holdout dispatch, and campaign terminal status.",
+      "acceptanceCriteria": [
+        "Create test/integration/ab-orchestration.test.ts with describe.skipIf(!HAS_DB) guard",
+        "A/B holdout happy path: create campaign with ab_enabled=true, ab_mode='holdout', ab_test_split_pct=10; mock Lead Service returning 100 leads per location (2 locations), Audience Engine snapshot, Email Service returning job_ids; call orchestrateAB via fireWorkerLogic helper; assert campaign_sends has A and B rows per location; assert campaign_recipients holdout rows have sent_at=NULL; assert campaigns.ab_phase='testing' after orchestration; call ab-winner-select logic with ab_opens_a=5/ab_opens_b=3 mocked; assert ab_winner='A' set on campaign; assert holdout campaign_sends rows exist; assert campaign_recipients holdout rows now have sent_at IS NOT NULL; fire handleEmailCampaignCompleted for all sends → campaign status='completed'",
+        "A/B full_split happy path: mode='full_split'; orchestrateAB called; all recipients get sent_at IS NOT NULL; ab_phase='complete' set immediately after orchestration (no ab-winner-select enqueued); handleEmailCampaignCompleted for all sends → ab_winner computed retrospectively from ab_opens_a/b; campaign status='completed'",
+        "Cancel in sending state (A/B in progress): insertCampaign with status='sending', ab_phase='testing'; POST /campaigns/:id/cancel → 409",
+        "ab-winner-select fires for campaign where status='cancelled': ab-winner-select processJob called directly → ACK cleanly with no DB mutations (assert no campaign updates)",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Integration tests — conversion attribution + A/B open tracking",
+      "description": "As a developer, I need integration tests for the lead.stage_changed conversion attribution handler and the email.opened A/B open tracking handler.",
+      "acceptanceCriteria": [
+        "Create test/integration/attribution.test.ts with describe.skipIf(!HAS_DB) guard",
+        "Conversion within 7-day window: insert campaign_recipients row with sent_at=T (now()-3days); call handleLeadStageChanged with occurred_at=T+1day; assert campaign_conversions row inserted with converted_at=occurred_at (not now())",
+        "Conversion outside 7-day window: occurred_at = sent_at + 8 days; assert no campaign_conversions row inserted",
+        "Holdout lead (sent_at=NULL): insert campaign_recipients with sent_at=NULL; call handleLeadStageChanged within 7 days of now(); assert no conversion (sent_at IS NOT NULL filter)",
+        "Duplicate stage change: call handleLeadStageChanged twice for same lead+campaign within 7 days; assert only one campaign_conversions row (ON CONFLICT DO NOTHING)",
+        "Late SQS processing: occurred_at within 7-day window of sent_at but handler called days later; assert conversion IS recorded (occurred_at anchor, not processing time)",
+        "A/B open tracking: insert campaign in status='sending', ab_phase='testing'; insert campaign_sends rows with variant='A' and variant='B'; call handleEmailOpened for A → assert ab_opens_a=1 on campaign row; call for B → assert ab_opens_b=1",
+        "email.opened after ab_phase='complete': set ab_phase='complete' on campaign; call handleEmailOpened for A → assert ab_opens_a unchanged (still 0)",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Contract tests — all 9 TypeBox payload contracts",
+      "description": "As a developer, I need contract tests using TypeBox Value.Check() to verify all outbound call payloads and inbound event payloads match their expected shapes, catching schema drift at test time.",
+      "acceptanceCriteria": [
+        "Create test/unit/contracts.test.ts in apps/crm/campaign using @sinclair/typebox Type + Value",
+        "Outbound: POST /audiences/segments/:id/evaluate payload matches Type.Object({ snapshot_id: Type.String(), entities: Type.Array(Type.Any()), done: Type.Boolean() })",
+        "Outbound: POST /audiences/evaluate inline payload matches Type.Object({ snapshot_id: Type.String(), filter: Type.Object({},{ additionalProperties: true }), entities: Type.Array(Type.Any()), snapshot: Type.Boolean(), done: Type.Boolean() })",
+        "Outbound: GET /leads response matches Type.Object({ items: Type.Array(Type.Object({ id: Type.String(), email: Type.String(), location_id: Type.String() }, { additionalProperties: true })) })",
+        "Outbound: GET /leads?ids=... response matches same shape as above (id, email, location_id required)",
+        "Outbound: POST /emails/campaigns/send body matches Type.Object({ job_ref: Type.String(), location_id: Type.String(), template_id: Type.String(), subject_template: Type.String(), recipients: Type.Array(Type.Any()), entity_type: Type.String(), entity_id: Type.String() })",
+        "Outbound: campaign.sent EventBridge payload matches CampaignSentPayload type from @ortho/types — validate using Type.Object with campaign_id, location_id, sent_count, template_id, completed_at",
+        "Inbound: email.campaign_completed payload matches Type.Object({ job_id: Type.String(), status: Type.String(), sent_count: Type.Number(), failed_count: Type.Number(), total_recipients: Type.Number(), location_id: Type.String(), completed_at: Type.String() })",
+        "Inbound: email.opened payload matches Type.Object({ campaign_job_id: Type.String(), entity_type: Type.String(), entity_id: Type.String() })",
+        "Inbound: lead.stage_changed payload matches Type.Object({ lead_id: Type.String(), stage_to: Type.String(), pipeline: Type.String(), occurred_at: Type.String() })",
+        "Each test uses a fixture object, calls Value.Check(schema, fixture), and asserts the result is true",
+        "Typecheck passes; tests pass"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

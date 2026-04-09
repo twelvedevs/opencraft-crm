@@ -154,6 +154,7 @@ export interface LeadStageChangedPayload {
   reason: string;
   time_in_stage_seconds: number;
   response_time_seconds?: number;
+  occurred_at: string;
 }
 
 export interface LeadConvertedPayload {
@@ -246,4 +247,36 @@ export interface MessageReceivedEvent {
   entity_type: 'lead';
   entity_id: string;
   payload: MessageReceivedPayload;
+}
+
+// --- Campaign Service published events ---
+
+export interface CampaignSentPayload {
+  campaign_id: string;
+  location_id: string;
+  sent_count: number;
+  template_id: string;
+  completed_at: string;
+}
+
+export interface CampaignSentEvent {
+  event_type: 'campaign.sent';
+  occurred_at: string;
+  payload: CampaignSentPayload;
+}
+
+export interface EmailCampaignCompletedPayload {
+  job_id: string;
+  status: 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
+  sent_count: number;
+  failed_count: number;
+  total_recipients: number;
+  location_id: string;
+  completed_at: string;
+}
+
+export interface EmailOpenedPayload {
+  campaign_job_id: string;
+  entity_type: string;
+  entity_id: string;
 }

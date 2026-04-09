@@ -75,7 +75,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "Progress: ${finished_tasks} stories finished, ${pending_tasks} remaining, ${total_tasks} stories total."
 
   # Use -p with --append-system-prompt so skills and project CLAUDE.md load normally
-  OUTPUT=$(claude -p "Read CLAUDE.md and begin the next Ralph iteration" \
+  OUTPUT=$(time claude -p "Read CLAUDE.md and begin the next Ralph iteration" \
     --append-system-prompt "$(cat "$SCRIPT_DIR/CLAUDE.md")" \
     --dangerously-skip-permissions 2>&1 | tee /dev/stderr) || true
 

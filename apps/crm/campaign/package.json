@@ -1,0 +1,41 @@
+{
+  "name": "@ortho/campaign-service",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "start:api": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/sensible": "^6.0.0",
+    "@ortho/auth-middleware": "file:../../../packages/@ortho/auth-middleware",
+    "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
+    "@ortho/logger": "file:../../../packages/@ortho/logger",
+    "@ortho/types": "file:../../../packages/@ortho/types",
+    "@sinclair/typebox": "^0.34.0",
+    "bullmq": "latest",
+    "fastify": "^5.0.0",
+    "ioredis": "latest",
+    "knex": "^3.0.0",
+    "pg": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.0.0",
+    "fast-jwt": "^6.2.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}
