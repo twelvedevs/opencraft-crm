@@ -1,0 +1,241 @@
+# Ralph Progress Log
+Started: Thu Apr  9 09:45:50 UTC 2026
+---
+
+## Codebase Patterns
+- Event types in @ortho/types follow: Payload interface + optional Event wrapper with `event_type`, `entity_type`, `entity_id`, `payload`
+- Not all payloads have Event wrappers — some are payload-only (e.g. LeadStageChangedPayload)
+- ROLE_PERMISSIONS in @ortho/auth-middleware uses `resource:action` format (e.g. `referrals:read`)
+- super_admin bypasses permission checks in require-permission.ts (early return), but still has explicit permissions listed
+- All services use ESM (`"type": "module"`) with NodeNext module resolution
+- Migration naming: `YYYYMMDDhhmmss_description.ts` (campaign pattern); use `knex.schema.withSchema('schema_name').createTable()` for tables
+- CHECK constraints and indexes added via `knex.raw()` after table creation
+- Each service has its own `knexfile.ts`, `src/db.ts`, and `src/env.ts` — no shared @ortho/db package
+- Referral service does NOT need bullmq/ioredis — uses @ortho/event-bus (SQS) only
+- EventBus factory reads EVENT_BUS_DRIVER from process.env directly (no need to pass it)
+- Cursor pagination: Base64 JSON `{ lastSeenId, lastSeenSortValue }`, tuple compare `(sort_col, id) < (?, ?)`, fetch `limit+1` then pop
+- ON CONFLICT `.onConflict('col').ignore()` returns empty array on conflict — check `rows[0] ?? null`
+- Repos export functions (not classes), accept `db: Knex` as first param, use `| null` for nullable fields
+- Event publisher pattern: export async function taking `(bus: EventBus, payload: TypedPayload)`, call `bus.publish({ event_type, entity_type, entity_id, payload })`
+- Inter-service HTTP clients use `X-Internal-Api-Key` header with service-specific API key env var
+- Must build @ortho/types (`npm run build`) before dependent services can typecheck (dist/*.d.ts required)
+- Services throw HTTP errors via `Object.assign(new Error(...), { statusCode: N })` — routes can read `.statusCode`
+- Notification service uses direct `fetch()` to Messaging Service: POST /messages/send with `{ to, body, dedup_key }`
+- SMS dedup_key pattern: `referral_{type}_notify:{referral_id}` — prevents duplicate SMS on SQS redelivery
+- Aggregate counts in services use PostgreSQL `COUNT(*) FILTER (WHERE ...)::int` for single-query summaries
+- Handlers that publish events take `(event, db, bus)` signature; read-only handlers take `(event, db)` only
+- worker.ts follows campaign pattern: createEventBus() → subscribe → bus.start(); SIGTERM calls bus.stop() + destroy()
+- Fastify 5 redirect: `reply.status(302).redirect(url)` — redirect() takes only URL string, set status separately
+- Public routes: register via encapsulated `fastify.register(async (app) => { ... })` scope without authPlugin
+- Staff routes: use `requirePermission('resource:action')` as `preHandler` array; access user ID via `req.user!.sub`
+- Route registration: `app.register(routesFn, { prefix: '/path', db })` — route paths are relative to prefix
+- index.ts pattern: two encapsulated scopes — public (no authPlugin) and staff (with authPlugin inside scope) — keeps auth isolated from public routes
+- Leaderboard/aggregate queries: use `COUNT(*) FILTER (WHERE condition)::int` with parameterized bindings for safe period filtering
+- Integration tests: mock external HTTP via `vi.mock()` at module level + `vi.stubGlobal('fetch', fetchMock)` — real Postgres, no HTTP calls
+- Integration test HAS_DB guard: `describe.skipIf(!HAS_DB)` skips tests when DATABASE_URL is the fallback dummy value
+- Route integration tests: use `buildTestApp()` + `app.inject()` — no port binding, JWT via test RSA keypair, JWKS mocked via `globalThis.fetch`
+- Mock EventBus for handler tests: `{ published: [], publish(e) { this.published.push(e) }, subscribe() {}, start() {}, stop() {} }`
+- Integration test helpers pattern: getDb(), runMigrations(), rollbackMigrations(), cleanup(), truncateTables(), and factory functions (insertReferrer, insertReferralLink, insertReferral)
+
+## 2026-04-09 - US-001
+- Added `referrals:read` to all 5 roles and `referrals:write` to marketing_staff, marketing_manager, super_admin
+- Type definitions (ReferralConvertedPayload, ReferrerCreatedPayload, ReferrerCreatedEvent, LeadConvertedPayload fields) were already present from prior iterations
+- Files changed: `packages/@ortho/auth-middleware/src/permissions.ts`
+- **Learnings for future iterations:**
+  - The @ortho/types package already had referral-related types added (likely during a design spec session)
+  - LeadStageChangedPayload uses `transitioned_at` (not `occurred_at`) — already correct
+  - LeadConvertedPayload already has `to_pipeline: string` and `converted_at: string`
+  - Auth-middleware tests (26 tests) all pass after adding new permissions
+---
+
+## 2026-04-09 - US-002
+- Scaffolded apps/crm/referral/ with full directory structure: src/{routes/public,services,repositories,handlers,events,clients}, migrations/, test/{unit,integration,contract}
+- Created config files: package.json, tsconfig.json, Dockerfile, vitest.config.ts, knexfile.ts
+- Created src/env.ts with all required env vars (DATABASE_URL, PORT, NODE_ENV, IDENTITY_JWKS_URL, LEAD_SERVICE_URL, LEAD_SERVICE_API_KEY, MESSAGING_SERVICE_URL, DEFAULT_REFERRAL_LANDING_URL, REFERRAL_BASE_URL, EVENT_BUS_DRIVER, SQS_QUEUE_URL, AWS_REGION)
+- Created src/db.ts with knex instance using crm_referrals schema
+- Created 6 migrations: schema, referrers, referral_links, referrals, reward_events, portal_tokens
+- All tables include CHECK constraints, indexes, and unique constraints from spec Section 4
+- Files changed: 14 new files in apps/crm/referral/
+- **Learnings for future iterations:**
+  - Campaign service is the best template for new CRM services (newer patterns)
+  - No @ortho/db shared package — each service manages its own knex config
+  - Referral service needs no Redis/BullMQ — only @ortho/event-bus for SQS
+  - vitest.config.ts references test/integration/setup.ts — will need to create this for integration tests
+  - Partial unique index syntax: `CREATE UNIQUE INDEX ... ON table (col) WHERE condition`
+---
+
+## 2026-04-09 - US-003
+- Implemented all five repository files: referrer.repo.ts, referral-link.repo.ts, referral.repo.ts, reward.repo.ts, portal-token.repo.ts
+- Files changed: 5 new files in apps/crm/referral/src/repositories/
+- **Learnings for future iterations:**
+  - Cursor-based pagination pattern: Base64-encode `{ lastSeenId, lastSeenCreatedAt }`, use `(created_at, id) < (?, ?)` tuple comparison, fetch `limit + 1` rows then pop to detect next page
+  - ON CONFLICT patterns: use `.onConflict('column').ignore()` for idempotent inserts; returns empty array when conflict occurs, so return `rows[0] ?? null`
+  - UPSERT pattern for portal tokens: `.onConflict('referrer_id').merge({...})` to replace token on re-generation
+  - Fire-and-forget pattern: wrap in try/catch with empty catch block (incrementClickCount)
+  - Reward repo listByStatus needs a JOIN to referrals table for location scoping since reward_events has no location_id column directly
+  - Default sort for rewards is `created_at ASC` (oldest first) per spec
+---
+
+## 2026-04-09 - US-004
+- Implemented lead-service HTTP client, link service (code generation + resolution + click tracking), and event publisher
+- Files changed: 3 new files in apps/crm/referral/src/
+  - src/clients/lead-service.client.ts — getLeadById using X-Internal-Api-Key header
+  - src/services/link.service.ts — generateCode (8-char alphanumeric), createLink (5 retries), resolveCode, recordClick, deactivateAllForReferrer
+  - src/events/publisher.ts — publishReferralConverted, publishReferrerCreated using @ortho/event-bus
+- **Learnings for future iterations:**
+  - @ortho/types dist must be built before referral service typecheck will pass (`cd packages/@ortho/types && npm run build`)
+  - Lead Service client uses `X-Internal-Api-Key` header (same pattern as conversation service's service-client.ts)
+  - Event publisher follows lead service pattern: typed function taking EventBus + payload, calling bus.publish with event_type/entity_type/entity_id/payload
+  - recordClick is fire-and-forget: call without await, repo's incrementClickCount already has try/catch
+  - Link service code collision retry: check findByCode before create to avoid unique constraint errors
+---
+
+## 2026-04-09 - US-005
+- Implemented four domain service files: referrer.service.ts, referral.service.ts, reward.service.ts, notification.service.ts
+- Files changed: 4 new files in apps/crm/referral/src/services/
+  - referrer.service.ts — createDoctorReferrer (auto-generates initial link), updateDoctorInfo, updateStatus, getWithSummary (with aggregate counts), list
+  - referral.service.ts — createFromEvent, advanceToExamScheduled, advanceToConverted, updateNotificationPrefs, getById, list
+  - reward.service.ts — issueReward (with double-issue and missing reward_type guards), list
+  - notification.service.ts — buildExamScheduledMessage, buildConversionMessage, sendExamNotification, sendConversionNotification (with referrer_type/phone/prefs guards)
+- **Learnings for future iterations:**
+  - Services use `Object.assign(new Error(...), { statusCode: N })` for HTTP-friendly errors (pattern from link.service.ts)
+  - getWithSummary uses PostgreSQL FILTER (WHERE ...) for counting referral statuses in a single query
+  - Notification service uses direct `fetch()` to Messaging Service (no shared HTTP client) — POST /messages/send with { to, body, dedup_key }
+  - SMS notifications skip for doctor referrers (only patient referrers get SMS), null phone, and when notify_on_* is false
+  - referral.service.ts updateNotificationPrefs does a direct DB update (not delegated to repo) since the repo didn't include this method
+  - Messaging Service dedup_key pattern: `referral_exam_notify:{referral_id}` and `referral_conversion_notify:{referral_id}`
+---
+
+## 2026-04-09 - US-006
+- Implemented two event handler files: lead-created.ts and lead-stage-changed.ts
+- Files changed: 2 new files in apps/crm/referral/src/handlers/
+  - src/handlers/lead-created.ts — skips if referrer_id or referral_code null; resolves link via referralLinkRepo.findByCode (not active link lookup); creates referral with ON CONFLICT idempotency
+  - src/handlers/lead-stage-changed.ts — filters to new_patient pipeline + exam_scheduled stage; advances referral status; sends SMS notification via notification.service
+- **Learnings for future iterations:**
+  - Handler pattern: export async function taking (event: OrthoEvent, db: Knex), extract payload fields with String() casts
+  - lead-created handler resolves referral_link_id from the specific referral_code in the payload (findByCode), NOT from the active link — this pins the referral to the exact link used at lead creation time
+  - lead-stage-changed uses transitioned_at from payload (not occurred_at) — matches LeadStageChangedPayload type
+  - Notification service handles all guard conditions internally (doctor skip, null phone, notify_on_* prefs) so handlers just call it
+  - Dedup on SMS happens at Messaging Service level via dedup_key — handlers don't need to track notification state
+---
+
+## 2026-04-09 - US-007
+- Implemented lead-converted handler with two branches and worker.ts entry point
+- Files changed: 2 new files in apps/crm/referral/src/
+  - src/handlers/lead-converted.ts — Branch A (to_pipeline='in_treatment'): advances referral to converted, creates reward_events row, sends conversion notification, publishes referral.converted; Branch B (to_pipeline='in_retention'): creates patient referrer + link, publishes referrer.created with /referrals/r/<code> URL
+  - src/worker.ts — creates EventBus, subscribes to lead.created, lead.stage_changed, lead.converted; graceful SIGTERM shutdown
+- **Learnings for future iterations:**
+  - lead-converted handler needs EventBus (3rd param) unlike other handlers — it publishes referral.converted and referrer.created events
+  - worker.ts pattern: createEventBus() → subscribe all events → bus.start(); no BullMQ/Redis needed for referral service
+  - Branch B referral_link_url uses REFERRAL_BASE_URL + '/referrals/r/' + code (the redirect endpoint), NOT the landing page URL with ?ref=
+  - Branch B rethrows on Lead Service call failure (no try/catch) — this dead-letters the SQS message for retry
+  - referrerRepo.create returns created_at as Date, but ReferrerCreatedPayload expects string — cast via `as unknown as string`
+---
+
+## 2026-04-09 - US-008
+- Implemented three public (no-auth) routes in encapsulated Fastify scopes:
+  - src/routes/public/links.ts: GET /referrals/r/:code (click redirect with 302), GET /referrals/links/:code (code resolution)
+  - src/routes/public/portal.ts: GET /referrals/portal/:token (doctor portal view with stats)
+- Click redirect differentiates active vs inactive vs unknown codes: active gets ?ref= appended + fire-and-forget click tracking; inactive redirects without ?ref=; unknown returns 404
+- Portal endpoint computes lifetime stats (total_referrals, exams_scheduled, cases_started) from referrals table and omits lead_id from response
+- Files changed: 2 new files in apps/crm/referral/src/routes/public/
+- **Learnings for future iterations:**
+  - Fastify 5 `reply.redirect()` takes only a URL string — use `reply.status(302).redirect(url)` to set status code explicitly
+  - Public routes are registered via `fastify.register(async (app) => { ... })` encapsulated scope WITHOUT authPlugin
+  - Portal stats are computed in-memory from referrals array rather than using aggregate SQL — acceptable for portal view since referral counts per referrer are bounded
+  - Routes accept `opts: { db: Knex }` as second parameter to Fastify plugin function, following campaign service pattern
+---
+
+## 2026-04-09 - US-009
+- Implemented two staff route files with JWT-protected endpoints:
+  - src/routes/referrers.ts: POST (create doctor referrer), GET (list), GET /:id (detail with summary), PATCH /:id (update contact fields), PATCH /:id/status, POST /:id/portal-token
+  - src/routes/referral-links.ts: POST /referrers/:id/links (new link + deactivate old), GET /referrers/:id/links (all links), PATCH /links/:id/status (activate/deactivate with mutual exclusion)
+- Files changed: 2 new files in apps/crm/referral/src/routes/
+- **Learnings for future iterations:**
+  - Staff routes use `requirePermission('referrals:read')` and `requirePermission('referrals:write')` from @ortho/auth-middleware as preHandler arrays
+  - Campaign service pattern: routes are registered via `app.register(routesFn, { prefix: '/referrers', db })` — prefix strips the base from route paths (so `/:id` becomes `/referrers/:id`)
+  - referral-link repo has no findById — use direct `db('referral_links').where({ id }).first()` for one-off lookups in routes
+  - Portal token UPSERT via `portalTokenRepo.upsertForReferrer` handles both create and replace — returns the new token including DB-generated UUID
+  - PATCH status endpoint deliberately does NOT auto-deactivate links (per spec) — link deactivation is separate
+  - Immutable field validation in PATCH: check for `lead_id`, `referrer_type`, `location_id` in request body and return 400
+---
+
+## 2026-04-09 - US-010
+- Implemented three staff route files and the HTTP server entry point:
+  - src/routes/referrals.ts: GET / (paginated list with filters), GET /:id (with reward_event), PATCH /:id/notifications
+  - src/routes/rewards.ts: GET /rewards (paginated list), PATCH /rewards/:id (issue reward with validation)
+  - src/routes/leaderboard.ts: GET /leaderboard (ranked by cases_started DESC with period filtering)
+  - src/index.ts: Fastify server with public scope (no auth) and staff scope (with authPlugin)
+- Files changed: 4 new files in apps/crm/referral/src/
+- **Learnings for future iterations:**
+  - Leaderboard uses `COUNT(*) FILTER (WHERE ...)::int` for period-scoped metrics in a single GROUP BY query
+  - Period filtering uses different date columns per metric: created_at for total_referrals, exam_scheduled_at for exams_scheduled, converted_at for cases_started
+  - authPlugin uses fp() (fastify-plugin) which breaks encapsulation — register inside an encapsulated scope to isolate from public routes
+  - index.ts uses two encapsulated scopes: public (no auth) and staff (with authPlugin) to cleanly separate auth concerns
+  - Service error handling pattern: services throw `Object.assign(new Error(), { statusCode })`, routes catch and extract statusCode for response
+  - Rewards PATCH route catches errors from service layer and maps statusCode to HTTP response — this pattern avoids duplicate validation in routes
+---
+
+## 2026-04-09 - US-011
+- Implemented 3 unit test files with 19 tests total:
+  - test/unit/link.service.test.ts (5 tests): generateCode length/charset, createLink collision retry, 500 after 5 collisions
+  - test/unit/notification.service.test.ts (10 tests): message building with first name, sendExamNotification/sendConversionNotification guard conditions (doctor skip, null phone, notify_on_* false)
+  - test/unit/reward.service.test.ts (4 tests): 400 on already issued, 400 on missing reward_type, 404 on not found, successful markIssued call
+- Created test/integration/setup.ts (empty placeholder required by vitest.config.ts)
+- Files changed: 4 new files in apps/crm/referral/test/
+- **Learnings for future iterations:**
+  - vi.mock() paths use relative paths from the test file to the source (e.g. `../../src/repositories/...`)
+  - env.ts must be mocked via `vi.mock('../../src/env.js', ...)` for notification service tests since it calls required() on import
+  - Use `vi.stubGlobal('fetch', fetchMock)` to mock global fetch for notification service tests
+  - Factory functions (makeReferrer, makeReferral, makePendingReward) with Partial overrides make tests concise
+  - vitest.config.ts setupFiles run for ALL tests including unit — created empty setup.ts to avoid import errors
+---
+
+## 2026-04-09 - US-012
+- Implemented 3 integration test files with 22 tests total for event handlers against real Postgres:
+  - test/integration/lead-created.handler.test.ts (5 tests): referral row creation pinned to specific code, unknown code skip, null referrer_id skip, null referral_code skip, idempotent duplicate delivery
+  - test/integration/lead-stage-changed.handler.test.ts (7 tests): status advance to exam_scheduled, exam_scheduled_at from transitioned_at, SMS with dedup_key for patient, no SMS for doctor, non-exam stage skip, wrong pipeline skip, missing referral skip, duplicate delivery dedup
+  - test/integration/lead-converted.handler.test.ts (10 tests): Branch A — converted status + converted_at, reward_events with pending, referral.converted published, SMS dedup_key, idempotent reward, no referral skip; Branch B — referrer + link creation, referrer.created with /referrals/r/<code> URL, idempotent skip on existing referrer, Lead Service failure rethrow
+- Created test/integration/helpers.ts with HAS_DB guard, migrations, truncate, and factory functions (insertReferrer, insertReferralLink, insertReferral)
+- Updated test/integration/setup.ts with all required env vars for referral service
+- Files changed: 5 files in apps/crm/referral/test/integration/
+- **Learnings for future iterations:**
+  - Integration tests mock external HTTP at module level: `vi.mock('../../src/clients/lead-service.client.js')` and `vi.stubGlobal('fetch', fetchMock)` for notification service
+  - HAS_DB guard uses `describe.skipIf(!HAS_DB)` — tests are skipped gracefully when no Postgres available (same pattern as campaign service)
+  - For lead-converted handler mock, use `const getLeadByIdMock = vi.fn()` with forwarding `vi.mock(... () => ({ getLeadById: (...args) => getLeadByIdMock(...args) }))` to allow per-test behavior changes
+  - Mock EventBus pattern: simple object with `published: OrthoEvent[]` array and no-op subscribe/start/stop — passed as third arg to handler
+  - Integration test helpers use `randomUUID().slice(0, 4)` for unique referral link codes to avoid collisions between tests
+  - Truncate order matters due to FK constraints — truncate child tables (portal_tokens, reward_events, referrals, referral_links) before parent (referrers), or use CASCADE
+---
+
+## 2026-04-09 - US-013
+- Implemented 4 integration test files with 18 tests total for API endpoints against real Postgres:
+  - test/integration/public-routes.test.ts (8 tests): GET /referrals/r/:code (active 302 with ?ref= + click_count, inactive 302 no ?ref=, unknown 404), GET /referrals/links/:code (200 resolved, 404 inactive, 404 unknown), GET /referrals/portal/:token (200 with stats + no lead_id, 404 unknown)
+  - test/integration/rewards.test.ts (3 tests): PATCH pending→issued with correct fields, 400 double-issue, 400 missing reward_type
+  - test/integration/leaderboard.test.ts (4 tests): ranked by cases_started DESC, referrer_type filter, period scoping per date column, location scoping
+  - test/integration/portal-token.test.ts (3 tests): token creation with portal_url, UPSERT regeneration, 400 for patient referrer
+- Updated test/integration/helpers.ts with buildTestApp(), makeJwt(), JWT/JWKS infrastructure for route-level integration testing
+- Files changed: 4 new test files, 1 updated helpers.ts
+- **Learnings for future iterations:**
+  - Route integration tests use `buildTestApp()` from helpers.ts + `app.inject()` (no actual port binding needed)
+  - JWT test infrastructure: `generateKeyPairSync` + `fast-jwt` createSigner for signing, mock JWKS endpoint via `globalThis.fetch` override
+  - Fire-and-forget operations (click tracking) need a small delay (~150ms) before asserting DB state in tests
+  - `buildTestApp()` registers two Fastify scopes: public (no auth) and staff (with authPlugin + routes)
+  - Each route test file follows: beforeAll(getDb + runMigrations + buildTestApp), afterAll(app.close + cleanup) — fully self-contained
+  - Leaderboard period test: created_at is auto-set to now() so period filtering demonstrates column differences by using a Feb period where exam_scheduled_at matches but created_at (April) doesn't
+  - Portal token UPSERT generates a new UUID each time via `gen_random_uuid()` — consecutive calls return different tokens, only one row per referrer
+  - TypeBox schema validation rejects missing required fields (e.g. reward_type) before reaching service code, still returns 400
+---
+
+## 2026-04-09 - US-014
+- Implemented contract test file with 10 tests validating event payload shapes:
+  - test/contract/event-payloads.test.ts: incoming lead.created (5 tests: valid, null fields, missing referrer_id/referrer_type/referral_code), outgoing referral.converted (2 tests: valid, missing required fields), outgoing referrer.created (3 tests: valid, missing required fields, URL pattern /referrals/r/<code>)
+- Used @sinclair/typebox Type.Object + Value.Check for schema validation
+- Files changed: 1 new file in apps/crm/referral/test/contract/
+- **Learnings for future iterations:**
+  - Contract tests use TypeBox schemas separate from TS interfaces — schemas enforce stricter rules (e.g. requiring fields that are optional in TS types)
+  - `Type.Union([Type.String(), Type.Null()])` enforces "field must be present but can be null" — different from `Type.Optional()` which allows absence
+  - `Type.String({ pattern: '...' })` applies JSON Schema regex pattern — matches anywhere in string (not anchored), useful for URL path validation
+  - `Value.Check(schema, data)` returns boolean — no exceptions, clean for test assertions
+  - vitest.config.ts `include: ['test/**/*.test.ts']` catches contract tests in test/contract/ without config changes
+---
