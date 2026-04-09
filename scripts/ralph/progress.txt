@@ -1,3 +1,26 @@
+## 2026-04-09 - US-007
+- Implemented src/services/metrics-cache.ts: LRU cache wrapping computeMetrics
+- Cache key: sha256(metric_family + '|' + period + '|' + sorted(location_ids).join(','))
+- Files created: apps/crm/reporting/src/services/metrics-cache.ts
+- **Learnings for future iterations:**
+  - metrics-cache exports `getMetrics(metric_family: string, params: MetricsParams)` — callers pass a discriminator string (e.g. 'dashboard') so the same cache instance is reusable for different metric contexts
+  - lru-cache v10+ uses `ttl` (not `maxAge`) and `LRUCache` named export (not default)
+  - No manual invalidation — TTL-only eviction keeps the implementation simple
+---
+
+## 2026-04-09 - US-006
+- Implemented src/db.ts (global knex connection, searchPath: crm_reporting) and src/services/metrics-calculator.ts
+- Files created: apps/crm/reporting/src/db.ts, apps/crm/reporting/src/services/metrics-calculator.ts
+- **Learnings for future iterations:**
+  - metrics-calculator imports `db` from `../db.js` (global singleton, same pattern as other crm services)
+  - computeMetrics(params) fans out all 6 analytics calls via Promise.all — fail-fast, no partial results
+  - Revenue config: when location_ids is empty/undefined (all-locations), load all configs; when specific IDs provided, findByLocationIds and populate missing_revenue_config for any not found
+  - avg_contract_value = null if ANY requested location is missing config → revenue_attributed and roas both null
+  - CHANNEL_TO_PLATFORM map exported: google_ads→google_ads, facebook→facebook_ads (for channel attribution in route handlers)
+  - raw AnalyticsRawData field on ComputedMetrics holds all six API responses so route handlers (channel-performance, location-comparison) can compute per-channel/per-location views without additional API calls
+  - divOrNull helper: returns null when denominator = 0, never 0
+---
+
 ## 2026-04-09 - US-003
 - Created src/schemas/ with 5 TypeBox schema files: report-config.ts, schedule.ts, run.ts, revenue-config.ts, metrics.ts
 - Files created: src/schemas/report-config.ts, src/schemas/schedule.ts, src/schemas/run.ts, src/schemas/revenue-config.ts, src/schemas/metrics.ts
@@ -31,6 +54,7 @@
 ---
 
 ## Codebase Patterns
+- Services use a global `src/db.ts` exporting a knex singleton (`export default knex`); metrics-calculator and other services import it directly — do not pass db as a parameter to service-level functions that wrap analytics/KPI computation
 - ROLE_PERMISSIONS in packages/@ortho/auth-middleware/src/permissions.ts is the single source of truth for all service permissions; add new `<service>:read` and `<service>:write` entries there for every new service
 - Permission naming convention: `<service>:read` and `<service>:write` (e.g., reporting:read, reporting:write)
 - `@ortho/db` does not exist as a package — use direct knex + pg pattern (same as referral/campaign services)
