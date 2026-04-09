@@ -714,19 +714,281 @@ Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/ty
 Write implementation plan, store to prd.json 
 ```
 
-
-
-
 ```
-Load codereview skill. Please do review of implementation of apps/platform/media-service against spec in @docs/superpowers/specs/2026-04-03-media-service-updated-design.md
+Load codereview skill. Please do review of implementation of apps/platform/media against spec in @docs/superpowers/specs/2026-04-03-media-service-updated-design.md
 ```
 
-#### Docker Compose
+
+#### Lead Service
+
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/NAVIGATOR.md & docs/superpowers/specs/2026-03-25-lead-service-design.md . Check which common packages can be used for the Lead Service
+```
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-lead-service-design.md .
+Refer to essential packages implementation:
+- docs/arch/adr-logger.md 
+- docs/arch/adr-event-bus.md
+- docs/arch/adr-auth-middleware.md
+```
 
 ```
 Load superpowers:brainstorming skill.
 Read docs:
 - overall platform & product architecture at @docs/01-platform-arch-design.md
-- @docs/NAVIGATOR.md
-We need implement docker-compose setup for development purposes. Read all specs if you need, read all the code, understand what assumptions have been made which services have to be run in local dev env.
+- component architecture design @docs/superpowers/specs/2026-03-25-lead-service-design.md
+- clarifying questions and answers @tasks/prd-questions-lead-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-lead-service-design.md with clarifications you got from @tasks/prd-questions-lead-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-06-lead-service-updated-design.md
 ```
+
+PRD phase 1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-06-lead-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan for phase 1, store to prd-phase-1.json 
+```
+
+PRD phase 2
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-06-lead-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan for phase 2, store to prd-phase-2.json 
+```
+
+PRD phase 3
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-06-lead-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan for phase 3, store to prd-phase-3.json 
+```
+
+Code-review
+```
+Load codereview skill. Please do review of implementation of apps/crm/lead against spec in @docs/superpowers/specs/2026-04-06-lead-service-updated-design.md
+```
+
+#### Pipeline Engine
+
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/NAVIGATOR.md & docs/superpowers/specs/2026-03-25-pipeline-engine-design.md . Check which common packages can be used for the Pipeline Engine
+```
+
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-pipeline-engine-design.md .
+Refer to essential packages implementation:
+- docs/arch/adr-logger.md 
+- docs/arch/adr-event-bus.md
+```
+
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-pipeline-engine-design.md
+- clarifying questions and answers @tasks/prd-questions-pipeline-engine.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-pipeline-engine-design.md with clarifications you got from @tasks/prd-questions-pipeline-engine.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-07-pipeline-engine-updated-design.md
+```
+
+PRD
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-07-pipeline-engine-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan, store to prd.json 
+```
+
+Code-review
+```
+Load codereview skill. Please do review of implementation of apps/crm/lead against spec in @docs/superpowers/specs/2026-04-07-pipeline-engine-updated-design.md
+```
+
+#### Conversation Service
+
+check required libs
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/NAVIGATOR.md & docs/superpowers/specs/2026-03-25-conversation-service-design.md . Check which common packages can be used for the Conversation Service
+```
+
+PRD questions
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-conversation-service-design.md .
+Refer to essential packages implementation:
+- docs/arch/adr-logger.md 
+- docs/arch/adr-event-bus.md
+- docs/arch/adr-auth-middleware.md
+```
+
+Update design doc
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-conversation-service-design
+- clarifying questions and answers @tasks/prd-questions-conversation-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-conversation-service-design.md with clarifications you got from @tasks/prd-questions-conversation-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-07-conversation-service-updated-design.md
+```
+
+PRD
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-07-conversation-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan, store to prd.json 
+```
+
+Code-review
+```
+Load codereview skill. Please do review of implementation of apps/crm/conversation against spec in @docs/superpowers/specs/2026-04-07-conversation-service-updated-design.md
+```
+
+#### Campaign Service
+
+check required libs
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/NAVIGATOR.md & docs/superpowers/specs/2026-03-25-campaign-service-design.md . Check which common packages can be used for the Campaign Service
+```
+
+PRD questions
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-campaign-service-design.md .
+Refer to essential packages implementation:
+- docs/arch/adr-logger.md 
+- docs/arch/adr-event-bus.md
+- docs/arch/adr-auth-middleware.md
+```
+
+Update design doc
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-campaign-service-design.md
+- clarifying questions and answers @tasks/prd-questions-campaign-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-campaign-service-design.md with clarifications you got from @tasks/prd-questions-campaign-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-08-campaign-service-updated-design.md
+```
+
+PRD Phase 1
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-08-campaign-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan for phase 1, store to prd.json 
+```
+
+%% implement it with ralph
+
+PRD Phase 2
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-08-campaign-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan for phase 2, store to prd.json 
+Keep in mind phase 1 is already implemented, you can see what's there if you need, @apps/crm/campaign/
+Progress is in @scripts/ralph/archive/2026-04-08-campaign-service-phase-1/progress.txt
+```
+
+%% implement it with ralph
+
+PRD Phase 3
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-08-campaign-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan for phase 3, store to prd.json 
+Keep in mind phase 1 and phase 2 are already implemented, you can see what's there if you need, @apps/crm/campaign/
+Progress is in files:
+- @scripts/ralph/archive/2026-04-08-campaign-service-phase-1/progress.txt
+- @scripts/ralph/archive/2026-04-08-campaign-service-phase-2/progress.txt
+```
+
+%% implement it with ralph
+
+Code-review
+```
+Load codereview skill. Please do review of implementation of apps/crm/campaign against spec in @docs/superpowers/specs/2026-04-08-campaign-service-updated-design.md
+```
+
+#### Referral Service
+
+check required libs
+```
+Load the prd-questions skill. Load superpowers:brainstorming skill. Read docs/NAVIGATOR.md & docs/superpowers/specs/2026-03-25-referral-service-design.md . Check which common packages can be used for the Referral Service
+```
+
+PRD questions
+```
+Load the prd-questions skill and generate questions for spec provided in @docs/superpowers/specs/2026-03-25-referral-service-design.md .
+Refer to essential packages implementation:
+- docs/arch/adr-logger.md 
+- docs/arch/adr-event-bus.md
+- docs/arch/adr-auth-middleware.md
+```
+
+```
+File @docs/00-prd-1.md contains overall product idea
+File @docs/01-platform-arch-design.md contains overview of entire system architecture
+File @tasks/prd-questions-referral-service.md contains questions clarifying how to implement Referral Service.
+In particular, it contains section 'Event Handler Correctness'. Referral Service assumes some events exchange between Pipeline Service and Lead Service. Please read documents with Lead Service design doc, Pipeline Service design doc, and help me provide answers to questions for Referral Service.
+Highlight any inconsistencies you find and suggest what should be fixed.
+```
+
+Update design doc
+```
+Load superpowers:brainstorming skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-03-25-referral-service-design.md
+- clarifying questions and answers @tasks/prd-questions-referral-service.md
+- Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest
+Update component architecture design @docs/superpowers/specs/2026-03-25-referral-service-design.md with clarifications you got from @tasks/prd-questions-referral-service.md
+Store updated component arch design at file @docs/superpowers/specs/2026-04-08-referral-service-updated-design.md
+```
+
+PRD
+```
+Load the ralph skill.
+Read docs:
+- overall platform & product architecture at @docs/01-platform-arch-design.md
+- component architecture design @docs/superpowers/specs/2026-04-09-referral-service-updated-design.md
+Tech Stack: Node.js 24, TypeScript 5 (ESM), Fastify 5, Knex 3 + pg, @sinclair/typebox 3, Vitest latest, BullMQ latest.
+Write implementation plan, store to prd.json 
+```
+
+%% implement it with ralph
+
+Code-review
+```
+Load codereview skill. Please do review of implementation of apps/crm/referral against spec in @docs/superpowers/specs/2026-04-08-referral-service-updated-design.md
+```
+
+#### Reporting Service
+
+
