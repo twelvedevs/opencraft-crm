@@ -1,3 +1,13 @@
+## 2026-04-09 - US-003
+- Created src/schemas/ with 5 TypeBox schema files: report-config.ts, schedule.ts, run.ts, revenue-config.ts, metrics.ts
+- Files created: src/schemas/report-config.ts, src/schemas/schedule.ts, src/schemas/run.ts, src/schemas/revenue-config.ts, src/schemas/metrics.ts
+- **Learnings for future iterations:**
+  - Schemas use `Type.Union([Type.String(), Type.Null()])` for nullable fields (TypeBox 0.34 pattern)
+  - `Type.Integer()` for integer fields, `Type.Number()` for decimals
+  - Shared internal schema objects (e.g., CoreKpis, LocationKpis) can be un-exported and reused within the same file
+  - PeriodParam regex: `^\d{4}-\d{2}$|^\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}$`
+---
+
 ## Codebase Patterns
 - ROLE_PERMISSIONS in packages/@ortho/auth-middleware/src/permissions.ts is the single source of truth for all service permissions; add new `<service>:read` and `<service>:write` entries there for every new service
 - Permission naming convention: `<service>:read` and `<service>:write` (e.g., reporting:read, reporting:write)
