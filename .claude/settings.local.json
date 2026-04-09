@@ -45,7 +45,11 @@
       "Bash(git:*)",
       "Bash(wc:*)",
       "Skill(review)",
-      "Skill(gstack-upgrade)"
+      "Skill(gstack-upgrade)",
+      "Bash(sed -n '148,170p' /Users/andrey/dev/pre-sale/ortho/packages/@ortho/types/src/events.ts)",
+      "Bash(sed -n '155,220p' /Users/andrey/dev/pre-sale/ortho/packages/@ortho/types/src/events.ts)",
+      "Bash(ls /Users/andrey/dev/pre-sale/ortho/apps/crm/lead/src/workers/ cat /Users/andrey/dev/pre-sale/ortho/apps/crm/lead/src/workers/*.ts)",
+      "Bash(ls /Users/andrey/dev/pre-sale/ortho/apps/crm/lead/src/events/ cat /Users/andrey/dev/pre-sale/ortho/apps/crm/lead/src/events/*.ts)"
     ]
   }
 }
