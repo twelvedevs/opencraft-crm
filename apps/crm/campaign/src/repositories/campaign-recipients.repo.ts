@@ -18,6 +18,13 @@ export async function bulkInsert(
   await db.batchInsert(TABLE, rows, 1000);
 }
 
+export async function bulkInsertFull(
+  db: Knex,
+  rows: CampaignRecipient[],
+): Promise<void> {
+  await db.batchInsert(TABLE, rows, 1000);
+}
+
 export async function findByCampaignAndVariant(
   db: Knex,
   campaignId: string,
