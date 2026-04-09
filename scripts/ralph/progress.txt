@@ -11,6 +11,7 @@ Started: Thu Apr  9 06:21:42 UTC 2026
 - `bulkInsert` omits sent_at (defaults to NULL); use `bulkInsertFull` when rows need explicit sent_at values (e.g., A/B recipient inserts)
 - A/B split helper: `sendVariant()` private function in send-orchestrator.ts handles Email Service POST for any variant
 - Export `processJob` from worker files to enable direct invocation in integration tests without BullMQ
+- BullMQ v5 forbids colons in queue names (`Queue name cannot contain :`); importing worker files that create `new Worker(...)` at module level will throw at import time — for integration tests, replicate processJob logic in a test helper instead of importing the worker module
 - When a worker needs to enqueue jobs on another queue, import `Queue` from bullmq and instantiate with the target queue constant
 - For unit-testing handlers that query Knex directly (not via repo), mock db as a thenable chain: `chain.then = vi.fn((resolve) => resolve(rows))` so `await db('table').select().where()` resolves correctly
 
@@ -93,4 +94,21 @@ Started: Thu Apr  9 06:21:42 UTC 2026
   - Terminal status guard uses `['completed', 'completed_with_errors', 'failed', 'cancelled']` — same set used in campaign-service.ts state machine
   - External service calls (Template + Email) use native `fetch` with `Content-Type: application/json` — no shared HTTP client wrapper
   - For proxy-style endpoints (test-send, spam-check), return 502 on upstream failures to distinguish from local 4xx errors
+---
+
+## 2026-04-09 - US-025
+- Created `test/integration/ab-orchestration.test.ts` with `describe.skipIf(!HAS_DB || !HAS_REDIS)` guard
+- 4 integration test cases:
+  1. A/B holdout happy path: 200 leads (100/location), 10% split → orchestrateAB → winner select → holdout dispatch → all completions → terminal status
+  2. A/B full_split happy path: 200 leads, 50/50 split → all sent immediately → retrospective winner computed on final completion
+  3. Cancel in sending state (A/B in progress) → 409 (state machine blocks cancel from sending)
+  4. ab-winner-select for cancelled campaign → ACK clean, no DB mutations
+- Used `fireABWorkerLogic` helper (mirrors real worker: status transition → audience resolution → orchestrateAB → ab_phase update)
+- Used `fireABWinnerSelect` helper (replicates processJob logic from ab-winner-select.worker.ts using test's Knex instance)
+- Files changed: `test/integration/ab-orchestration.test.ts` (new)
+- **Learnings for future iterations:**
+  - BullMQ v5.73.1 forbids colons in queue names — importing worker modules that create `new Worker(...)` at module level throws `Queue name cannot contain :`. Replicate processJob logic in test helpers instead of importing worker files directly.
+  - The `createServiceFetchMock` pattern from orchestration.test.ts works well for A/B tests — the auto-incrementing `email-job-${counter}` covers multiple variants per location without needing an explicit map.
+  - For A/B holdout tests, the `fireABWinnerSelect` helper must replicate the full holdout dispatch logic (fetch recipients, group by location, POST Email Service, insert sends, update sent_at) to test the complete flow.
+  - The state machine explicitly blocks cancel from sending state — `sending` only allows `complete`, `complete-with-errors`, and `fail` transitions.
 ---
