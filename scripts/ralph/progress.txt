@@ -124,3 +124,17 @@ Started: Thu Apr  9 06:21:42 UTC 2026
   - `toBeCloseTo(value, -3)` works well for comparing timestamps with millisecond tolerance (precision=-3 means tolerance of 500ms)
   - The `insertRecipient` helper directly inserts into `campaign_recipients` table — simpler than going through the repo for test setup
 ---
+
+## 2026-04-09 - US-027
+- Created `test/unit/contracts.test.ts` with 9 contract tests using `@sinclair/typebox` `Type` + `Value.Check()`
+- Covers all 9 payload contracts:
+  - Outbound: POST /audiences/segments/:id/evaluate, POST /audiences/evaluate (inline), GET /leads, GET /leads?ids=..., POST /emails/campaigns/send, campaign.sent EventBridge payload
+  - Inbound: email.campaign_completed, email.opened, lead.stage_changed
+- Each test defines a TypeBox schema, creates a fixture object matching actual codebase usage, and asserts `Value.Check(schema, fixture) === true`
+- Files changed: `apps/crm/campaign/test/unit/contracts.test.ts` (new)
+- **Learnings for future iterations:**
+  - `@sinclair/typebox` is already a dependency — use `Type` from `@sinclair/typebox` and `Value` from `@sinclair/typebox/value` (separate import path)
+  - Use `Type.Object({}, { additionalProperties: true })` for open-ended objects like filter payloads
+  - Use `Type.Object({ ... }, { additionalProperties: true })` on response items when only certain fields are required but extras may exist
+  - Contract test fixtures should mirror actual values produced/consumed by the codebase (e.g., `entity_type: 'campaign'` not just any string)
+---
