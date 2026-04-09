@@ -78,3 +78,19 @@ Started: Thu Apr  9 06:21:42 UTC 2026
   - For mocking Knex query builders in unit tests, use a thenable chain pattern: mock object with `.then()` that resolves to rows, so `await db('table').select().where()...` works without counting method calls
   - The sqs-consumer follows a simple pattern: `bus.subscribe(eventName, async (event) => { cast payload; call handler })` — no routing logic needed
 ---
+
+## 2026-04-09 - US-024
+- Created `src/routes/diagnostics.ts` as a Fastify plugin with 5 endpoints:
+  - `GET /:id/sends` — returns campaign send details via `sendsRepo.findAllByCampaignId`
+  - `GET /:id/conversions` — paginated conversions via `conversionsRepo.listByCampaignId`
+  - `GET /:id/events` — campaign event history via `eventsRepo.listByCampaignId`
+  - `POST /:id/test-send` — renders template + sends single email; 409 for terminal statuses
+  - `POST /:id/spam-check` — renders template + calls Email Service spam-check endpoint
+- Registered `diagnosticsRoutes` in `src/api.ts` with prefix `/campaigns`
+- Files changed: `src/routes/diagnostics.ts` (new), `src/api.ts`
+- **Learnings for future iterations:**
+  - Route plugins all follow the same `(app, opts: { db: Knex })` signature and are registered with `prefix: '/campaigns'` in api.ts
+  - Terminal status guard uses `['completed', 'completed_with_errors', 'failed', 'cancelled']` — same set used in campaign-service.ts state machine
+  - External service calls (Template + Email) use native `fetch` with `Content-Type: application/json` — no shared HTTP client wrapper
+  - For proxy-style endpoints (test-send, spam-check), return 502 on upstream failures to distinguish from local 4xx errors
+---
