@@ -1,9 +1,28 @@
 ## Codebase Patterns
 - ROLE_PERMISSIONS in packages/@ortho/auth-middleware/src/permissions.ts is the single source of truth for all service permissions; add new `<service>:read` and `<service>:write` entries there for every new service
 - Permission naming convention: `<service>:read` and `<service>:write` (e.g., reporting:read, reporting:write)
+- `@ortho/db` does not exist as a package — use direct knex + pg pattern (same as referral/campaign services)
+- vitest.config.ts: omit `setupFiles` if no integration setup file exists yet; add it later in the integration test story
+- Migrations use `knex.schema.withSchema('crm_<service>').createTable(...)` for tables; use `knex.raw(...)` for CHECK constraints, custom indexes, and schema creation/drop
+- Foreign keys referencing across schemas use full `'crm_reporting.table_name'` string in `.inTable()`
+- `text[]` PostgreSQL arrays require `table.specificType('col', 'text[]')` in Knex — no native array method
 
 # Ralph Progress Log
 Started: Thu Apr  9 23:00:58 +03 2026
+---
+
+## 2026-04-09 - US-002
+- Created full scaffold for apps/crm/reporting service
+- Files created: package.json, tsconfig.json, Dockerfile, knexfile.ts, vitest.config.ts, src/env.ts, src/index.ts (stub), migrations/001-004 (schema + 4 tables)
+- Directory structure: src/{routes/metrics,services,repositories,jobs,schemas}/, migrations/, test/{unit,integration}/, templates/
+- **Learnings for future iterations:**
+  - `@ortho/db` package does not exist; use direct knex + pg (don't include it in package.json)
+  - `@fastify/cors` is a real dep to include; `ioredis` needed alongside bullmq
+  - Default port for reporting service is 3009 (per env.ts spec)
+  - `text[]` Postgres columns need `table.specificType('col', 'text[]')` in Knex migrations
+  - FK `.inTable()` for cross-schema refs requires full qualified name: `'crm_reporting.report_configs'`
+  - vitest.config.ts omits setupFiles until integration tests added in US-016
+  - src/index.ts stub needed so tsconfig include compiles something; replace fully in US-011
 ---
 
 ## 2026-04-09 - US-001
