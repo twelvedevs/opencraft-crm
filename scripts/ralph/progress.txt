@@ -1,0 +1,66 @@
+# Ralph Progress Log
+Started: Thu Apr  9 06:21:42 UTC 2026
+---
+
+## Codebase Patterns
+- Repository files follow `{table-name}.repo.ts` naming, export a `TABLE` constant, use `Knex` param, and cast rows with `as Interface`
+- Use `onConflict(['col1', 'col2']).ignore()` for upsert-with-ignore pattern in Knex
+- No `withSchema()` in repo queries — the search_path handles schema resolution at connection level
+- Integration tests use `describe.skipIf(!HAS_DB)` guard pattern
+- Migrations use `withSchema('crm_campaigns')` but repos do not
+- `bulkInsert` omits sent_at (defaults to NULL); use `bulkInsertFull` when rows need explicit sent_at values (e.g., A/B recipient inserts)
+- A/B split helper: `sendVariant()` private function in send-orchestrator.ts handles Email Service POST for any variant
+- Export `processJob` from worker files to enable direct invocation in integration tests without BullMQ
+- When a worker needs to enqueue jobs on another queue, import `Queue` from bullmq and instantiate with the target queue constant
+
+---
+
+## 2026-04-09 - US-019
+- Implemented `campaign-conversions.repo.ts` with `CampaignConversion` interface, `insertConversion` (ON CONFLICT DO NOTHING), and `listByCampaignId` (paginated with total count)
+- Files changed: `apps/crm/campaign/src/repositories/campaign-conversions.repo.ts` (new)
+- **Learnings for future iterations:**
+  - Existing repos use a simple pattern: interface + TABLE constant + exported async functions taking `db: Knex` as first param
+  - `listByCampaignId` uses `Promise.all` for parallel count + rows query — this pattern can be reused for paginated list endpoints
+  - The `campaign_conversions` table has a unique constraint on `(campaign_id, lead_id)` — use `.onConflict().ignore()` for idempotent inserts
+---
+
+## 2026-04-09 - US-020
+- Implemented `ab-winner.ts` pure function service with `selectWinner(opensA, countA, opensB, countB)` returning 'A' or 'B'
+- Created unit tests with 6 cases: A wins, B wins, tie→A, both zero→A, countA=0 with B opens→B, countB=0 with A opens→A
+- Files changed: `apps/crm/campaign/src/services/ab-winner.ts` (new), `apps/crm/campaign/test/unit/ab-winner.test.ts` (new)
+- **Learnings for future iterations:**
+  - Pure function services with no dependencies are the simplest pattern — no Knex, no env, just inputs→output
+  - The `selectWinner` function handles division-by-zero by treating 0-count sides as rate=0, ties go to A
+  - This function will be consumed by both `ab-winner-select.worker.ts` and `email-campaign-completed.handler.ts` in future stories
+---
+
+## 2026-04-09 - US-021
+- Implemented `orchestrateAB` in `send-orchestrator.ts` handling both holdout and full_split modes
+- Added `bulkInsertFull` to `campaign-recipients.repo.ts` for inserting rows with explicit `sent_at` values
+- Added `sendVariant` private helper function to DRY up Email Service POST calls
+- Created unit tests: holdout floor rounding (101 leads → A=10, B=10, holdout=81), full_split 50/50 (101 → A=50, B=51), holdout sent_at=NULL assertion, crash recovery guard
+- Files changed: `apps/crm/campaign/src/services/send-orchestrator.ts`, `apps/crm/campaign/src/repositories/campaign-recipients.repo.ts`, `apps/crm/campaign/test/unit/send-orchestrator-ab.test.ts` (new)
+- **Learnings for future iterations:**
+  - The `orchestrateAB` function follows same pattern as `orchestrateNonAB`: fetch→422 check→transaction(sends+recipients)
+  - Crash recovery uses per-variant `findByEmailJobRef` checks with job_ref format `{campaign_id}:{location_id}:{variant}`
+  - Holdout recipients get `variant='holdout'` and `sent_at=NULL`; A/B recipients get `sent_at=now()`
+  - On 422 from Email Service for any variant, the entire location is skipped (continue to next)
+  - Future US-022 will consume `orchestrateAB` from the campaign-orchestrate worker and route based on `campaign.ab_enabled`
+---
+
+## 2026-04-09 - US-022
+- Updated `campaign-orchestrate.worker.ts` to route A/B campaigns (`ab_enabled=true`) to `orchestrateAB`, non-A/B to `orchestrateNonAB`
+- After holdout orchestration: enqueues delayed BullMQ job on `AB_WINNER_QUEUE`, sets `ab_phase='testing'`, stores `ab_winner_job_id`
+- After full_split orchestration: sets `ab_phase='complete'` immediately (no delayed winner selection)
+- Created `ab-winner-select.worker.ts`: loads campaign, guards on `status='sending' AND ab_phase='testing'`, computes winner via `selectWinner`, updates campaign, dispatches holdout sends grouped by location with crash recovery
+- Updated `email-campaign-completed.handler.ts`: after determining terminal status, computes retrospective `ab_winner` for `full_split` campaigns where `ab_winner` is null
+- Imported `ab-winner-select.worker.ts` as side-effect import in `worker.ts`
+- `AB_WINNER_QUEUE` constant was already defined in `connection.ts` from a prior phase
+- Files changed: `src/workers/campaign-orchestrate.worker.ts`, `src/workers/ab-winner-select.worker.ts` (new), `src/handlers/email-campaign-completed.handler.ts`, `src/worker.ts`
+- **Learnings for future iterations:**
+  - The `ab-winner-select` worker queries `campaign_recipients` directly (not via repo) to get all holdout recipients, then groups by `location_id` in JS — the existing `findByCampaignAndVariant` is paginated and not suitable for bulk location grouping
+  - The `processJob` function is exported from `ab-winner-select.worker.ts` to enable direct invocation in integration tests without going through BullMQ
+  - `Queue` must be imported alongside `Worker` from bullmq when a worker needs to enqueue jobs on a different queue (e.g., orchestrate worker enqueuing ab-winner-select jobs)
+  - The holdout send uses `recipientsRepo.updateSentAt` to mark holdout recipients as sent per location, matching the existing pattern
+  - Full_split retrospective winner uses the same `selectWinner` pure function as the holdout path, with `total_recipients` summed from `allSends` grouped by variant
+---
