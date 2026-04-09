@@ -112,3 +112,15 @@ Started: Thu Apr  9 06:21:42 UTC 2026
   - For A/B holdout tests, the `fireABWinnerSelect` helper must replicate the full holdout dispatch logic (fetch recipients, group by location, POST Email Service, insert sends, update sent_at) to test the complete flow.
   - The state machine explicitly blocks cancel from sending state — `sending` only allows `complete`, `complete-with-errors`, and `fail` transitions.
 ---
+
+## 2026-04-09 - US-026
+- Created `test/integration/attribution.test.ts` with 7 integration test cases across 2 describe blocks:
+  - Conversion attribution (5 tests): within 7-day window, outside 7-day window, holdout lead (sent_at=NULL), duplicate stage change (ON CONFLICT DO NOTHING), late SQS processing (occurred_at anchor)
+  - A/B open tracking (2 tests): increment ab_opens_a/ab_opens_b on email.opened events, no-op after ab_phase='complete'
+- Files changed: `test/integration/attribution.test.ts` (new)
+- **Learnings for future iterations:**
+  - Integration tests for handlers that don't need Fastify (no HTTP endpoints) can skip `buildTestApp()` — just use `getDb()` directly with `runMigrations()` and `truncateTables()`
+  - The `daysAgo(n)` / `daysAfter(base, n)` helper pattern is useful for date arithmetic in attribution window tests
+  - `toBeCloseTo(value, -3)` works well for comparing timestamps with millisecond tolerance (precision=-3 means tolerance of 500ms)
+  - The `insertRecipient` helper directly inserts into `campaign_recipients` table — simpler than going through the repo for test setup
+---
