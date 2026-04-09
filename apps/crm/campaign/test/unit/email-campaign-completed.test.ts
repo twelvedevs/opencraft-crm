@@ -206,6 +206,22 @@ describe('handleEmailCampaignCompleted', () => {
     }));
   });
 
+  it('terminal status = failed when all sends are cancelled (no completions)', async () => {
+    vi.mocked(sendsRepo.findAllByCampaignId).mockResolvedValue([
+      makeSend({ id: 'send-1', location_id: 'loc-1', status: 'cancelled', sent_count: 0, failed_count: 0 }),
+      makeSend({ id: 'send-2', location_id: 'loc-2', status: 'cancelled', sent_count: 0, failed_count: 0 }),
+    ]);
+
+    await handleEmailCampaignCompleted(makePayload({ status: 'cancelled' }), db, bus);
+
+    expect(campaignsRepo.update).toHaveBeenCalledWith(db, 'camp-1', expect.objectContaining({
+      status: 'failed',
+    }));
+    expect(eventsRepo.insertEvent).toHaveBeenCalledWith(db, expect.objectContaining({
+      to_status: 'failed',
+    }));
+  });
+
   it('returns early without status change when sends still in flight', async () => {
     vi.mocked(sendsRepo.countNonTerminalSends).mockResolvedValue(2);
 

@@ -81,12 +81,12 @@ export async function handleEmailCampaignCompleted(
       s.status === 'completed_with_errors' ||
       s.failed_count > 0,
   );
-  const allFailed = allSends.every((s) => s.status === 'failed');
 
   let terminal: string;
-  if (allFailed) {
+  if (!hasAnyCompletion) {
+    // All sends failed, cancelled, or otherwise never completed — treat as failed
     terminal = 'failed';
-  } else if (hasAnyCompletion && hasAnyErrors) {
+  } else if (hasAnyErrors) {
     terminal = 'completed_with_errors';
   } else {
     terminal = 'completed';

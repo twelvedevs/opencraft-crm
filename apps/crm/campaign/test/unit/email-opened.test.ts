@@ -9,6 +9,7 @@ vi.mock('../../src/repositories/campaign-sends.repo.js', () => ({
 vi.mock('../../src/repositories/campaigns.repo.js', () => ({
   findById: vi.fn(),
   update: vi.fn(),
+  incrementAbOpens: vi.fn(),
 }));
 
 import { handleEmailOpened } from '../../src/handlers/email-opened.handler.js';
@@ -86,27 +87,26 @@ beforeEach(() => {
   vi.mocked(sendsRepo.findByEmailJobId).mockResolvedValue(makeSend());
   vi.mocked(campaignsRepo.findById).mockResolvedValue(makeCampaign());
   vi.mocked(campaignsRepo.update).mockResolvedValue(makeCampaign());
+  vi.mocked(campaignsRepo.incrementAbOpens).mockResolvedValue(undefined);
 });
 
 describe('handleEmailOpened', () => {
-  it('increments ab_opens_a when variant = A', async () => {
+  it('atomically increments ab_opens_a when variant = A', async () => {
     vi.mocked(sendsRepo.findByEmailJobId).mockResolvedValue(makeSend({ variant: 'A' }));
 
     await handleEmailOpened(makePayload(), db);
 
-    expect(campaignsRepo.update).toHaveBeenCalledWith(db, 'camp-1', {
-      ab_opens_a: 1,
-    });
+    expect(campaignsRepo.incrementAbOpens).toHaveBeenCalledWith(db, 'camp-1', 'A');
+    expect(campaignsRepo.update).not.toHaveBeenCalled();
   });
 
-  it('increments ab_opens_b when variant = B', async () => {
+  it('atomically increments ab_opens_b when variant = B', async () => {
     vi.mocked(sendsRepo.findByEmailJobId).mockResolvedValue(makeSend({ variant: 'B' }));
 
     await handleEmailOpened(makePayload(), db);
 
-    expect(campaignsRepo.update).toHaveBeenCalledWith(db, 'camp-1', {
-      ab_opens_b: 1,
-    });
+    expect(campaignsRepo.incrementAbOpens).toHaveBeenCalledWith(db, 'camp-1', 'B');
+    expect(campaignsRepo.update).not.toHaveBeenCalled();
   });
 
   it('no-ops when variant = holdout', async () => {

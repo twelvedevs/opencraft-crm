@@ -30,17 +30,10 @@ export async function handleEmailOpened(
     return; // Late opens or non-A/B — no-op
   }
 
-  // Step 3: increment ab_opens for the matching variant
-  if (send.variant === 'A') {
-    await campaignsRepo.update(db, campaign.id, {
-      ab_opens_a: campaign.ab_opens_a + 1,
-    });
-    log.info({ campaign_id: campaign.id, variant: 'A' }, 'Incremented ab_opens_a');
-  } else if (send.variant === 'B') {
-    await campaignsRepo.update(db, campaign.id, {
-      ab_opens_b: campaign.ab_opens_b + 1,
-    });
-    log.info({ campaign_id: campaign.id, variant: 'B' }, 'Incremented ab_opens_b');
+  // Step 3: atomically increment ab_opens for the matching variant
+  if (send.variant === 'A' || send.variant === 'B') {
+    await campaignsRepo.incrementAbOpens(db, campaign.id, send.variant);
+    log.info({ campaign_id: campaign.id, variant: send.variant }, `Incremented ab_opens_${send.variant.toLowerCase()}`);
   }
   // variant='holdout' or null → no-op
 }

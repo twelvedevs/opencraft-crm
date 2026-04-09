@@ -160,8 +160,11 @@ export async function orchestrateAB(
     const now = new Date();
     let jobIdA: string | null = null;
     let jobIdB: string | null = null;
+    // Track whether the 422 path already recorded a send row outside the transaction
+    let variantARecorded = !!existingA;
+    let variantBRecorded = !!existingB;
 
-    // Send variant A
+    // Send variant A (record failure and continue to variant B on 422)
     if (!existingA && groupA.length > 0) {
       const res = await sendVariant(
         env, campaign, locationId, jobRefA, groupA,
@@ -183,18 +186,17 @@ export async function orchestrateAB(
           started_at: null,
           completed_at: now,
         });
-        continue;
-      }
-
-      if (!res.ok) {
+        variantARecorded = true;
+        // Do NOT continue — fall through to send variant B
+      } else if (!res.ok) {
         throw new Error(`Email Service returned ${res.status}: ${await res.text()}`);
+      } else {
+        const body = (await res.json()) as { job_id: string };
+        jobIdA = body.job_id;
       }
-
-      const body = (await res.json()) as { job_id: string };
-      jobIdA = body.job_id;
     }
 
-    // Send variant B
+    // Send variant B (record failure and continue on 422)
     if (!existingB && groupB.length > 0) {
       const res = await sendVariant(
         env, campaign, locationId, jobRefB, groupB,
@@ -216,20 +218,19 @@ export async function orchestrateAB(
           started_at: null,
           completed_at: now,
         });
-        continue;
-      }
-
-      if (!res.ok) {
+        variantBRecorded = true;
+        // Do NOT continue — fall through to insert recipients
+      } else if (!res.ok) {
         throw new Error(`Email Service returned ${res.status}: ${await res.text()}`);
+      } else {
+        const body = (await res.json()) as { job_id: string };
+        jobIdB = body.job_id;
       }
-
-      const body = (await res.json()) as { job_id: string };
-      jobIdB = body.job_id;
     }
 
     // Insert sends and recipients in a single transaction per location
     await db.transaction(async (trx) => {
-      if (!existingA) {
+      if (!variantARecorded) {
         await sendsRepo.insert(trx, {
           campaign_id: campaign.id,
           location_id: locationId,
@@ -246,7 +247,7 @@ export async function orchestrateAB(
         });
       }
 
-      if (!existingB) {
+      if (!variantBRecorded) {
         await sendsRepo.insert(trx, {
           campaign_id: campaign.id,
           location_id: locationId,

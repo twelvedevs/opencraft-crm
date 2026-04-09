@@ -108,6 +108,17 @@ export async function list(
   return { items: rows as Campaign[], total };
 }
 
+export async function incrementAbOpens(
+  db: Knex,
+  id: string,
+  variant: 'A' | 'B',
+): Promise<void> {
+  const col = variant === 'A' ? 'ab_opens_a' : 'ab_opens_b';
+  await db(TABLE)
+    .where({ id })
+    .update({ [col]: db.raw(`${col} + 1`) });
+}
+
 export async function remove(db: Knex, id: string): Promise<void> {
   await db(TABLE).where({ id }).delete();
 }

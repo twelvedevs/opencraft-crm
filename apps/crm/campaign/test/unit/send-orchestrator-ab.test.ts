@@ -211,6 +211,45 @@ describe('orchestrateAB', () => {
     }
   });
 
+  it('when variant A gets 422, variant B is still sent and holdout recipients are inserted', async () => {
+    globalThis.fetch = vi.fn(async (_url: string, opts: RequestInit) => {
+      const body = JSON.parse(opts.body as string) as { job_ref: string };
+      if (body.job_ref.endsWith(':A')) {
+        return new Response('spam check failed', { status: 422 });
+      }
+      return jsonResponse({ job_id: 'ej-b' });
+    }) as unknown as typeof fetch;
+
+    const db = fakeDb();
+    // 100 leads, 10% split → A=10, B=10, holdout=80
+    const leads = makeLeads(100, 'loc-1');
+    const grouped = new Map([['loc-1', leads]]);
+    const campaign = makeCampaign({ ab_test_split_pct: 10 });
+
+    await orchestrateAB(db as never, campaign, grouped, ENV);
+
+    // Variant A recorded as failed (inserted outside transaction)
+    const insertCalls = vi.mocked(sendsRepo.insert).mock.calls;
+    const aFailed = insertCalls.find((c) => c[1].variant === 'A' && c[1].status === 'failed');
+    expect(aFailed).toBeDefined();
+
+    // Variant B was submitted to Email Service
+    const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const bFetches = fetchCalls.filter(([, opts]) => {
+      const body = JSON.parse((opts as RequestInit).body as string) as { job_ref: string };
+      return body.job_ref.endsWith(':B');
+    });
+    expect(bFetches).toHaveLength(1);
+
+    // Holdout recipients inserted (80 recipients with variant='holdout')
+    expect(recipientsRepo.bulkInsertFull).toHaveBeenCalled();
+    const allRecipients = vi.mocked(recipientsRepo.bulkInsertFull).mock.calls[0]![1];
+    const holdout = allRecipients.filter(
+      (r: { variant: string | null }) => r.variant === 'holdout',
+    );
+    expect(holdout).toHaveLength(80);
+  });
+
   it('crash recovery guard skips existing email_job_ref', async () => {
     // Both variants already exist
     vi.mocked(sendsRepo.findByEmailJobRef).mockResolvedValue({

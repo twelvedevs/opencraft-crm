@@ -65,10 +65,8 @@ export async function processJob(job: Job<ABWinnerJobData>): Promise<void> {
     ? (campaign.ab_variant_a_subject ?? campaign.subject ?? '')
     : (campaign.ab_variant_b_subject ?? campaign.subject ?? '');
 
-  // Fetch all holdout recipients and group by location
-  const holdoutRecipients = await db('campaign_recipients')
-    .where({ campaign_id, variant: 'holdout' })
-    .select('*') as recipientsRepo.CampaignRecipient[];
+  // Fetch all holdout recipients in pages of 1,000 to avoid unbounded memory use
+  const holdoutRecipients = await recipientsRepo.findAllHoldoutByCampaign(db, campaign_id);
 
   const byLocation = new Map<string, recipientsRepo.CampaignRecipient[]>();
   for (const r of holdoutRecipients) {

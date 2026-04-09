@@ -39,6 +39,22 @@ export async function findByCampaignAndVariant(
   return rows as CampaignRecipient[];
 }
 
+export async function findAllHoldoutByCampaign(
+  db: Knex,
+  campaignId: string,
+): Promise<CampaignRecipient[]> {
+  const PAGE = 1000;
+  const all: CampaignRecipient[] = [];
+  let offset = 0;
+  while (true) {
+    const page = await findByCampaignAndVariant(db, campaignId, 'holdout', PAGE, offset);
+    all.push(...page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
+  }
+  return all;
+}
+
 export async function updateSentAt(
   db: Knex,
   campaignId: string,
