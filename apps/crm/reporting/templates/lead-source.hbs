@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lead Source Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+    h1 { color: #1a3c5e; border-bottom: 2px solid #1a3c5e; padding-bottom: 8px; }
+    h2 { color: #2c6e9e; margin-top: 24px; }
+    .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { background: #1a3c5e; color: #fff; padding: 10px 12px; text-align: left; font-size: 13px; }
+    td { padding: 9px 12px; border-bottom: 1px solid #e0e0e0; font-size: 13px; }
+    tr:nth-child(even) td { background: #f7f9fb; }
+    .total-row td { font-weight: bold; background: #e8f4e8; }
+    .summary-bar { display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap; }
+    .summary-item { background: #f0f4f8; border-radius: 6px; padding: 12px 20px; }
+    .summary-label { font-size: 12px; color: #666; }
+    .summary-value { font-size: 22px; font-weight: bold; color: #1a3c5e; }
+    .null-value { color: #aaa; font-style: italic; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Lead Source Report</h1>
+  <div class="meta">
+    <strong>Period:</strong> {{period}}&nbsp;&nbsp;
+    {{#if location_ids}}<strong>Locations:</strong> {{location_ids}}&nbsp;&nbsp;{{/if}}
+    <strong>Generated:</strong> {{generated_at}}
+  </div>
+
+  <div class="summary-bar">
+    <div class="summary-item">
+      <div class="summary-label">Total Leads</div>
+      <div class="summary-value">{{raw.leads.total}}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Cost per Lead</div>
+      <div class="summary-value">{{#if cost_per_lead}}${{formatNumber cost_per_lead}}{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Total Conversions</div>
+      <div class="summary-value">{{raw.conversions.total}}</div>
+    </div>
+  </div>
+
+  <h2>Leads by Source Channel</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Channel</th>
+        <th>Leads</th>
+        <th>% of Total</th>
+        <th>Conversions</th>
+        <th>Conversion Rate</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each raw.leads.by_channel}}
+      <tr>
+        <td>{{channel}}</td>
+        <td>{{count}}</td>
+        <td>{{#if ../raw.leads.total}}{{formatPct (divOrNull count ../raw.leads.total)}}%{{else}}—{{/if}}</td>
+        <td>—</td>
+        <td>—</td>
+      </tr>
+      {{/each}}
+      <tr class="total-row">
+        <td>Total</td>
+        <td>{{raw.leads.total}}</td>
+        <td>100%</td>
+        <td>{{raw.conversions.total}}</td>
+        <td>{{#if case_conversion_rate}}{{formatPct case_conversion_rate}}%{{else}}—{{/if}}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Pipeline Stage Breakdown</h2>
+  <table>
+    <thead>
+      <tr><th>Stage</th><th>Entries</th></tr>
+    </thead>
+    <tbody>
+      {{#each raw.pipeline.by_stage}}
+      <tr><td>{{stage}}</td><td>{{entries}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+</body>
+</html>

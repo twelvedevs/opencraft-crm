@@ -1,3 +1,20 @@
+## 2026-04-09 - US-009
+- Implemented Handlebars templates, PDF generator, and CSV generator
+- Files created: templates/weekly-summary.hbs, templates/monthly-executive.hbs, templates/channel-deep-dive.hbs, templates/coordinator-productivity.hbs, templates/lead-source.hbs
+- Files created: apps/crm/reporting/src/services/pdf-generator.ts, apps/crm/reporting/src/services/csv-generator.ts
+- Updated: apps/crm/reporting/Dockerfile (added `COPY templates/ ./templates/`)
+- **Learnings for future iterations:**
+  - Templates live in `templates/` at the project root (not under `src/`); Dockerfile must explicitly `COPY templates/ ./templates/` after `COPY dist/`
+  - Path resolution uses `path.join(fileURLToPath(new URL('../..', import.meta.url)), 'templates')` — works for both `dist/services/` (compiled) and `src/services/` (tsx dev) because both are two levels deep from the project root
+  - All five templates compiled at module init with `readFileSync` — fails fast at startup if any template is missing (no lazy loading)
+  - Handlebars helpers (formatNumber, formatPct, formatSeconds, join, divOrNull) registered globally at module init in pdf-generator.ts
+  - pdf-generator exports `ReportType` union; csv-generator re-exports it so callers need only one import
+  - fast-csv v5: use `format({ headers: true, writeBOM: true })` to get a Transform stream; write rows with `.write()`, call `.end()`, collect with stream events
+  - `streamToBuffer` helper collects chunks; start collecting BEFORE writing rows (avoid missing early data events)
+  - CSV rows are `Record<string, unknown>` — fast-csv infers column names from the first row's keys
+  - channel_deep_dive CSV computes per-channel spend/cost inline using the same CHANNEL_TO_PLATFORM map as metrics-calculator
+---
+
 ## 2026-04-09 - US-008
 - Implemented src/services/schedule-manager.ts: BullMQ schedule manager with cron derivation, register/remove/replace/reconcile
 - Files created: apps/crm/reporting/src/services/schedule-manager.ts
