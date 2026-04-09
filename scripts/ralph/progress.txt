@@ -19,6 +19,17 @@
   - `updateStatus` in runs.ts uses spread of conditional keys to avoid overwriting unrelated fields
 ---
 
+## 2026-04-09 - US-005
+- Implemented src/services/analytics-client.ts with six endpoint methods
+- Files created: apps/crm/reporting/src/services/analytics-client.ts
+- **Learnings for future iterations:**
+  - Analytics client uses plain Node 24 `fetch` (no node-fetch) with `AbortController` for 10s timeout — new controller per attempt
+  - Retry logic: 1 retry (2 total attempts) with 500ms sleep before retry; only retries on `status >= 500` or network/timeout errors; 4xx passes through and throws from `getMetrics`
+  - `location_ids`: omit `location_id` param entirely when array is empty or undefined — use `params.location_ids && params.location_ids.length > 0` check
+  - Extra params forwarded generically via `Object.entries()` loop — handles future coordinator_id, campaign filters, etc.
+  - Auth header: `Authorization: Bearer ${env.ANALYTICS_API_KEY}` (not X-Internal-Api-Key — Analytics uses `ak_`-prefixed token)
+---
+
 ## Codebase Patterns
 - ROLE_PERMISSIONS in packages/@ortho/auth-middleware/src/permissions.ts is the single source of truth for all service permissions; add new `<service>:read` and `<service>:write` entries there for every new service
 - Permission naming convention: `<service>:read` and `<service>:write` (e.g., reporting:read, reporting:write)
