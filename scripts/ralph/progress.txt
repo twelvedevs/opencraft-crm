@@ -8,6 +8,17 @@
   - PeriodParam regex: `^\d{4}-\d{2}$|^\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}$`
 ---
 
+## 2026-04-09 - US-004
+- Implemented all four repository files in apps/crm/reporting/src/repositories/
+- Files created: report-configs.ts, schedules.ts, runs.ts, revenue-config.ts
+- **Learnings for future iterations:**
+  - Repositories use `const TABLE = 'crm_reporting.<table_name>'` (full schema-qualified name) for all Knex queries
+  - Returned row types are internal interfaces (e.g. `ReportConfig`) with `Date` for timestamps; JSON serialization handles conversion
+  - `parameters` JSONB column: insert with `JSON.stringify(body.parameters ?? {})`, Knex/pg deserializes to object on read
+  - `upsert` in revenue-config uses `.onConflict('location_id').merge(...)` Knex pattern
+  - `updateStatus` in runs.ts uses spread of conditional keys to avoid overwriting unrelated fields
+---
+
 ## Codebase Patterns
 - ROLE_PERMISSIONS in packages/@ortho/auth-middleware/src/permissions.ts is the single source of truth for all service permissions; add new `<service>:read` and `<service>:write` entries there for every new service
 - Permission naming convention: `<service>:read` and `<service>:write` (e.g., reporting:read, reporting:write)
