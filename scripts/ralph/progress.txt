@@ -1,0 +1,17 @@
+## Codebase Patterns
+- ROLE_PERMISSIONS in packages/@ortho/auth-middleware/src/permissions.ts is the single source of truth for all service permissions; add new `<service>:read` and `<service>:write` entries there for every new service
+- Permission naming convention: `<service>:read` and `<service>:write` (e.g., reporting:read, reporting:write)
+
+# Ralph Progress Log
+Started: Thu Apr  9 23:00:58 +03 2026
+---
+
+## 2026-04-09 - US-001
+- Added `reporting:read` to call_center_agent, call_center_manager, marketing_staff, marketing_manager, super_admin
+- Added `reporting:write` to marketing_manager, super_admin
+- Files changed: packages/@ortho/auth-middleware/src/permissions.ts
+- **Learnings for future iterations:**
+  - Permissions file is flat array per role — just append new permission strings
+  - Typecheck in auth-middleware runs `tsc --noEmit` and passes cleanly with just the permissions change
+  - Branch: ralph/reporting-service (created from feature/reporting)
+---
