@@ -7,6 +7,7 @@ import { env } from './env.js';
 import { campaignsRoutes } from './routes/campaigns.js';
 import { workflowRoutes } from './routes/workflow.js';
 import { commentsRoutes } from './routes/comments.js';
+import { diagnosticsRoutes } from './routes/diagnostics.js';
 
 export async function buildApp(db: Knex): Promise<FastifyInstance> {
   const log = createLogger('crm-campaign');
@@ -24,6 +25,7 @@ export async function buildApp(db: Knex): Promise<FastifyInstance> {
   await app.register(campaignsRoutes, { prefix: '/campaigns', db });
   await app.register(workflowRoutes, { prefix: '/campaigns', db });
   await app.register(commentsRoutes, { prefix: '/campaigns', db });
+  await app.register(diagnosticsRoutes, { prefix: '/campaigns', db });
 
   return app;
 }
