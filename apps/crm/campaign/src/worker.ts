@@ -7,6 +7,7 @@ import { startConsumer } from './handlers/sqs-consumer.js';
 const log = createLogger('crm-campaign-worker');
 
 import './workers/campaign-orchestrate.worker.js';
+import './workers/ab-winner-select.worker.js';
 
 const bus = createEventBus();
 startConsumer(db, bus).catch((err) => {

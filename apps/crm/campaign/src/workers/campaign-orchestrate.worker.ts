@@ -1,12 +1,14 @@
-import { Worker, type Job } from 'bullmq';
+import { Worker, Queue, type Job } from 'bullmq';
 import { createLogger } from '@ortho/logger';
-import { bullmqRedis, ORCHESTRATE_QUEUE } from '../queue/connection.js';
+import { bullmqRedis, ORCHESTRATE_QUEUE, AB_WINNER_QUEUE } from '../queue/connection.js';
 import db from '../db.js';
 import { env } from '../env.js';
 import * as campaignsRepo from '../repositories/campaigns.repo.js';
 import { insertEvent } from '../repositories/campaign-events.repo.js';
 import { resolveAudience } from '../services/audience-resolver.js';
-import { orchestrateNonAB } from '../services/send-orchestrator.js';
+import { orchestrateNonAB, orchestrateAB } from '../services/send-orchestrator.js';
+
+const abWinnerQueue = new Queue(AB_WINNER_QUEUE, { connection: bullmqRedis });
 
 const log = createLogger('campaign-orchestrate-worker');
 
@@ -81,8 +83,32 @@ async function processJob(job: Job<OrchestrateJobData>): Promise<void> {
     return;
   }
 
-  // Steps 9-11 — non-A/B send orchestration
-  await orchestrateNonAB(db, campaign, groupedByLocation, env);
+  // Steps 9-11 — send orchestration (route by A/B flag)
+  if (campaign.ab_enabled) {
+    await orchestrateAB(db, campaign, groupedByLocation, env);
+
+    if (campaign.ab_mode === 'holdout') {
+      const delayMs = (campaign.ab_winner_delay_hours ?? 1) * 3600000;
+      const job = await abWinnerQueue.add(
+        'select-winner',
+        { campaign_id },
+        { delay: delayMs },
+      );
+      await campaignsRepo.update(db, campaign_id, {
+        ab_phase: 'testing',
+        ab_decision_at: new Date(Date.now() + delayMs),
+        ab_winner_job_id: job.id ?? null,
+      });
+    } else {
+      // full_split — no delayed winner selection needed
+      await campaignsRepo.update(db, campaign_id, {
+        ab_phase: 'complete',
+      });
+    }
+  } else {
+    await orchestrateNonAB(db, campaign, groupedByLocation, env);
+  }
+
   log.info(
     { campaign_id, locationCount: groupedByLocation.size },
     'Orchestration complete',

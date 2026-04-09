@@ -6,6 +6,7 @@ import * as campaignsRepo from '../repositories/campaigns.repo.js';
 import { insertEvent } from '../repositories/campaign-events.repo.js';
 import { countNonTerminalSends } from '../repositories/campaign-sends.repo.js';
 import { publishCampaignSent } from '../events/publisher.js';
+import { selectWinner } from '../services/ab-winner.js';
 
 const log = createLogger('email-campaign-completed-handler');
 
@@ -91,9 +92,23 @@ export async function handleEmailCampaignCompleted(
     terminal = 'completed';
   }
 
+  // Full_split retrospective winner: compute ab_winner if not yet set
+  let ab_winner: string | undefined;
+  if (campaign.ab_mode === 'full_split' && campaign.ab_winner == null) {
+    const countA = allSends
+      .filter((s) => s.variant === 'A')
+      .reduce((sum, s) => sum + s.total_recipients, 0);
+    const countB = allSends
+      .filter((s) => s.variant === 'B')
+      .reduce((sum, s) => sum + s.total_recipients, 0);
+    ab_winner = selectWinner(campaign.ab_opens_a, countA, campaign.ab_opens_b, countB);
+    log.info({ campaign_id: campaign.id, ab_winner }, 'Full_split retrospective winner computed');
+  }
+
   await campaignsRepo.update(db, campaign.id, {
     status: terminal,
     completed_at: new Date(),
+    ...(ab_winner != null ? { ab_winner } : {}),
   });
 
   await insertEvent(db, {
