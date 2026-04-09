@@ -1,3 +1,13 @@
+## 2026-04-09 - US-008
+- Implemented src/services/schedule-manager.ts: BullMQ schedule manager with cron derivation, register/remove/replace/reconcile
+- Files created: apps/crm/reporting/src/services/schedule-manager.ts
+- **Learnings for future iterations:**
+  - BullMQ `RepeatableJob.id` holds the jobId passed during `queue.add()` (optional/nullable); match by `j.id === jobId`, then call `queue.removeRepeatableByKey(j.key)`
+  - Queue and its Redis connection initialized at module level (singleton pattern) — same as analytics/identity services
+  - `reconcile()` uses `Set` of registered job IDs for O(1) lookup; safe to call on every deploy
+  - BullMQ `queue.add()` with `jobId` in repeatable options deduplicates by key — registering the same schedule twice is idempotent
+---
+
 ## 2026-04-09 - US-007
 - Implemented src/services/metrics-cache.ts: LRU cache wrapping computeMetrics
 - Cache key: sha256(metric_family + '|' + period + '|' + sorted(location_ids).join(','))
