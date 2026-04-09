@@ -12,6 +12,7 @@ Started: Thu Apr  9 06:21:42 UTC 2026
 - A/B split helper: `sendVariant()` private function in send-orchestrator.ts handles Email Service POST for any variant
 - Export `processJob` from worker files to enable direct invocation in integration tests without BullMQ
 - When a worker needs to enqueue jobs on another queue, import `Queue` from bullmq and instantiate with the target queue constant
+- For unit-testing handlers that query Knex directly (not via repo), mock db as a thenable chain: `chain.then = vi.fn((resolve) => resolve(rows))` so `await db('table').select().where()` resolves correctly
 
 ---
 
@@ -63,4 +64,17 @@ Started: Thu Apr  9 06:21:42 UTC 2026
   - `Queue` must be imported alongside `Worker` from bullmq when a worker needs to enqueue jobs on a different queue (e.g., orchestrate worker enqueuing ab-winner-select jobs)
   - The holdout send uses `recipientsRepo.updateSentAt` to mark holdout recipients as sent per location, matching the existing pattern
   - Full_split retrospective winner uses the same `selectWinner` pure function as the holdout path, with `total_recipients` summed from `allSends` grouped by variant
+---
+
+## 2026-04-09 - US-023
+- Created `email-opened.handler.ts`: looks up campaign_sends by `campaign_job_id`, guards on `status='sending' AND ab_phase='testing'`, increments `ab_opens_a` or `ab_opens_b` based on variant
+- Created `lead-stage-changed.handler.ts`: queries `campaign_recipients` directly for leads with `sent_at` within 7-day window of `occurred_at`, calls `insertConversion` for each matching campaign
+- Updated `sqs-consumer.ts`: subscribes to `email.opened` and `lead.stage_changed` events alongside existing `email.campaign_completed`
+- Created `test/unit/email-opened.test.ts` (6 test cases) and `test/unit/lead-stage-changed.test.ts` (6 test cases)
+- Files changed: `src/handlers/email-opened.handler.ts` (new), `src/handlers/lead-stage-changed.handler.ts` (new), `src/handlers/sqs-consumer.ts`, `test/unit/email-opened.test.ts` (new), `test/unit/lead-stage-changed.test.ts` (new)
+- **Learnings for future iterations:**
+  - Event handlers that don't publish events don't need the `bus` parameter — `handleEmailOpened` and `handleLeadStageChanged` only take `(payload, db)`
+  - The `lead-stage-changed` handler queries `campaign_recipients` directly (not via repo) because it needs a `DISTINCT campaign_id` query with date arithmetic that doesn't match any existing repo method
+  - For mocking Knex query builders in unit tests, use a thenable chain pattern: mock object with `.then()` that resolves to rows, so `await db('table').select().where()...` works without counting method calls
+  - The sqs-consumer follows a simple pattern: `bus.subscribe(eventName, async (event) => { cast payload; call handler })` — no routing logic needed
 ---
