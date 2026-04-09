@@ -1,0 +1,145 @@
+{
+  "project": "Ortho CRM — Campaign Service Phase 2",
+  "branchName": "ralph/campaign-service-phase-2",
+  "description": "Campaign Service Phase 2 — BullMQ orchestration, non-A/B send pipeline, SQS event handling, schedule/send-now/unschedule routes, and integration tests for the full orchestration flow.",
+  "userStories": [
+    {
+      "id": "US-011",
+      "title": "campaign-sends and campaign-recipients repositories",
+      "description": "As a developer, I need DB access functions for the campaign_sends and campaign_recipients tables so workers and handlers can record send jobs and recipient rows.",
+      "acceptanceCriteria": [
+        "Create src/repositories/campaign-sends.repo.ts exporting: findByEmailJobId(db, emailJobId) → CampaignSend|null; findByEmailJobRef(db, ref) → CampaignSend|null; findAllByCampaignId(db, campaignId) → CampaignSend[]; countNonTerminalSends(db, campaignId) → number (count rows where status NOT IN completed,completed_with_errors,failed,cancelled); insert(db, data) → CampaignSend; update(db, id, data) → CampaignSend; CampaignSend interface exported",
+        "Create src/repositories/campaign-recipients.repo.ts exporting: bulkInsert(db, rows) → void — uses knex batchInsert chunked at 1000 rows per call; findByCampaignAndVariant(db, campaignId, variant, limit, offset) → CampaignRecipient[]; updateSentAt(db, campaignId, variant, locationId, sentAt) → void; CampaignRecipient interface exported",
+        "Both repos follow the existing pattern (TABLE const, db as first arg, plain named exports, no class)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "BullMQ queue connection and worker entry point",
+      "description": "As a developer, I need a shared BullMQ Redis connection and a worker.ts entry point so the campaign-orchestrate worker can be registered and started as a separate ECS process.",
+      "acceptanceCriteria": [
+        "Create src/queue/connection.ts exporting bullmqRedis (ioredis Redis instance) constructed from env.BULLMQ_REDIS_URL with maxRetriesPerRequest: null; export queueName constants ORCHESTRATE_QUEUE = 'campaign:orchestrate' and AB_WINNER_QUEUE = 'campaign:ab-winner-select'",
+        "Create src/worker.ts as the worker entry point: imports workers and sqs consumer (stubs are fine if not yet implemented); calls graceful shutdown on SIGTERM (closes bullmqRedis connection); process exits on unhandled rejection with non-zero code",
+        "src/index.ts continues to be the API-only entry point (no worker code imported there)",
+        "package.json already has start:worker and dev:worker scripts pointing to worker.ts — verify they are present (no changes needed if already correct)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Audience resolver service with unit tests",
+      "description": "As the campaign-orchestrate worker, I need an audience-resolver service that fetches leads from Lead Service and evaluates them through Audience Engine, returning grouped recipients by location_id.",
+      "acceptanceCriteria": [
+        "Create src/services/audience-resolver.ts exporting resolveAudience(db, campaign, env) → { snapshotId: string, groupedByLocation: Map<string, LeadContact[]> }",
+        "Pre-filter extraction: scans campaign.audience_filter JSONB ad-hoc for top-level { field, op, value } conditions where field is one of location_id, pipeline, stage; applies matching ones as URL query params on GET /leads calls — this is an optimization, not required for correctness",
+        "Fetches leads from Lead Service via GET /leads?contact_status=active&limit=500&offset=... in a pagination loop until no more results; each lead record includes id, email, first_name, location_id",
+        "Submits batches to Audience Engine: named segment uses POST /audiences/segments/:id/evaluate { snapshot_id, entities, done }; inline filter uses POST /audiences/evaluate { snapshot_id, filter, entities, snapshot: true, done }; final batch has done: true",
+        "Fetches matched lead_ids from Audience Engine via GET /audiences/snapshots/:snapshot_id (paginated); batch-fetches contact data from Lead Service via GET /leads?ids=id1,id2,...  (chunks of 500)",
+        "Groups resolved leads by location_id in a Map",
+        "Unit tests in test/unit/audience-resolver.test.ts: (1) pagination loop calls Lead Service correct page count for 1050 leads at limit 500 (3 pages); (2) final batch has done=true; (3) pre-filter extraction correctly picks location_id from audience_filter; (4) Audience Engine 4xx response throws an error",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Non-A/B send orchestrator and campaign.sent event publisher",
+      "description": "As the campaign-orchestrate worker, I need a send-orchestrator service that groups leads by location and calls Email Service once per location, and an event publisher that emits campaign.sent via @ortho/event-bus.",
+      "acceptanceCriteria": [
+        "Create src/events/publisher.ts exporting publishCampaignSent(bus, payload: CampaignSentPayload) → Promise<void> using bus.publish('campaign.sent', payload); bus is the @ortho/event-bus instance passed in",
+        "Create src/services/send-orchestrator.ts exporting orchestrateNonAB(db, campaign, groupedByLocation, env) → void",
+        "orchestrateNonAB: for each location group — skip if campaign_sends row already exists for email_job_ref '{campaign_id}:{location_id}' (crash recovery guard); wrap the following in a single DB transaction: POST /emails/campaigns/send with job_ref, location_id, template_id, subject_template, recipients, entity_type='campaign', entity_id=campaign.id; on 202 response insert campaign_sends row; bulk insert campaign_recipients in chunks of 1000 using knex batchInsert; on 422 response (spam_check_failed or domain_not_configured) insert campaign_sends with status='failed', continue to next location",
+        "Unit tests in test/unit/send-orchestrator.test.ts: (1) skip guard — existing campaign_sends row prevents re-call to Email Service; (2) transaction scope — if campaign_recipients insert throws, campaign_sends row is not committed; (3) bulk insert chunking — 2500 recipients results in 3 batchInsert calls at 1000 each; (4) 422 response inserts failed send and continues",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "campaign-orchestrate worker (non-A/B path)",
+      "description": "As the Campaign Service, I need the campaign-orchestrate BullMQ worker that drives audience resolution and send orchestration for non-A/B campaigns when a scheduled or send-now job fires.",
+      "acceptanceCriteria": [
+        "Create src/workers/campaign-orchestrate.worker.ts instantiating a BullMQ Worker on ORCHESTRATE_QUEUE using bullmqRedis connection",
+        "Step 1 — status guard: load campaign; if status NOT IN ('scheduled','sending') ACK and return (covers cancelled campaigns)",
+        "Step 2 — status transition: UPDATE campaigns SET status='sending', sent_at=COALESCE(sent_at, now()) WHERE id=? AND status IN ('scheduled','sending')",
+        "Step 3 — snapshot expiry check: if audience_snapshot_id IS NOT NULL, call GET /audiences/snapshots/:id; if 404 (expired) clear audience_snapshot_id and continue to re-resolve",
+        "Steps 4-7 — audience resolution: generate a caller-side snapshot_id UUID; call resolveAudience(db, campaign, env) to fetch and evaluate; UPDATE campaigns SET audience_snapshot_id=snapshotId",
+        "Step 8 — empty audience guard: if matched_count=0 (groupedByLocation is empty), UPDATE campaigns SET status='failed', completed_at=now(); INSERT campaign_events (from_status:'sending', to_status:'failed', actor_id:null, comment:'empty_audience'); return",
+        "Steps 9-11 — non-A/B send: call orchestrateNonAB(db, campaign, groupedByLocation, env)",
+        "BullMQ Worker concurrency=1; worker registered in src/worker.ts on startup",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "email.campaign_completed handler and SQS consumer wiring",
+      "description": "As the Campaign Service worker, I need an SQS event handler for email.campaign_completed that updates send status, publishes campaign.sent, and transitions the campaign to its terminal status when all sends are done.",
+      "acceptanceCriteria": [
+        "Create src/handlers/email-campaign-completed.handler.ts exporting handleEmailCampaignCompleted(payload: EmailCampaignCompletedPayload, db, bus) → Promise<void>",
+        "Step 1: look up campaign_sends by email_job_id=payload.job_id; if not found, log warn and return (not our job)",
+        "Step 2: update campaign_sends row with status, sent_count, failed_count, total_recipients, completed_at from payload",
+        "Step 3: publish campaign.sent via publishCampaignSent(bus, { campaign_id, location_id, sent_count, template_id, completed_at })",
+        "Step 4 — completion check: load campaign; if ab_phase='testing' return early (holdout not yet resolved); count campaign_sends rows where status NOT IN (completed,completed_with_errors,failed,cancelled); if count>0 return (still in flight)",
+        "Step 5 — terminal status: has_any_completion = any send with status IN (completed,completed_with_errors); terminal = all_failed→'failed', has_any_completion+any_errors→'completed_with_errors', else→'completed'; UPDATE campaign + INSERT campaign_events (from_status:'sending', to_status:terminal, actor_id:null)",
+        "Create src/handlers/sqs-consumer.ts exporting startConsumer(db, bus) that registers handleEmailCampaignCompleted via bus.subscribe('email.campaign_completed', ...) and calls bus.start()",
+        "Update src/worker.ts to call startConsumer(db, bus) on startup",
+        "Unit tests in test/unit/email-campaign-completed.test.ts covering: not-found returns early; terminal=completed; terminal=completed_with_errors (mixed results); terminal=failed (all failed); still in-flight returns early without status change; ab_phase=testing returns early",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Schedule, send-now, unschedule routes + cancel BullMQ cleanup",
+      "description": "As a Marketing Manager, I need schedule, send-now, and unschedule routes so I can control when approved campaigns are sent, and the cancel route should also remove any pending BullMQ jobs.",
+      "acceptanceCriteria": [
+        "Replace 501 stub for POST /:id/schedule: add preHandler [writePerm, managePerm]; body schema { scheduled_for: string (ISO timestamp) }; validate scheduled_for is present and in the future (400 if missing or past); validateTransition approved→scheduled (409 if wrong status); enqueue delayed BullMQ job on ORCHESTRATE_QUEUE with delay = scheduled_for - now() ms; store orchestrate_job_id in campaign; update status to 'scheduled'; insert campaign_events; return 200 { campaign_id, status, scheduled_for }",
+        "Replace 501 stub for DELETE /:id/schedule: add preHandler [writePerm, managePerm]; validateTransition scheduled→approved (409 if wrong status); remove BullMQ job by orchestrate_job_id (using Queue instance — use obliterate or remove); set orchestrate_job_id=NULL, status='approved'; insert campaign_events; return 200 { campaign_id, status }",
+        "Replace 501 stub for POST /:id/send-now: add preHandler [writePerm, managePerm]; validateTransition approved→sending (409 if wrong status); UPDATE campaign SET status='sending', sent_at=now(); enqueue ORCHESTRATE_QUEUE job with delay=0; store orchestrate_job_id; insert campaign_events; return 200 { campaign_id, status }",
+        "Update existing POST /:id/cancel: before updating campaign status, if campaign.orchestrate_job_id is set, remove the BullMQ job (ignore errors if job already gone); the rest of the handler logic (transition validation, DB update, event insert) is unchanged",
+        "Queue instance for route handlers is constructed from bullmqRedis connection with ORCHESTRATE_QUEUE name and passed via opts or module-level singleton (consistent with worker pattern)",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Integration tests — Phase 2 orchestration scenarios",
+      "description": "As a developer, I need integration tests covering the full orchestration pipeline so I can verify non-A/B send flow, edge cases, and crash recovery guards work end-to-end with real Postgres and real Redis.",
+      "acceptanceCriteria": [
+        "Add HAS_REDIS guard (env.BULLMQ_REDIS_URL exists) alongside existing HAS_DB; tests use describe.skipIf(!HAS_DB || !HAS_REDIS)",
+        "Create test/integration/orchestration.test.ts; external HTTP calls (Audience Engine, Lead Service, Email Service) mocked via globalThis.fetch mock (same pattern as approval-workflow tests)",
+        "Test: non-A/B happy path — create campaign → approve → POST /campaigns/:id/send-now → assert status='sending', orchestrate_job_id set; manually fire worker job; assert audience resolved, 1 Email Service call made, campaign_sends row inserted, campaign_recipients rows inserted; fire email.campaign_completed handler; assert status='completed', campaign_events has terminal row",
+        "Test: empty audience — Audience Engine returns snapshot with matched_count=0 (empty groupedByLocation); fire worker; assert status='failed', campaign_events has comment='empty_audience'",
+        "Test: multi-location (3 locations) — mock Lead Service to return leads across 3 location_ids; fire worker; assert 3 Email Service calls made (one per location), 3 campaign_sends rows; fire 3 email.campaign_completed events; assert status='completed'",
+        "Test: crash recovery — insert campaign in 'sending' state with audience_snapshot_id already set and 2 of 3 campaign_sends rows already present; fire worker; assert only 1 new Email Service call made (skips locations with existing campaign_sends rows); no duplicate campaign_recipients rows inserted",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
