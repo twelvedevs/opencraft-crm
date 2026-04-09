@@ -8,3 +8,4 @@
 - [ ] ### `@platform/audience-ui` React Component
 - [ ] update event-bus docs, find what other services require updates
 - [ ] Implement `@platform/integration-hub-ui`
+- [ ] надо отдельно провалидировать все ивенты и все типы и пейлоуды на целостность всей конструкции

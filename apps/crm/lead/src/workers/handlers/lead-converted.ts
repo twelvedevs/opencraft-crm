@@ -13,8 +13,8 @@ export async function handleLeadConverted(
   const payload = event.payload;
 
   const lead_id = String(payload.lead_id);
-  const occurred_at = payload.occurred_at
-    ? new Date(String(payload.occurred_at))
+  const occurred_at = payload.converted_at
+    ? new Date(String(payload.converted_at))
     : new Date();
 
   const lead = await leadRepository.findById(db, lead_id);

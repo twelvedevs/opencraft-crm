@@ -11,8 +11,8 @@ export async function handleLeadArchived(event: OrthoEvent, pool: Pool): Promise
 
     const event_id = event.event_id ?? randomUUID();
     const occurred_at =
-      typeof event.payload['occurred_at'] === 'string'
-        ? new Date(event.payload['occurred_at'])
+      typeof event.payload['archived_at'] === 'string'
+        ? new Date(event.payload['archived_at'])
         : new Date();
 
     const location_id = String(event.payload['location_id'] ?? '');

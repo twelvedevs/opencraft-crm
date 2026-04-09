@@ -8,14 +8,14 @@ export interface LeadStageChangedPayload {
   lead_id: string;
   stage_to: string;
   pipeline: string;
-  occurred_at: string;
+  transitioned_at: string;
 }
 
 export async function handleLeadStageChanged(
   payload: LeadStageChangedPayload,
   db: Knex,
 ): Promise<void> {
-  const occurredAt = new Date(payload.occurred_at);
+  const occurredAt = new Date(payload.transitioned_at);
 
   // Step 1: find all campaigns this lead was sent to within the 7-day attribution window
   // Uses occurred_at as the anchor — NOT processing time

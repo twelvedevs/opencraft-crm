@@ -116,8 +116,11 @@ export interface LeadMergedEvent {
 }
 
 export interface LeadArchivedPayload {
+  membership_id: string;
   lead_id: string;
   location_id: string;
+  pipeline: string;
+  archived_at: string;
 }
 
 export interface LeadArchivedEvent {
@@ -146,21 +149,32 @@ export interface AppointmentUpdatedEvent {
 }
 
 export interface LeadStageChangedPayload {
+  membership_id: string;
   lead_id: string;
   location_id: string;
   pipeline: string;
   stage_to: string;
-  stage_from: string;
+  stage_from: string | null;
+  override: boolean;
+  triggered_by: string | null;
   reason: string;
-  time_in_stage_seconds: number;
-  response_time_seconds?: number;
-  occurred_at: string;
+  timeout_at: string | null;
+  transitioned_at: string;
+  time_in_stage_seconds: number | null;
+  response_time_seconds?: number | null;
 }
 
 export interface LeadConvertedPayload {
   lead_id: string;
   location_id: string;
+  from_pipeline: string;
+  from_stage: string;
+  to_pipeline: string;
+  to_stage: string;
+  new_membership_id: string;
   channel: string;
+  triggered_by: string | null;
+  converted_at: string;
 }
 
 export interface OptOutReceivedPayload {
@@ -207,10 +221,30 @@ export interface InboundMessageReceivedPayload {
 }
 
 export interface ReferralConvertedPayload {
+  referral_id: string;
   lead_id: string;
   location_id: string;
   referrer_id: string;
   referrer_type: string;
+  converted_at: string;
+}
+
+export interface ReferrerCreatedPayload {
+  referrer_id: string;
+  referrer_type: string;
+  lead_id: string;
+  location_id: string;
+  referral_link_id: string;
+  referral_code: string;
+  referral_link_url: string;
+  created_at: string;
+}
+
+export interface ReferrerCreatedEvent {
+  event_type: 'referrer.created';
+  entity_type: 'referrer';
+  entity_id: string;
+  payload: ReferrerCreatedPayload;
 }
 
 export interface SequenceStepCompletedPayload {

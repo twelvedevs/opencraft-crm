@@ -16,8 +16,8 @@ export async function handleStageChanged(
   const lead_id = String(payload.lead_id);
   const pipeline = String(payload.pipeline);
   const stage_to = String(payload.stage_to);
-  const occurred_at = payload.occurred_at
-    ? new Date(String(payload.occurred_at))
+  const occurred_at = payload.transitioned_at
+    ? new Date(String(payload.transitioned_at))
     : new Date();
 
   const lead = await leadRepository.findById(db, lead_id);

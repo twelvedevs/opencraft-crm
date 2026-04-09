@@ -11,8 +11,8 @@ export async function handleLeadConverted(event: OrthoEvent, pool: Pool): Promis
 
     const event_id = event.event_id ?? randomUUID();
     const occurred_at =
-      typeof event.payload['occurred_at'] === 'string'
-        ? new Date(event.payload['occurred_at'])
+      typeof event.payload['converted_at'] === 'string'
+        ? new Date(event.payload['converted_at'])
         : new Date();
 
     const location_id = String(event.payload['location_id'] ?? '');
