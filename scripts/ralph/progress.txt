@@ -1,3 +1,17 @@
+## 2026-04-10 - US-015
+- Implemented unit tests for all four pure-logic modules (analytics-client, metrics-calculator, pdf-generator, csv-generator, schedule-manager)
+- Files created: test/unit/analytics-client.test.ts, test/unit/metrics-calculator.test.ts, test/unit/pdf-generator.test.ts, test/unit/csv-generator.test.ts, test/unit/schedule-manager.test.ts
+- All 50 tests pass; typecheck clean
+- **Learnings for future iterations:**
+  - `vi.hoisted()` is required for variables referenced inside `vi.mock` factory functions — the factory is hoisted before imports but plain `const` declarations are not; wrap mock fn instances in `vi.hoisted(() => vi.fn())`
+  - Unhandled rejection warning with fake timers: when a promise rejects inside `vi.advanceTimersByTimeAsync()`, attach the rejection handler BEFORE advancing (`const assertion = expect(promise).rejects.toThrow(...)`, then `await vi.advanceTimersByTimeAsync(N)`, then `await assertion`)
+  - For modules that create Redis/Queue connections at module-init (schedule-manager), mock both `bullmq` and `ioredis` AND `env.js` with `vi.mock` before importing the module under test — all three must be mocked or the module throws at load time
+  - `vi.resetAllMocks()` removes all mock implementations (including "once" overrides); re-apply defaults in beforeEach after calling it; prefer this over `vi.clearAllMocks()` when tests add `mockRejectedValueOnce` / `mockResolvedValueOnce` to avoid state leaking between tests
+  - `import type` from mocked modules is safe and does not trigger mock factory execution — use it for ReportSchedule, Knex, etc. in test helpers
+  - csv-generator tests need no mocks — fast-csv is a pure Node.js transform stream that works in the test process without any setup
+  - tsconfig `include: ["src/**/*"]` means `tsc --noEmit` never typechecks test files; tests are transpiled by Vitest only
+---
+
 ## 2026-04-10 - US-014
 - Implemented schedules, runs, revenue config, and health routes
 - Files created: apps/crm/reporting/src/routes/schedules.ts, routes/runs.ts, routes/config.ts, routes/health.ts
