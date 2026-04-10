@@ -33,7 +33,7 @@ build_reporting() {
     --updated-spec "${TODAY}-reporting-service-updated-design.md" \
     --tasks-file "prd-questions-reporting-service.md" \
     --app-dir "apps/crm/reporting" \
-    "${EXTRA_ARGS[@]}"
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 }
 
 build_data_import() {
@@ -43,7 +43,7 @@ build_data_import() {
     --updated-spec "${TODAY}-data-import-service-updated-design.md" \
     --tasks-file "prd-questions-data-import-service.md" \
     --app-dir "apps/crm/import" \
-    "${EXTRA_ARGS[@]}"
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 }
 
 build_api_gateway() {
@@ -54,7 +54,7 @@ build_api_gateway() {
     --tasks-file "prd-questions-crm-api-gateway.md" \
     --app-dir "apps/crm/api-gateway" \
     --extra-packages "docs/arch/adr-logger.md docs/arch/adr-auth-middleware.md" \
-    "${EXTRA_ARGS[@]}"
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 }
 
 build_web_app() {
@@ -66,7 +66,7 @@ build_web_app() {
     --app-dir "apps/crm/web" \
     --tech-stack "React 18, TypeScript 5, Tailwind CSS 3, React Query 5, Vite 5" \
     --extra-packages "docs/arch/adr-auth-middleware.md" \
-    "${EXTRA_ARGS[@]}"
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 }
 
 case "$SERVICE_FILTER" in

@@ -7,6 +7,7 @@
 #   Step 4: Commit preparation files
 #   Step 5: Run Ralph implementation loop
 #   Step 6: Archive prd.json + progress.txt via git mv
+#   Step 7: Code review + auto-fix issues found
 #
 # Usage: ./scripts/build-module.sh [options]
 #   Required:
@@ -19,7 +20,7 @@
 #     --tech-stack      Comma-separated tech stack string (default: standard Node.js)
 #     --extra-packages  Space-separated ADR docs to include in prompts
 #     --max-iterations  Ralph max iterations (default: 20)
-#     --skip-to         Skip to a specific step: 1|2|3|4|5|6
+#     --skip-to         Skip to a specific step: 1|2|3|4|5|6|7
 
 set -euo pipefail
 
@@ -92,7 +93,8 @@ Read the following docs thoroughly:
 ${PACKAGES_REF:+- essential packages:
 $PACKAGES_REF}
 Task: Generate clarifying questions for $SERVICE_NAME as the prd-questions skill normally would.
-Then immediately answer each question based on the design document, architecture doc, and your engineering judgment.
+Then immediately answer each question based on the design document, architecture doc,
+and your engineering judgment.
 Format: for each question, write the question then the answer below it.
 Save the complete result (questions + answers) to $TASKS_PATH" \
       --dangerously-skip-permissions
@@ -174,6 +176,19 @@ if [ "$SKIP_TO" -le 6 ]; then
     git commit -m "chore($SLUG): archive ralph run → $ARCHIVE_DIR"
 
   echo "✓ Step 6: Archived to $ARCHIVE_DIR"
+fi
+
+# ─── Step 7: Code review + fix ───────────────────────────────────────────────
+if [ "$SKIP_TO" -le 7 ]; then
+  echo "▶ Step 7: Running code review and fixing issues..."
+  claude -p "Load superpowers:requesting-code-review skill.
+Review the implementation at @$APP_DIR against the spec at @$UPDATED_SPEC_PATH.
+For every issue found: categorise it (critical / major / minor), explain what is wrong and why,
+then fix it in the code.
+After all fixes are applied, run typecheck and tests to confirm everything passes.
+Commit any fixes with an appropriate conventional commit message." \
+    --dangerously-skip-permissions
+  echo "✓ Step 7: Code review complete."
 fi
 
 echo ""

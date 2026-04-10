@@ -1,0 +1,269 @@
+{
+  "project": "Ortho CRM — Reporting Service",
+  "branchName": "ralph/reporting-service",
+  "description": "Reporting Service (apps/crm/reporting) — Ortho-specific KPI computation over Analytics Service, dashboard API with 5-min LRU cache, parameterized report configs, BullMQ-scheduled PDF/CSV generation via Puppeteer/fast-csv, delivery via Email Service and Media Service",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Update @ortho/auth-middleware for Reporting Service RBAC",
+      "description": "As a developer, I need RBAC permissions for the Reporting Service so all downstream route stories can use requirePermission without compilation errors.",
+      "acceptanceCriteria": [
+        "In packages/@ortho/auth-middleware: add reporting:read to ROLE_PERMISSIONS for call_center_agent, call_center_manager, marketing_staff, marketing_manager, super_admin",
+        "In packages/@ortho/auth-middleware: add reporting:write to ROLE_PERMISSIONS for marketing_manager, super_admin (controls revenue config PUT and schedule management)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Scaffold apps/crm/reporting project and create DB migrations",
+      "description": "As a developer, I need the service scaffolding and database schema so all subsequent stories have a foundation to build on.",
+      "acceptanceCriteria": [
+        "Directory apps/crm/reporting/ created with src/{routes/metrics,services,repositories,jobs,schemas}/, migrations/, test/{unit,integration}/, templates/",
+        "package.json with dependencies: fastify, @fastify/cors, @sinclair/typebox, knex, pg, @ortho/db, @ortho/auth-middleware, @ortho/logger, @ortho/types, bullmq, lru-cache, handlebars, puppeteer, fast-csv; devDependencies: typescript, vitest, tsx, @types/node",
+        "tsconfig.json configured for ESM (module: NodeNext, moduleResolution: NodeNext, target: ES2022)",
+        "Dockerfile: single CMD target node dist/index.js (HTTP server + BullMQ worker in same process per spec Section 1.1)",
+        "src/env.ts exports typed, validated env config reading: PORT (default 3009), DATABASE_URL, REDIS_URL, ANALYTICS_SERVICE_URL, ANALYTICS_API_KEY, MEDIA_SERVICE_URL, INTERNAL_API_SECRET, EMAIL_SERVICE_URL, NOTIFICATION_SERVICE_URL, CRM_BASE_URL, IDENTITY_JWKS_URL, LOG_LEVEL (default info), LRU_CACHE_MAX (default 500), LRU_CACHE_TTL_MS (default 300000)",
+        "Migration 001: CREATE SCHEMA crm_reporting",
+        "Migration 002: CREATE TABLE crm_reporting.location_revenue_config with columns: location_id text PRIMARY KEY, avg_contract_value numeric(10,2) NOT NULL, updated_at timestamptz NOT NULL DEFAULT now(), updated_by text NOT NULL",
+        "Migration 003: CREATE TABLE crm_reporting.report_configs with all columns from spec Section 2.2 including CHECK constraint on report_type, INDEX on created_by, INDEX on created_at DESC",
+        "Migration 004: CREATE TABLE crm_reporting.report_schedules with all columns from spec Section 2.3 including FK to report_configs ON DELETE CASCADE",
+        "Migration 005: CREATE TABLE crm_reporting.report_runs with all columns from spec Section 2.4 including FKs to report_configs and report_schedules, INDEX on (report_config_id, started_at DESC)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Implement TypeBox schemas",
+      "description": "As a developer, I need all TypeBox schemas in src/schemas/ so route handlers can import validated request/response shapes without duplication.",
+      "acceptanceCriteria": [
+        "src/schemas/report-config.ts: exports ReportType string literal union ('weekly_summary' | 'monthly_executive' | 'channel_deep_dive' | 'coordinator_productivity' | 'lead_source'), ReportConfigBody (name, report_type, parameters with period_type/from/to/location_ids/channel), ReportConfigParams, ReportConfigResponse",
+        "src/schemas/schedule.ts: exports ScheduleBody (report_config_id, frequency daily|weekly|monthly, day_of_week optional int, day_of_month optional int, hour_utc int 0-23, recipient_emails string[], format pdf|csv default pdf, active boolean default true), ScheduleResponse",
+        "src/schemas/run.ts: exports RunStatus ('pending' | 'running' | 'done' | 'failed'), RunResponse (id, report_config_id, report_schedule_id nullable, triggered_by, format, status, media_file_id nullable, error_message nullable, started_at, completed_at nullable, recipient_emails nullable)",
+        "src/schemas/revenue-config.ts: exports RevenueConfigBody (avg_contract_value number), RevenueConfigResponse (location_id, avg_contract_value, updated_at)",
+        "src/schemas/metrics.ts: exports PeriodParam (string, pattern YYYY-MM or YYYY-MM-DD/YYYY-MM-DD), MetricsQueryParams (period, location_id array optional, granularity daily|monthly|total optional), shared KPI response shapes for dashboard and each metric family",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement all four repositories",
+      "description": "As a developer, I need typed repository functions for all four tables so services can perform DB operations without raw SQL scattered across the codebase.",
+      "acceptanceCriteria": [
+        "src/repositories/report-configs.ts: findById, findByCreatedBy(userId, typeFilter?), findAll(typeFilter?), create(body, createdBy), update(id, body), deleteById; returns typed objects matching ReportConfigResponse shape",
+        "src/repositories/schedules.ts: findById, findByReportConfigId, findAllActive (returns all active=true rows), create(body, createdBy), update(id, body), setActive(id, active), deleteById",
+        "src/repositories/runs.ts: findById, findByConfigId(configId, limit?) ordered by started_at DESC, create(body), updateStatus(id, status, opts?: { media_file_id?, error_message?, completed_at? })",
+        "src/repositories/revenue-config.ts: findByLocationId, findAll(), findByLocationIds(ids: string[]), upsert(locationId, avgContractValue, updatedBy)",
+        "All repositories accept a Knex instance; no hardcoded DB connections; use crm_reporting schema prefix in all table references",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement Analytics Service HTTP client",
+      "description": "As a developer, I need a typed HTTP client for the Analytics Service with timeout and retry so metrics-calculator can call it reliably.",
+      "acceptanceCriteria": [
+        "src/services/analytics-client.ts: all six endpoint methods from spec Section 3.1: getLeadMetrics, getPipelineMetrics, getConversionMetrics, getAdSpendMetrics, getCoordinatorMetrics, getCampaignMetrics",
+        "Each method accepts { period, location_ids?: string[], granularity?: string, ...extra } and passes params as query string; when location_ids is undefined or empty array the location_id param is omitted entirely from the request",
+        "Plain fetch (Node 24 built-in) with AbortController 10-second timeout applied to every request",
+        "One retry on 5xx responses or network errors (fetch throws); exponential backoff: 500ms before first retry, 1000ms before second; no retry on 4xx",
+        "After retry exhaustion throws the error to the caller; caller is responsible for 502 propagation",
+        "All calls include Authorization: Bearer {ANALYTICS_API_KEY} header",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Implement metrics calculator",
+      "description": "As a developer, I need the metrics calculation layer that fans out to Analytics Service and computes all Ortho-specific KPIs so dashboard routes can return derived metrics.",
+      "acceptanceCriteria": [
+        "src/services/metrics-calculator.ts: computeMetrics(params) fans out parallel calls via Promise.all to all relevant Analytics endpoints; if any call throws, the error propagates through Promise.all (fail-fast, no partial results)",
+        "Computes all KPIs from spec Section 3.3: cost_per_lead, exam_conversion_rate, exam_show_rate, case_conversion_rate, cost_per_exam, cost_per_case_start, revenue_attributed, roas, lead_response_time, time_in_stage",
+        "All ratio KPIs return null (not 0 or error) when denominator is zero",
+        "revenue_attributed = conversions_count × avg_contract_value loaded from location_revenue_config; if a location has no config entry, revenue_attributed and roas return null for that location; response includes missing_revenue_config: string[] listing affected location IDs",
+        "Channel attribution: google_ads leads attributed to google_ads platform spend; facebook leads attributed to facebook_ads spend; cross-platform spend never blended",
+        "When caller JWT locations = [] (marketing_staff/marketing_manager), location_ids param omitted from Analytics calls (not passed as empty array)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Implement metrics LRU cache",
+      "description": "As a developer, I need a caching layer wrapping metrics-calculator so repeated dashboard loads from concurrent users do not hammer the Analytics Service.",
+      "acceptanceCriteria": [
+        "src/services/metrics-cache.ts: wraps metrics-calculator.computeMetrics with an lru-cache instance; max entries from env.LRU_CACHE_MAX; TTL from env.LRU_CACHE_TTL_MS",
+        "Cache key computed as sha256(metric_family + '|' + period + '|' + sorted(location_ids).join(',')) using node:crypto createHash('sha256').update(...).digest('hex'); location_ids sorted lexicographically before joining to ensure key stability regardless of input order",
+        "On cache miss: calls metrics-calculator, stores result, returns result",
+        "On cache hit: returns cached result without calling metrics-calculator",
+        "No manual invalidation — TTL expiry is the only eviction mechanism",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Implement schedule manager",
+      "description": "As a developer, I need the BullMQ schedule manager with cron derivation and startup reconciliation so scheduled report delivery can be registered, updated, and recovered after Redis flushes.",
+      "acceptanceCriteria": [
+        "src/services/schedule-manager.ts: registerSchedule(schedule) adds BullMQ repeatable job; deterministic job ID = 'report-schedule:{schedule.id}'",
+        "Cron expression derivation from spec Section 7.1: daily → '0 {hour_utc} * * *'; weekly → '0 {hour_utc} * * {day_of_week}'; monthly → '0 {hour_utc} {day_of_month} * *'",
+        "removeSchedule(scheduleId) calls queue.removeRepeatableByKey using the deterministic job ID",
+        "replaceSchedule(scheduleId, newSchedule) removes old job then adds new one; used by PUT /reporting/schedules/:id",
+        "reconcile(db) queries all active=true rows from crm_reporting.report_schedules, fetches registered repeatable jobs from BullMQ via queue.getRepeatableJobs(), re-registers any schedule whose job ID is absent; idempotent and safe to run on every deploy",
+        "Exports BullMQ Queue instance for use by job handler; queue name is 'reporting-jobs'",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement Handlebars templates, PDF generator, and CSV generator",
+      "description": "As a developer, I need all five report templates compiled at module init plus PDF and CSV generators so the report-renderer can produce output files.",
+      "acceptanceCriteria": [
+        "templates/weekly-summary.hbs, monthly-executive.hbs, channel-deep-dive.hbs, coordinator-productivity.hbs, lead-source.hbs: valid HTML files with Handlebars placeholders for period, location, and the relevant KPI fields for each report type; structurally correct so Puppeteer can render them",
+        "src/services/pdf-generator.ts: all five templates loaded from disk and compiled with Handlebars.compile() at module initialization (import time); compiled template functions stored as module-level constants; service startup fails fast if any template file is missing",
+        "pdf-generator.ts generatePdf(reportType, data): renders compiled Handlebars template with data, launches new Puppeteer browser per job with args --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage, sets page.setDefaultTimeout(30_000) immediately after page creation, calls page.setContent() then page.pdf(), closes browser in finally block regardless of success or failure; returns Buffer",
+        "src/services/csv-generator.ts generateCsv(reportType, data): uses fast-csv to serialize the metric rows appropriate for each report type; returns Buffer",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Implement email sender and report renderer",
+      "description": "As a developer, I need the email sender and full report rendering pipeline so the BullMQ job handler has an orchestrator to call.",
+      "acceptanceCriteria": [
+        "src/services/email-sender.ts: sendReportEmail(runId, recipientEmails, reportName, period) calls POST /emails/send on Email Service with to: recipientEmails, subject: '{reportName} — {period}', body_html containing anchor tag pointing to {CRM_BASE_URL}/reporting/runs/{runId}/download (the 302 redirect endpoint, NOT a presigned URL)",
+        "src/services/report-renderer.ts: SERVICE_CALLER_ID = '00000000-0000-0000-0000-000000reporting' hardcoded constant (not env var)",
+        "report-renderer.ts renderReport(job: GenerateReportJob): step 1 load report_config + parameters from DB; step 2 resolve period string to concrete YYYY-MM-DD/YYYY-MM-DD range (YYYY-MM → first/last day of month; last_30d and last_month period_type values resolved to concrete dates); step 3 fetch metrics via metrics-cache.ts; step 4 generate document (PDF via pdf-generator or CSV via csv-generator) to Buffer; step 5 POST to Media Service POST /media/internal/store with buffer/filename/content_type, INTERNAL_API_SECRET header, uploaded_by=SERVICE_CALLER_ID, location_id=parameters.location_ids[0] if exactly one location else null → receive { file_id, url }; step 6 update report_run status=done, media_file_id, completed_at=now(); step 7 if recipient_emails present call email-sender.sendReportEmail; step 8 if report_schedule_id is null (on-demand) call POST /notifications/publish { channel: 'user:{triggered_by}' } on Notification Service; step 9 on any failure update report_run status=failed, error_message=error.message and rethrow",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement BullMQ job handler and index.ts",
+      "description": "As a developer, I need the generate-report job handler and the process entry point so the service is fully runnable as a single ECS task with co-located HTTP server and worker.",
+      "acceptanceCriteria": [
+        "src/jobs/generate-report.ts: exports GenerateReportJob interface { report_config_id: string, report_run_id: string, format: 'pdf' | 'csv', recipient_emails?: string[], report_schedule_id?: string }; BullMQ Worker registered on 'reporting-jobs' queue processes this job type by calling report-renderer.renderReport",
+        "BullMQ job retry config: attempts: 3 (2 retries after initial), backoff: { type: 'exponential', delay: 5000 } (5s → 25s), removeOnFail: false",
+        "On final failure (all 3 attempts exhausted): updates report_run row to status=failed, error_message=last error message; the report_runs table is the authoritative failure log",
+        "src/index.ts: unconditionally boots both Fastify HTTP server and BullMQ Worker in the same process (no WORKER_ONLY env flag); runs schedule-manager reconcile() synchronously before app.listen() — service does not serve traffic until reconciliation is complete; registers all routes under their correct prefixes; uses @ortho/logger and @ortho/auth-middleware; listens on env.PORT",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Implement dashboard and metrics routes",
+      "description": "As a developer, I need the dashboard and four metrics endpoints so the CRM frontend can display KPI data with proper location scoping and period validation.",
+      "acceptanceCriteria": [
+        "Period validation helper (can be in src/services/period.ts or inline): YYYY-MM parsed to first/last day of that calendar month; YYYY-MM-DD/YYYY-MM-DD parsed and validated; returns 400 { error: 'invalid_period', message: '...' } for malformed input; custom ranges > 366 days return 400 { error: 'invalid_period', message: 'Custom period cannot exceed 366 days' }",
+        "Location access control helper: call_center_agent → own location only (req.user.location_id); call_center_manager → req.user.locations array; marketing_staff/marketing_manager → pass undefined (omit filter)",
+        "routes/dashboard.ts: GET /reporting/dashboard?period=&location_id[]=&granularity= → 200 { period, granularity, kpis: {...}, missing_revenue_config: [...] }; requires reporting:read; analytics errors propagate as 502 { error: 'upstream_unavailable', upstream: 'analytics' }",
+        "routes/metrics/channel-performance.ts: GET /reporting/metrics/channel-performance → leads/funnel rates/cost metrics by channel; requires reporting:read",
+        "routes/metrics/location-comparison.ts: GET /reporting/metrics/location-comparison → per-location KPIs + network_average; network_average implementation per spec Section 4.3: call_center_agent/manager return network_average: null with no extra Analytics call; marketing roles fire two parallel calls and merge; requires reporting:read",
+        "routes/metrics/coordinator-performance.ts: GET /reporting/metrics/coordinator-performance?coordinator_id= → per-coordinator metrics; call_center_agent: coordinator_id param unconditionally overwritten with req.user.sub regardless of what was passed; other roles: pass through; requires reporting:read",
+        "routes/metrics/campaign-analytics.ts: GET /reporting/metrics/campaign-analytics → sent/delivered/opened/clicked/conversion per campaign; requires reporting:read",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Implement report-configs routes",
+      "description": "As a developer, I need the full report-configs CRUD and on-demand generate endpoint so users can save, manage, and trigger report runs.",
+      "acceptanceCriteria": [
+        "routes/report-configs.ts: GET /reporting/report-configs?type=&all= → 200 { data: ReportConfig[] } sorted created_at DESC; without all=true returns only caller's own configs (filtered by created_by=req.user.sub); with all=true and marketing_manager+ role returns all configs; optional ?type= filter applied; requires reporting:read",
+        "POST /reporting/report-configs → 201 { id, ...config }; all roles may create; location-scoped roles (call_center_agent, call_center_manager) validated that parameters.location_ids are subset of req.user.locations; requires reporting:read",
+        "PUT /reporting/report-configs/:id → 200; caller must own the config OR have marketing_manager+ role; location scoping enforced on parameters.location_ids same as POST; requires reporting:read",
+        "DELETE /reporting/report-configs/:id → 204; caller must own OR marketing_manager+; requires reporting:read",
+        "POST /reporting/report-configs/:id/generate?format=pdf|csv (default pdf) → 202 { run_id }; creates report_run row with status=pending, triggered_by=req.user.sub, format, recipient_emails=null; enqueues generate-report BullMQ job with the new run_id; requires reporting:read",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Implement schedules, runs, revenue config, and health routes",
+      "description": "As a developer, I need the remaining route files so the service is fully feature-complete and deployable.",
+      "acceptanceCriteria": [
+        "routes/schedules.ts: GET /reporting/schedules → list schedules for caller's configs; POST → create schedule, validate recipient_emails format (basic regex, 400 on malformed), insert DB row, register BullMQ repeatable job via schedule-manager; PUT /:id → update DB row first, then replaceSchedule via schedule-manager; on BullMQ failure after DB success: log error, return 500; DELETE /:id → set active=false in DB, removeSchedule via schedule-manager; requires reporting:read for GET, reporting:write for write operations",
+        "routes/runs.ts: GET /reporting/runs?config_id= → list run history; GET /reporting/runs/:id → single run; GET /reporting/runs/:id/download → verify caller is triggered_by OR has location access to config's location_ids (marketing_manager+ always passes) → 302 redirect to fresh Media Service presigned URL from GET /media/internal/:file_id/signed-url; POST /reporting/runs/:id/retry → requires run.status='failed', same ownership check as download, creates new report_run row inheriting format and recipient_emails, enqueues fresh generate-report job → 202 { run_id }, original run row unchanged; requires reporting:read",
+        "routes/config.ts: GET /reporting/config/revenue → 200 { data: LocationRevenueConfig[] }; call_center_agent/manager: WHERE location_id = ANY(req.user.locations); marketing_staff/manager: no WHERE clause; requires reporting:read. PUT /reporting/config/revenue/:location_id → 200; requires reporting:write (marketing_manager only); upserts via revenue-config.repo; location_id is opaque string, not validated against real locations",
+        "routes/health.ts: GET /health → 200 { status: 'ok' } unconditional; GET /ready → runs SELECT 1 on Postgres and Redis PING; 200 { status: 'ok' } if both pass; 503 { status: 'unavailable', checks: { db: 'ok'|'fail', redis: 'ok'|'fail' } } if either fails",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Unit tests: metrics calculator, PDF/CSV generators, schedule manager, analytics client",
+      "description": "As a developer, I need unit tests for all pure-logic modules so CI catches regressions in KPI math, document generation, scheduling, and HTTP retry behavior.",
+      "acceptanceCriteria": [
+        "test/unit/metrics-calculator.test.ts: all ratio KPIs return null when denominator is zero; missing location_revenue_config entry → revenue_attributed and roas return null for that location, location ID appears in missing_revenue_config[]; channel attribution correctly maps google_ads leads to google_ads spend and facebook leads to facebook_ads spend; Promise.all error propagation (if one analytics call throws, computeMetrics rejects)",
+        "test/unit/analytics-client.test.ts: fetch mocked via vi.mock; 10s timeout applied (AbortController signal); retry fires on 5xx response (first call 500 → retry → 200 succeeds); retry fires on network error (first call throws → retry → succeeds); no retry on 4xx (single call then throw); after two failures throws the error; when location_ids is empty array or undefined the location_id query param is omitted from the request URL",
+        "test/unit/pdf-generator.test.ts: Puppeteer mocked via vi.mock('puppeteer'); test that generatePdf passes correct Chromium launch args (--no-sandbox, --disable-setuid-sandbox, --disable-dev-shm-usage); test that browser.close() is called in finally even when page.pdf() throws; test that setDefaultTimeout(30000) is called on the page",
+        "test/unit/csv-generator.test.ts: generateCsv for each of the five report types returns a non-empty Buffer; rows serialized correctly from input data",
+        "test/unit/schedule-manager.test.ts: BullMQ Queue mocked; cron expression derivation: daily with hour_utc=14 → '0 14 * * *'; weekly with hour_utc=9 day_of_week=1 → '0 9 * * 1'; monthly with hour_utc=8 day_of_month=15 → '0 8 15 * *'; reconcile skips already-registered jobs; reconcile re-registers jobs missing from BullMQ list",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Integration tests: all HTTP routes and generate-report BullMQ job",
+      "description": "As a developer, I need integration tests against real Postgres and real Redis so route-level business rules, DB state transitions, and job processing are verified end-to-end.",
+      "acceptanceCriteria": [
+        "Analytics Service, Media Service, Email Service, and Notification Service HTTP calls mocked via vi.mock at module level; Puppeteer always mocked; real Postgres test DB and real Redis used",
+        "test/integration/dashboard.test.ts: 200 with kpis and missing_revenue_config; 400 on malformed period; 400 when custom range > 366 days; 502 { error: 'upstream_unavailable', upstream: 'analytics' } when analytics mock throws; call_center_agent location-scoped to own location",
+        "test/integration/report-configs.test.ts: POST creates config, GET returns only caller's own, GET with all=true and marketing_manager returns all, PUT/DELETE ownership check (403 for non-owner non-manager), POST generate returns 202 with run_id and creates report_run row in DB with status=pending",
+        "test/integration/schedules.test.ts: POST creates schedule and DB row; invalid email in recipient_emails → 400; PUT updates DB row; DELETE sets active=false in DB",
+        "test/integration/runs.test.ts: GET list filtered by config_id; GET /:id returns run; GET /:id/download returns 302 to presigned URL (Media Service mock returns test URL); POST /:id/retry on failed run creates new run_id, original run unchanged, new run has status=pending; POST /:id/retry on non-failed run returns 400",
+        "test/integration/config.test.ts: GET revenue config returns rows scoped to caller's locations for call_center roles; marketing_manager gets all rows; PUT upserts correctly, requires reporting:write (403 for call_center_agent)",
+        "test/integration/generate-report-job.test.ts: enqueue generate-report job with real BullMQ + real Redis; worker processes job; report_run status transitions from pending → done; Media Service mock called with correct buffer and SERVICE_CALLER_ID; Email Service mock called when recipient_emails present; Notification Service mock called for on-demand run (report_schedule_id null); Notification Service mock NOT called for scheduled run (report_schedule_id present); on worker failure after 3 attempts report_run status=failed with error_message set",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

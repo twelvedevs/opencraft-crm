@@ -5,6 +5,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'conversations:write',
     'pipeline:read',
     'referrals:read',
+    'reporting:read',
   ],
   call_center_manager: [
     'leads:read',
@@ -16,6 +17,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'reports:read',
     'bulk-sms:write',
     'referrals:read',
+    'reporting:read',
   ],
   marketing_staff: [
     'leads:read',
@@ -25,6 +27,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'reports:read',
     'referrals:read',
     'referrals:write',
+    'reporting:read',
   ],
   marketing_manager: [
     'leads:read',
@@ -44,6 +47,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'bulk-sms:write',
     'referrals:read',
     'referrals:write',
+    'reporting:read',
+    'reporting:write',
   ],
   super_admin: [
     'leads:read',
@@ -63,5 +68,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'bulk-sms:write',
     'referrals:read',
     'referrals:write',
+    'reporting:read',
+    'reporting:write',
   ],
 };
