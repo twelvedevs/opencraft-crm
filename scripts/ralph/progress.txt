@@ -1,3 +1,151 @@
 # Ralph Progress Log
 Started: Fri Apr 10 11:46:44 +03 2026
 ---
+
+## Codebase Patterns
+- No `@ortho/db` package exists; each service creates a local `db.ts` with `knexLib({ client: 'pg', connection: env.DATABASE_URL, searchPath: ['<schema>', 'public'] })`
+- Service env vars use `src/env.ts` with `required()` / `optional()` helper pattern — throws on missing required vars at import time
+- Fastify setup: `createLogger('crm-<name>')`, cast as `unknown as FastifyBaseLogger`, `@fastify/sensible` registered, auth in scoped plugin
+- Dockerfile: multi-stage with `node:24-alpine` (builder + runner)
+- Package naming: `@ortho/<service>-service`
+- All services use file: references for monorepo packages (e.g., `"@ortho/auth-middleware": "file:../../../packages/@ortho/auth-middleware"`)
+- Knex migrations: use `string()` not `varchar()` (Knex types lack `varchar`); use `specificType('col', 'type[]')` for Postgres arrays; CHECK constraints and indexes via `knex.raw()` with fully-qualified `schema.table` names
+- BullMQ Worker: connection uses `{ url: env.REDIS_URL }`, worker-level `removeOnComplete` is `KeepJobs` type (`{ count: 0 }` = true), omit `removeOnFail` to keep failed jobs
+- Worker exports `ImportJobData` interface and `startWorker` function — routes enqueue jobs with `{ import_id, phase }` payload
+- Route pattern: factory function `routeName(opts)` returning async Fastify plugin; `requireRole` for role arrays, `requireLocation` for location scoping
+- `@fastify/multipart` needs side-effect `import '@fastify/multipart'` for `req.file()` type augmentation
+
+---
+
+## 2026-04-10 - US-001
+- Scaffolded apps/crm/import/ with full service layout
+- Files created: package.json, tsconfig.json, Dockerfile, .env.example, src/index.ts, src/env.ts, src/db.ts, migrations/, test/unit/, test/integration/
+- **Learnings for future iterations:**
+  - `@ortho/db` package doesn't exist — use local db.ts pattern (see Codebase Patterns)
+  - Reporting service (most recent) is the best reference for patterns
+  - Port 3010 chosen for import service
+  - Schema name is `crm_imports` (matching the searchPath in db.ts)
+---
+
+## 2026-04-10 - US-002
+- Created knexfile.ts and 4 Knex migrations for the crm_imports schema
+- Files created: knexfile.ts, migrations/001_create_crm_imports_schema.ts, migrations/002_create_imports_table.ts, migrations/003_create_import_rows_table.ts, migrations/004_create_column_mappings_table.ts
+- **Learnings for future iterations:**
+  - Knex types don't have `varchar()` method — use `string()` instead (creates varchar(255) in Postgres)
+  - Use `specificType('col', 'type[]')` for Postgres array columns (e.g., `text[]`, `uuid[]`)
+  - Migrations live outside `src/` and are NOT included in `tsc --noEmit` via tsconfig (rootDir: "src"); they compile fine standalone
+  - knexfile.ts uses `loadExtensions: ['.ts']` so migrations are run as TypeScript via tsx at runtime
+  - CHECK constraints and indexes are added via `knex.raw()` after table creation, using fully-qualified `schema.table` names
+- Repository pattern: class-based with constructor injection of Knex; use fully-qualified table names (e.g. `crm_imports.imports`) as TABLE const; cast results `as Type`
+- Shared interfaces live in `src/types.ts` (Import, ImportRow, ColumnMapping) — import from `../types.js`
+- Upsert pattern: `db(TABLE).insert({...}).onConflict('key').merge({...}).returning('*')`
+- JSON columns need `JSON.stringify()` on insert/upsert; Knex returns them as parsed objects on read
+---
+
+## 2026-04-10 - US-003
+- Implemented typed repository classes for all three tables (imports, import_rows, column_mappings)
+- Created shared type interfaces in src/types.ts
+- Files created: src/types.ts, src/repositories/import.repo.ts, src/repositories/import-row.repo.ts, src/repositories/column-mapping.repo.ts
+- **Learnings for future iterations:**
+  - Class-based repos with Knex constructor injection; fully-qualified table names (e.g. `crm_imports.imports`)
+  - Knex `.onConflict().merge()` for upserts with `.returning('*')`
+  - JSON/JSONB columns need `JSON.stringify()` on write, auto-parsed on read
+  - Cursor pagination: use `created_at` for imports (desc), `row_number` for import_rows (asc)
+  - Types in src/types.ts: Import, ImportRow, ColumnMapping — used across repos, services, and routes
+---
+
+## 2026-04-10 - US-004
+- Implemented typed HTTP client classes for Pipeline Engine and Lead Service
+- Files created: src/clients/pipeline-engine.ts, src/clients/lead-service.ts
+- **Learnings for future iterations:**
+  - Client pattern: class-based with private `request<T>()` helper; reads env vars in constructor
+  - Authorization header uses `Bearer ${apiKey}` pattern (not X-Internal-Api-Key)
+  - Custom error classes (PipelineEngineError, LeadServiceError) extend Error with httpStatus property
+  - DELETE endpoints (like deleteAppointment) don't parse response body — just check res.ok
+  - Query params with arrays use repeated keys with `[]` suffix (e.g., `phones[]=...&phones[]=...`)
+---
+
+## 2026-04-10 - US-005
+- Implemented Ortho2 header mapping and 5-tier match service
+- Files created: src/mapping/ortho2-headers.ts, src/services/match.service.ts
+- **Learnings for future iterations:**
+  - Match service exports helper functions (buildPhoneMap, buildEmailMap, normalizePhone) as standalone exports for testability
+  - Lead type interface defined in match.service.ts since LeadServiceClient returns `unknown[]`
+  - MatchResult interface: { status: 'matched'|'unmatched'|'ambiguous', matchedLeadId?, matchTier?, candidateIds? }
+  - matchRow takes both class-level and parameter-level leadServiceClient (parameter is used for API calls)
+  - Tier 3+4 share a single name search API call; nameResults cached in local variable
+  - Phone normalization uses libphonenumber-js parsePhoneNumberFromString with 'US' default region
+---
+
+## 2026-04-10 - US-006
+- Implemented UndoService class with undoRow, undoTransition, and undoConversion methods
+- Files created: src/services/undo.service.ts
+- **Learnings for future iterations:**
+  - UndoService dispatches on `snapshot.type` ('transition' vs 'conversion')
+  - `undoTransition`: reverses stage via createTransition with override:true + reason:'import_undo'; conditionally deletes appointment
+  - `undoConversion`: closes post-import membership, then re-enrolls in pre-import pipeline/stage using importRecord.location_id (not snapshot)
+  - before_snapshot is typed as `Record<string, unknown> | null` in ImportRow — cast needed for field access
+---
+
+## 2026-04-10 - US-007
+- Implemented ImportService class with createImport, getImport, listImports, confirmImport, cancelImport, initiateUndo methods
+- Files created: src/services/import.service.ts
+- **Learnings for future iterations:**
+  - Service error pattern: custom `ImportServiceError` class with `statusCode` and `body: { error: string }` — matches codebase convention (e.g., TransitionError in pipeline service)
+  - `initiateUndo` uses raw SQL for atomic status guard: `UPDATE ... WHERE status='completed' AND undo_deadline > now()` — avoids race conditions between check and update
+  - When raw SQL UPDATE returns 0 rows, follow up with a SELECT to determine the specific error (404 vs 422 vs 409)
+  - ImportService constructor takes Knex instance directly (in addition to repos) for raw SQL in initiateUndo
+  - Column mapping upsert happens in confirmImport before updating the import record
+---
+
+## 2026-04-10 - US-008
+- Implemented BullMQ worker with parse_match phase in src/workers/import-job.ts
+- Files created: src/workers/import-job.ts
+- **Learnings for future iterations:**
+  - BullMQ Worker `removeOnComplete` at worker level uses `KeepJobs` type (`{ count: 0 }` = `true`); `removeOnFail` is also `KeepJobs` (not `boolean`) — omit it to keep failed jobs (equivalent to `false`)
+  - `attempts` is a per-job option (set when enqueuing), not a Worker constructor option
+  - Worker connection uses `{ url: env.REDIS_URL }` format
+  - ImportJobData interface: `{ import_id: string; phase: 'parse_match' | 'execute' | 'undo' }` — exported for use in route enqueue calls
+  - parse_match flow: update status → S3 fetch → csv-parse stream → detect headers → merge column mappings (saved overrides auto) → batch prefetch leads → match each row → batch insert rows → update import counts
+  - `raw_data` column stored as `JSON.stringify(raw)` in row inserts (batchInsert takes `Partial<ImportRow>[]` but raw_data is `Record<string, unknown>` — pass stringified via `Record<string, unknown>` typed array)
+  - Column mapping direction: CRM field → CSV header name; mapRow function reverses this to extract values from raw CSV records
+  - Worker catch block updates import to 'failed' and re-throws for BullMQ to mark job failed
+---
+
+## 2026-04-10 - US-009
+- Implemented execute phase in BullMQ worker with 4 import-type handlers
+- Files changed: src/workers/import-job.ts
+- **Learnings for future iterations:**
+  - Execute handlers return `boolean` (true=executed, false=failed-early) for clean counting in the main loop
+  - `before_snapshot` is written to DB as `JSON.stringify(...)` cast through `unknown` to `Record<string, unknown>` — same pattern as `raw_data`
+  - `undo_deadline` uses `knex.raw("now() + interval '2 hours'")` cast as `unknown as Date` to pass through the repo update
+  - Conversion handlers (active_patients, completed_patients): write snapshot → transition → convert → update snapshot with post_import_membership_id
+  - Transition handlers (scheduled_appointments, no_shows): write snapshot → transition → (optional appointment) → update snapshot
+  - Per-row error catching: PipelineEngineError/LeadServiceError caught → row marked failed with `pipeline_engine_error: <status>` / `lead_service_error: <status>`; other errors re-thrown to fail the whole job
+  - Crash recovery: rows stuck in 'executing' are queried via findByImportIdAndStatus and logged at warn, then skipped by the main loop (which only queries 'matched' rows)
+---
+
+## 2026-04-10 - US-010
+- Implemented undo phase in BullMQ worker: queries executed rows in DESC order, calls UndoService.undoRow per row, best-effort error handling
+- Added Worker 'failed' event handler for job failure logging
+- Files changed: src/workers/import-job.ts
+- **Learnings for future iterations:**
+  - Undo phase uses `findExecutedByImportIdDesc` (already existed in repo) for reverse-order processing
+  - Best-effort pattern: catch per-row errors, log them, set error_message on row, but continue loop; import is marked 'undone' unconditionally after all rows
+  - Worker `failed` event: BullMQ passes `(job, err)` where job can be undefined; guard with `if (job)` before accessing `job.data`
+  - UndoService is instantiated inside the phase function (not passed as parameter) — consistent with how MatchService is created in parseMatchPhase
+---
+
+## 2026-04-10 - US-011
+- Implemented src/routes/imports.ts with POST /imports (multipart upload), GET /imports (list), GET /imports/:id (single)
+- Files created: src/routes/imports.ts
+- **Learnings for future iterations:**
+  - Route pattern: export a factory function `importsRoutes(opts)` that returns an async Fastify plugin function — allows dependency injection of services, S3 client, and BullMQ queue
+  - Auth middleware: `requireRole(['call_center_manager', 'marketing_manager'])` for role-based access; `requireLocation()` for location scoping (reads `location_id` from params/query)
+  - `@fastify/multipart` types: must `import '@fastify/multipart'` (side-effect import) to get `req.file()` type augmentation on FastifyRequest
+  - Multipart field access: `data.fields` is `Record<string, { value?: string }>` for scalar fields alongside file upload
+  - S3 streaming upload: `new Upload({ client, params: { Bucket, Key, Body: data.file } })` from `@aws-sdk/lib-storage` — no temp file or buffering
+  - TypeBox schema for UUID: `Type.String({ format: 'uuid' })`
+  - ImportServiceError is caught and re-thrown as HTTP error in GET /imports/:id; POST /imports doesn't need this since createImport never throws service errors
+  - Route not yet wired in index.ts — that happens in US-014
+---
