@@ -5,6 +5,11 @@ import { createLogger } from '@ortho/logger';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
 import { reconcile } from './services/schedule-manager.js';
+import { dashboardRoutes } from './routes/dashboard.js';
+import { channelPerformanceRoutes } from './routes/metrics/channel-performance.js';
+import { locationComparisonRoutes } from './routes/metrics/location-comparison.js';
+import { coordinatorPerformanceRoutes } from './routes/metrics/coordinator-performance.js';
+import { campaignAnalyticsRoutes } from './routes/metrics/campaign-analytics.js';
 
 // Importing this module starts the BullMQ Worker as a module-level side effect.
 // HTTP server and Worker run in the same process (per spec Section 1.1).
@@ -29,6 +34,12 @@ await app.register(async (scope) => {
   await scope.register(authPlugin, { jwksUrl: env.IDENTITY_JWKS_URL });
 
   // Metric and dashboard routes  →  US-012
+  await scope.register(dashboardRoutes);
+  await scope.register(channelPerformanceRoutes);
+  await scope.register(locationComparisonRoutes);
+  await scope.register(coordinatorPerformanceRoutes);
+  await scope.register(campaignAnalyticsRoutes);
+
   // Report-config CRUD + generate  →  US-013
   // Schedules, runs, revenue config, health  →  US-014
 });
