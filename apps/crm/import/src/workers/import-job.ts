@@ -13,6 +13,7 @@ import { MatchService, normalizePhone, buildPhoneMap, buildEmailMap, type Lead }
 import { autoDetectMapping } from '../mapping/ortho2-headers.js';
 import { PipelineEngineError, type PipelineEngineClient } from '../clients/pipeline-engine.js';
 import { LeadServiceError, type LeadServiceClient } from '../clients/lead-service.js';
+import { UndoService } from '../services/undo.service.js';
 import type { Import, ImportRow } from '../types.js';
 
 export interface ImportJobData {
@@ -480,6 +481,51 @@ async function executePhase(
   log.info({ importId, executedCount, failedCount }, 'execute phase complete');
 }
 
+async function undoPhase(
+  job: { data: ImportJobData },
+  knex: Knex,
+  pipelineClient: PipelineEngineClient,
+  leadClient: LeadServiceClient,
+  log: Logger,
+): Promise<void> {
+  const importId = job.data.import_id;
+  const importRepo = new ImportRepository(knex);
+  const importRowRepo = new ImportRowRepository(knex);
+  const undoService = new UndoService(pipelineClient, leadClient);
+
+  const importRecord = await importRepo.findById(importId);
+  if (!importRecord) throw new Error(`Import ${importId} not found`);
+
+  // Check for rows stuck in 'executing' from a prior crashed run
+  const stuckRows = await importRowRepo.findByImportIdAndStatus(importId, ['executing']);
+  for (const stuckRow of stuckRows) {
+    log.warn({ importId, rowId: stuckRow.id, rowNumber: stuckRow.row_number }, 'skipping row stuck in executing state during undo');
+  }
+
+  // Query executed rows in reverse order
+  const executedRows = await importRowRepo.findExecutedByImportIdDesc(importId);
+
+  // Sequential best-effort undo
+  for (const row of executedRows) {
+    try {
+      await undoService.undoRow(row, importRecord);
+      await importRowRepo.update(row.id, { status: 'undone' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error({ importId, rowId: row.id, err: message }, 'undo row failed');
+      await importRowRepo.update(row.id, { error_message: message });
+    }
+  }
+
+  // Unconditionally mark import as undone
+  await importRepo.update(importId, {
+    status: 'undone',
+    undone_at: new Date(),
+  });
+
+  log.info({ importId, undoneCount: executedRows.length }, 'undo phase complete');
+}
+
 export function startWorker(
   queue: Queue,
   knex: Knex,
@@ -505,7 +551,7 @@ export function startWorker(
             await executePhase(job, knex, pipelineClient, leadClient, log);
             break;
           case 'undo':
-            // Added in US-010
+            await undoPhase(job, knex, pipelineClient, leadClient, log);
             break;
           default:
             throw new Error(`Unknown phase: ${phase}`);
@@ -525,6 +571,15 @@ export function startWorker(
       concurrency: 2,
     },
   );
+
+  worker.on('failed', (job, err) => {
+    if (job) {
+      log.error(
+        { jobId: job.id, importId: job.data.import_id, phase: job.data.phase, err: err.message },
+        'import job failed',
+      );
+    }
+  });
 
   return worker;
 }
