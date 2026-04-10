@@ -1,3 +1,22 @@
+## 2026-04-10 - US-012
+- Implemented period validation helper, dashboard route, and all four metrics routes
+- Files created: apps/crm/reporting/src/services/period.ts
+- Files created: apps/crm/reporting/src/routes/dashboard.ts
+- Files created: apps/crm/reporting/src/routes/metrics/channel-performance.ts
+- Files created: apps/crm/reporting/src/routes/metrics/location-comparison.ts
+- Files created: apps/crm/reporting/src/routes/metrics/coordinator-performance.ts
+- Files created: apps/crm/reporting/src/routes/metrics/campaign-analytics.ts
+- Files updated: apps/crm/reporting/src/index.ts (route registration)
+- **Learnings for future iterations:**
+  - `resolveLocationIds` exported from routes/dashboard.ts is the shared location-scoping helper — import it in all metrics routes; do NOT redefine it
+  - Location scoping rules: call_center_agent + call_center_manager → always use req.user.locations (JWT), ignore query param; marketing_staff/manager/super_admin → use query param if provided, otherwise undefined (all locations)
+  - coordinator-performance: call_center_agent's coordinator_id is ALWAYS overwritten with req.user.sub — caller cannot override it; other roles pass through query param
+  - location-comparison: per-location metrics require one getMetrics call per location_id (with a single-element location_ids array); marketing roles additionally fire an all-locations call (location_ids: undefined) in the same Promise.all for network_average; scoped roles return network_average: null with no extra call
+  - period.ts parsePeriod() returns ResolvedPeriod | PeriodError — use isPeriodError() guard to distinguish; converts YYYY-MM to concrete from/to dates before passing to analytics
+  - Route functions take only `(app: FastifyInstance)` — no opts object needed since they use module-level singletons (metrics-cache, etc.)
+  - MetricsQueryParams schema uses `location_id` (singular) as the query param name even though it repeats; handlers normalize to array with `Array.isArray()` check
+---
+
 ## 2026-04-10 - US-011
 - Implemented src/jobs/generate-report.ts (BullMQ Worker + GENERATE_REPORT_JOB_OPTIONS) and full src/index.ts
 - Files created: apps/crm/reporting/src/jobs/generate-report.ts
