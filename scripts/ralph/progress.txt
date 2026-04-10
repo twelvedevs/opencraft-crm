@@ -1,3 +1,16 @@
+## 2026-04-10 - US-013
+- Implemented report-configs CRUD routes and on-demand generate endpoint
+- Files created: apps/crm/reporting/src/routes/report-configs.ts
+- Files updated: apps/crm/reporting/src/index.ts (registered reportConfigRoutes)
+- **Learnings for future iterations:**
+  - Ownership check pattern: `existing.created_by !== req.user!.sub && !isManagerRole(req.user!.role)` → 403
+  - Manager roles set: `{ marketing_manager, super_admin }` — use a `Set` for O(1) lookup
+  - Location scope guard (`checkLocationScope`) needed only for call_center_agent/manager; marketing roles bypass it; returns null (OK) or an error payload for the caller to `reply.code(403).send()`
+  - `generate` endpoint: create run row first, then enqueue BullMQ job; spread `GENERATE_REPORT_JOB_OPTIONS` into `queue.add()`; `recipient_emails` is null for on-demand triggers (no schedule)
+  - TypeBox `Type.Optional(Type.String())` for optional query params; access with `req.query as { type?: string; all?: string }`
+  - `all=true` query string arrives as the string `'true'` (not boolean) — compare with `q.all === 'true'`
+---
+
 ## 2026-04-10 - US-012
 - Implemented period validation helper, dashboard route, and all four metrics routes
 - Files created: apps/crm/reporting/src/services/period.ts
