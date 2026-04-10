@@ -3,6 +3,7 @@ Started: Fri Apr 10 11:46:44 +03 2026
 ---
 
 ## Codebase Patterns
+- Integration tests: `describe.skipIf(!HAS_DB)` pattern with helpers.ts (getDb, runMigrations, cleanup, truncateTables); setup.ts sets env vars before module imports; nock for HTTP mocking; `processImportJob` for direct phase invocation
 - No `@ortho/db` package exists; each service creates a local `db.ts` with `knexLib({ client: 'pg', connection: env.DATABASE_URL, searchPath: ['<schema>', 'public'] })`
 - Service env vars use `src/env.ts` with `required()` / `optional()` helper pattern — throws on missing required vars at import time
 - Fastify setup: `createLogger('crm-<name>')`, cast as `unknown as FastifyBaseLogger`, `@fastify/sensible` registered, auth in scoped plugin
@@ -14,6 +15,7 @@ Started: Fri Apr 10 11:46:44 +03 2026
 - Worker exports `ImportJobData` interface and `startWorker` function — routes enqueue jobs with `{ import_id, phase }` payload
 - Route pattern: factory function `routeName(opts)` returning async Fastify plugin; `requireRole` for role arrays, `requireLocation` for location scoping
 - `@fastify/multipart` needs side-effect `import '@fastify/multipart'` for `req.file()` type augmentation
+- `libphonenumber-js` rejects `555` area codes — use real US area codes (212, 310, etc.) in tests
 
 ---
 
@@ -148,4 +150,85 @@ Started: Fri Apr 10 11:46:44 +03 2026
   - TypeBox schema for UUID: `Type.String({ format: 'uuid' })`
   - ImportServiceError is caught and re-thrown as HTTP error in GET /imports/:id; POST /imports doesn't need this since createImport never throws service errors
   - Route not yet wired in index.ts — that happens in US-014
+---
+
+## 2026-04-10 - US-012
+- Implemented src/routes/rows.ts with GET /imports/:id/rows endpoint
+- Cursor-paginated rows listing with status filter, limit (default 50, max 200), and cursor (row_number)
+- Location validation: checks import's location_id against user's locations (with bypass for marketing_staff, marketing_manager, super_admin)
+- Files created: src/routes/rows.ts
+- **Learnings for future iterations:**
+  - Location validation for sub-resources (rows belong to import): fetch the parent import, then check its location_id against req.user.locations
+  - LOCATION_BYPASS_ROLES duplicated from auth-middleware require-location.ts — consider exporting from the package if more routes need it
+  - The rows route reuses ImportRowRepository.findByImportId which already implements cursor pagination with row_number
+  - Route not yet wired in index.ts — that happens in US-014
+---
+
+## 2026-04-10 - US-013
+- Implemented src/routes/actions.ts with POST /imports/:id/confirm, POST /imports/:id/cancel, POST /imports/:id/undo
+- Confirm: validates body with TypeBox (column_mapping: Record<string, string>), calls importService.confirmImport, enqueues BullMQ job with phase 'execute', returns 202
+- Cancel: no body, calls importService.cancelImport, returns 200
+- Undo: no body, calls importService.initiateUndo, enqueues BullMQ job with phase 'undo', returns 202
+- All three catch ImportServiceError and return appropriate HTTP codes (409, 422, 404)
+- Files created: src/routes/actions.ts
+- **Learnings for future iterations:**
+  - Action routes follow same pattern as other routes: factory function returning async Fastify plugin
+  - ImportServiceError already handles all status guard logic (409 for wrong status, 422 for expired undo window, 404 for not found) — routes just catch and forward
+  - BullMQ job enqueue happens AFTER the service call succeeds (confirm/undo only)
+  - Route not yet wired in index.ts — that happens in US-014
+---
+
+## 2026-04-10 - US-014
+- Created src/routes/mappings.ts with GET /imports/column-mappings/:type endpoint (TypeBox validated, 404 if no mapping saved)
+- Rewrote src/index.ts to fully wire all dependencies: S3Client, BullMQ Queue, PipelineEngineClient, LeadServiceClient, repos, ImportService, route plugins, worker
+- Route registration order: mappings → imports → rows → actions (mappings first to prevent 'column-mappings' matching :id param)
+- Migrations run at startup via `db.migrate.latest()` with knexfile-like config
+- SIGTERM handler: worker.close() → fastify.close() → knex.destroy() → process.exit(0)
+- Files created: src/routes/mappings.ts
+- Files changed: src/index.ts
+- **Learnings for future iterations:**
+  - `@ortho/db` has no `runMigrations` function — use `knex.migrate.latest()` directly with directory/schemaName/tableName/loadExtensions config
+  - `@fastify/multipart` must be registered on the app instance (not just imported as side-effect) for `req.file()` to work
+  - Route registration order matters for parameterized routes — register static segments (like `column-mappings`) before `:id` params
+  - startWorker takes Queue instance as first param (unused internally — worker creates its own connection) but matches the signature for consistency
+  - MatchService and UndoService are NOT instantiated in index.ts — the worker creates them internally per-job
+---
+
+## 2026-04-10 - US-015
+- Implemented unit tests for match service (18 tests) and ortho2-headers (13 tests) — 31 total
+- Files created: test/unit/match.service.test.ts, test/unit/ortho2-headers.test.ts
+- **Learnings for future iterations:**
+  - `libphonenumber-js` rejects `555` area codes as invalid (fictional US numbers). Use real area codes like `212`, `310` in tests.
+  - Mock pattern for LeadServiceClient: factory function returning object with `vi.fn()` methods cast `as unknown as LeadServiceClient` — no need for `vi.mock()` since MatchService uses constructor injection
+  - Tests import exported helper functions (`normalizePhone`, `buildPhoneMap`, `buildEmailMap`) and `Lead` type directly from the service module
+  - `matchRow` takes a separate `leadServiceClient` parameter (not the constructor-injected one) — tests pass the mock through that parameter
+  - PipelineEngineClient is not used by MatchService — pass empty object `{} as PipelineEngineClient`
+---
+
+## 2026-04-10 - US-016
+- Implemented unit tests for undo service (9 tests) and import service (11 tests) — 20 total, 51 total across all test files
+- Files created: test/unit/undo.service.test.ts, test/unit/import.service.test.ts
+- **Learnings for future iterations:**
+  - Mock pattern for Knex `db.raw`: use `vi.fn()` with sequential `.mockResolvedValueOnce()` calls — first for the UPDATE, second for the SELECT fallback
+  - `ImportServiceError` carries both `statusCode` and `body: { error: string }` — test both fields
+  - `invocationCallOrder` on vi.fn() mocks is useful for verifying call ordering (e.g., closeMembership before enrollMembership)
+  - `initiateUndo` SQL uses `now()` for atomic deadline check — verify by inspecting the raw SQL string from the Knex spy
+  - UndoService tests: mock both PipelineEngineClient and LeadServiceClient with factory functions returning `vi.fn()` methods
+---
+
+## 2026-04-10 - US-017
+- Implemented integration tests for parse_match phase (4 tests): happy path (3-row CSV with tier 1/2/5 matching), all-unmatched CSV, S3 read failure, saved column_mapping override
+- Refactored import-job.ts to export `processImportJob` function for direct test invocation (no BullMQ/Redis dependency in tests)
+- Created integration test infrastructure: setup.ts (env vars), helpers.ts (DB lifecycle, S3 mocks, constants), vitest.config.ts
+- Added `nock` to devDependencies for HTTP interception of Lead Service calls
+- Files created: test/integration/parse-phase.test.ts, test/integration/setup.ts, test/integration/helpers.ts, vitest.config.ts
+- Files changed: src/workers/import-job.ts, package.json
+- **Learnings for future iterations:**
+  - Integration tests use `describe.skipIf(!HAS_DB)` pattern — tests skip gracefully without Postgres
+  - `processImportJob` exported from import-job.ts wraps phase dispatch + error handling — use this for all integration tests (execute, undo phases too)
+  - S3 mock: return `{ Body: Readable.from(csvContent) }` from `send()` — no actual AWS SDK needed
+  - nock interceptors are consumed in order of definition — define them matching the expected API call sequence
+  - nock `query(true)` matches any query string; `query((qs) => ...)` for specific param assertions
+  - `LeadServiceClient` reads env vars at construction time — setup.ts must set env vars before any imports
+  - Test helpers in helpers.ts are shared across all integration test files (parse, execute, undo, routes)
 ---

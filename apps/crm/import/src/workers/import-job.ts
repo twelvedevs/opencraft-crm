@@ -526,6 +526,44 @@ async function undoPhase(
   log.info({ importId, undoneCount: executedRows.length }, 'undo phase complete');
 }
 
+export async function processImportJob(
+  jobData: ImportJobData,
+  knex: Knex,
+  s3Client: S3Client,
+  pipelineClient: PipelineEngineClient,
+  leadClient: LeadServiceClient,
+  log: Logger,
+): Promise<void> {
+  const { import_id, phase } = jobData;
+  log.info({ importId: import_id, phase }, 'processing import job');
+
+  const importRepo = new ImportRepository(knex);
+
+  try {
+    switch (phase) {
+      case 'parse_match':
+        await parseMatchPhase({ data: jobData }, knex, s3Client, leadClient, log);
+        break;
+      case 'execute':
+        await executePhase({ data: jobData }, knex, pipelineClient, leadClient, log);
+        break;
+      case 'undo':
+        await undoPhase({ data: jobData }, knex, pipelineClient, leadClient, log);
+        break;
+      default:
+        throw new Error(`Unknown phase: ${phase}`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ importId: import_id, phase, err: message }, 'import job failed');
+    await importRepo.update(import_id, {
+      status: 'failed',
+      error_message: message,
+    });
+    throw err;
+  }
+}
+
 export function startWorker(
   queue: Queue,
   knex: Knex,
@@ -537,34 +575,7 @@ export function startWorker(
   const worker = new Worker<ImportJobData>(
     'import-jobs',
     async (job) => {
-      const { import_id, phase } = job.data;
-      log.info({ importId: import_id, phase }, 'processing import job');
-
-      const importRepo = new ImportRepository(knex);
-
-      try {
-        switch (phase) {
-          case 'parse_match':
-            await parseMatchPhase(job, knex, s3Client, leadClient, log);
-            break;
-          case 'execute':
-            await executePhase(job, knex, pipelineClient, leadClient, log);
-            break;
-          case 'undo':
-            await undoPhase(job, knex, pipelineClient, leadClient, log);
-            break;
-          default:
-            throw new Error(`Unknown phase: ${phase}`);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.error({ importId: import_id, phase, err: message }, 'import job failed');
-        await importRepo.update(import_id, {
-          status: 'failed',
-          error_message: message,
-        });
-        throw err;
-      }
+      await processImportJob(job.data, knex, s3Client, pipelineClient, leadClient, log);
     },
     {
       connection: { url: env.REDIS_URL },
