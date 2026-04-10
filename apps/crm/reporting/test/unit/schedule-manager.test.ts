@@ -110,6 +110,14 @@ describe('cron derivation via registerSchedule', () => {
     const [, , opts] = mockAdd.mock.calls[0] as [string, unknown, { jobId: string }];
     expect(opts.jobId).toBe('report-schedule:sched-abc');
   });
+
+  it('uses job name "fire-scheduled-report" (lightweight dispatcher, not generate-report)', async () => {
+    await registerSchedule(makeSchedule({ id: 'sched-name-check' }));
+
+    const [jobName, payload] = mockAdd.mock.calls[0] as [string, { schedule_id: string }, unknown];
+    expect(jobName).toBe('fire-scheduled-report');
+    expect(payload.schedule_id).toBe('sched-name-check');
+  });
 });
 
 // ---------------------------------------------------------------------------

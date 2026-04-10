@@ -70,7 +70,8 @@ function extractRows(reportType: ReportType, data: Record<string, unknown>): Csv
         conversionMap.set(String(c['channel']), Number(c['count'] ?? 0));
       }
 
-      // Platform to spend lookup (google_ads → google_ads, facebook → facebook_ads)
+      // Mirrors CHANNEL_TO_PLATFORM in metrics-calculator.ts (kept local to avoid
+      // pulling in the analytics-client transitive dependency in this module)
       const CHANNEL_TO_PLATFORM: Record<string, string> = {
         google_ads: 'google_ads',
         facebook: 'facebook_ads',

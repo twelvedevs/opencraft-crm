@@ -62,6 +62,11 @@ export async function locationComparisonRoutes(app: FastifyInstance): Promise<vo
       const isMarketingRole =
         role === 'marketing_staff' || role === 'marketing_manager' || role === 'super_admin';
 
+      // For marketing roles, targetLocations is driven exclusively by the caller's
+      // query params. When no location_id[] is supplied, the per-location breakdown
+      // is empty (we cannot enumerate all location IDs) — the response will contain
+      // locations:[] with a valid network_average. This is intentional: callers who
+      // want a per-location breakdown must pass the location_id[] filter explicitly.
       const targetLocations: string[] = isMarketingRole
         ? (queryLocIds ?? [])
         : jwtLocations;

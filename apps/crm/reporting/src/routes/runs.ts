@@ -51,6 +51,7 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
    * GET /reporting/runs?config_id=
    *
    * Returns run history for the given report config, ordered by started_at DESC.
+   * Caller must own the config or be marketing_manager+.
    */
   app.get(
     '/reporting/runs',
@@ -63,6 +64,17 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
           message: 'config_id query param is required',
         });
       }
+
+      const config = await configsRepo.findById(db, q.config_id);
+      if (!config) {
+        return reply.code(404).send({ error: 'not_found', message: 'Report config not found' });
+      }
+      const canRead =
+        MANAGER_ROLES.has(req.user!.role) || config.created_by === req.user!.sub;
+      if (!canRead) {
+        return reply.code(403).send({ error: 'forbidden', message: 'Not authorized to view runs for this config' });
+      }
+
       const runs = await runsRepo.findByConfigId(db, q.config_id);
       return reply.code(200).send({ data: runs });
     },
@@ -71,7 +83,8 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
   /**
    * GET /reporting/runs/:id
    *
-   * Returns a single run by ID.
+   * Returns a single run by ID. Caller must have access using the same
+   * ownership/location rules as download and retry.
    */
   app.get(
     '/reporting/runs/:id',
@@ -82,6 +95,19 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
       if (!run) {
         return reply.code(404).send({ error: 'not_found', message: 'Run not found' });
       }
+
+      const config = await configsRepo.findById(db, run.report_config_id);
+      const allowed = canAccessRun(
+        run.triggered_by,
+        config?.parameters?.location_ids,
+        req.user!.sub,
+        req.user!.role,
+        req.user!.locations,
+      );
+      if (!allowed) {
+        return reply.code(403).send({ error: 'forbidden', message: 'Not authorized to view this run' });
+      }
+
       return reply.code(200).send(run);
     },
   );
@@ -162,6 +188,7 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
 
       const newRun = await runsRepo.create(db, {
         report_config_id: run.report_config_id,
+        report_schedule_id: run.report_schedule_id ?? undefined,
         triggered_by: req.user!.sub,
         format: run.format,
         status: 'pending',

@@ -37,10 +37,8 @@ import * as revenueConfigRepo from '../../src/repositories/revenue-config.js';
 const DATABASE_URL = process.env['DATABASE_URL'];
 const REDIS_URL = process.env['REDIS_URL'];
 
-export const HAS_DB =
-  !!DATABASE_URL && DATABASE_URL !== 'postgresql://localhost:5432/test';
-export const HAS_REDIS =
-  !!REDIS_URL && REDIS_URL !== 'redis://localhost:6379';
+export const HAS_DB = !!DATABASE_URL;
+export const HAS_REDIS = !!REDIS_URL;
 
 // ─── Test constants ──────────────────────────────────────────────────────────
 

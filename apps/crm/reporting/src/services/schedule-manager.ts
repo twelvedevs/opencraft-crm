@@ -27,14 +27,13 @@ export const reportingQueue = new Queue(QUEUE_NAME, { connection: queueRedis });
 
 export async function registerSchedule(schedule: ReportSchedule): Promise<void> {
   const jobId = buildJobId(schedule.id);
+  // Per spec Section 7.2: the repeatable job is a lightweight dispatcher.
+  // It carries only the schedule_id so the handler can load the schedule at
+  // fire time, check active status, create the report_run row, and enqueue
+  // the one-off 'generate-report' job with the newly minted run ID.
   await reportingQueue.add(
-    'generate-report',
-    {
-      report_config_id: schedule.report_config_id,
-      format: schedule.format,
-      recipient_emails: schedule.recipient_emails,
-      report_schedule_id: schedule.id,
-    },
+    'fire-scheduled-report',
+    { schedule_id: schedule.id },
     {
       repeat: { pattern: deriveCron(schedule) },
       jobId,

@@ -46,7 +46,8 @@ async function fetchWithRetry(url: string): Promise<Response> {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
-      await sleep(RETRY_DELAY_MS);
+      // Exponential backoff: 500ms for attempt 1, 1000ms for attempt 2, etc.
+      await sleep(RETRY_DELAY_MS * Math.pow(2, attempt - 1));
     }
 
     const controller = new AbortController();

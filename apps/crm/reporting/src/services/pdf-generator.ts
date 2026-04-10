@@ -20,17 +20,17 @@ export type ReportType =
 // ---------------------------------------------------------------------------
 
 Handlebars.registerHelper('formatNumber', (value: unknown) => {
-  if (value == null || typeof value !== 'number') return '0';
+  if (value == null || typeof value !== 'number') return '—';
   return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 });
 
 Handlebars.registerHelper('formatPct', (value: unknown) => {
-  if (value == null || typeof value !== 'number') return '0.0';
+  if (value == null || typeof value !== 'number') return '—';
   return (value * 100).toFixed(1);
 });
 
 Handlebars.registerHelper('formatDecimal', (value: unknown) => {
-  if (value == null || typeof value !== 'number') return '0.00';
+  if (value == null || typeof value !== 'number') return '—';
   return value.toFixed(2);
 });
 
