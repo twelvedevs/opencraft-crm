@@ -1,3 +1,17 @@
+## 2026-04-10 - US-010
+- Implemented email-sender.ts and report-renderer.ts
+- Files created: apps/crm/reporting/src/services/email-sender.ts, apps/crm/reporting/src/services/report-renderer.ts
+- **Learnings for future iterations:**
+  - Media Service `POST /media/internal/store` is multipart (not JSON); use `FormData` + `Blob`; `new Uint8Array(buffer)` is required to convert Node.js Buffer to a type-safe BlobPart (avoids SharedArrayBuffer TypeScript error)
+  - Media Service uses `Authorization: Bearer {INTERNAL_API_SECRET}` (same pattern as other internal routes)
+  - Media Service returns `{ file_id, urls: { original: '...' } }` — note `urls` is nested, not flat `url`
+  - Notification Service `POST /notifications/publish` requires `title` (string, required) in the body — the channel must have exactly 3 segments (`user:{id}:{type}`); spec's `user:{triggered_by}` is only 2 segments and would fail validation — use `user:{triggered_by}:reports`
+  - report-renderer.ts exports `GenerateReportJob` interface — US-011's generate-report.ts should import it from here rather than redefining
+  - Period resolution: `custom` → `${from}/${to}`, `last_30d` → `{today-30}/{today}`, `last_month` → first/last of previous calendar month; default fallback is last 30 days
+  - Notification publish failure is logged as warn (not thrown) — losing a notification should not fail the run
+  - The step-9 catch block wraps its own `updateStatus` in try/catch so an update failure doesn't swallow the original error
+---
+
 ## 2026-04-09 - US-009
 - Implemented Handlebars templates, PDF generator, and CSV generator
 - Files created: templates/weekly-summary.hbs, templates/monthly-executive.hbs, templates/channel-deep-dive.hbs, templates/coordinator-productivity.hbs, templates/lead-source.hbs
