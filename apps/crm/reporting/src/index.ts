@@ -10,6 +10,7 @@ import { channelPerformanceRoutes } from './routes/metrics/channel-performance.j
 import { locationComparisonRoutes } from './routes/metrics/location-comparison.js';
 import { coordinatorPerformanceRoutes } from './routes/metrics/coordinator-performance.js';
 import { campaignAnalyticsRoutes } from './routes/metrics/campaign-analytics.js';
+import { reportConfigRoutes } from './routes/report-configs.js';
 
 // Importing this module starts the BullMQ Worker as a module-level side effect.
 // HTTP server and Worker run in the same process (per spec Section 1.1).
@@ -41,6 +42,8 @@ await app.register(async (scope) => {
   await scope.register(campaignAnalyticsRoutes);
 
   // Report-config CRUD + generate  →  US-013
+  await scope.register(reportConfigRoutes);
+
   // Schedules, runs, revenue config, health  →  US-014
 });
 
