@@ -1,3 +1,19 @@
+## 2026-04-10 - US-016
+- Implemented integration tests for all HTTP routes and the generate-report BullMQ worker
+- Files created: test/integration/helpers.ts, test/integration/dashboard.test.ts, test/integration/report-configs.test.ts, test/integration/schedules.test.ts, test/integration/runs.test.ts, test/integration/config.test.ts, test/integration/generate-report-job.test.ts
+- All 50 existing unit tests still pass; 51 integration tests skip gracefully without DB/Redis (correct behavior for local dev); typecheck clean
+- **Learnings for future iterations:**
+  - Module-level singletons (db.js, schedule-manager.ts) in the reporting service must be handled via vi.mock in each test file — mock env.js with `DATABASE_URL: process.env['DATABASE_URL'] ?? 'fallback'` so db.js gets the real test DB URL; do NOT mock db.js itself for integration tests
+  - Schedule-manager mock is required in ALL route test files because healthRoutes imports `queueRedis` from schedule-manager — if not mocked, it creates a real Redis connection at module load time
+  - For generate-report-job tests, do NOT mock schedule-manager (need real Redis); use `HAS_REDIS` guard alongside `HAS_DB`; call `reportingQueue.obliterate({ force: true })` in beforeAll to flush stale queue state
+  - `waitForJob(runId, 'completed'|'failed')` pattern: attach 'completed'/'failed' listeners BEFORE enqueuing to avoid missing the event, use a setTimeout guard to prevent test hangs
+  - For BullMQ failure tests, use `attempts: 1` (override GENERATE_REPORT_JOB_OPTIONS) to avoid exponential backoff delays in tests
+  - `afterEach` must be explicitly imported from vitest — it is NOT available globally even inside describe blocks (caused a ReferenceError on first run)
+  - The `buildTestApp()` helper sets a JWKS-aware fetch mock; test files that need additional fetch behavior (e.g., runs download presigned URL) should replace globalThis.fetch with their own implementation that also handles JWKS
+  - For the download redirect test: Fastify inject does NOT follow 302 redirects — check `res.statusCode === 302` and `res.headers['location']`
+  - `vi.hoisted()` is required for mock handles that are referenced inside vi.mock() factories AND also need to be accessible outside (e.g., mockQueueAdd, mockRegisterSchedule)
+---
+
 ## 2026-04-10 - US-015
 - Implemented unit tests for all four pure-logic modules (analytics-client, metrics-calculator, pdf-generator, csv-generator, schedule-manager)
 - Files created: test/unit/analytics-client.test.ts, test/unit/metrics-calculator.test.ts, test/unit/pdf-generator.test.ts, test/unit/csv-generator.test.ts, test/unit/schedule-manager.test.ts
