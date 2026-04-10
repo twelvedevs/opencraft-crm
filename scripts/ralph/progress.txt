@@ -1,3 +1,16 @@
+## 2026-04-10 - US-014
+- Implemented schedules, runs, revenue config, and health routes
+- Files created: apps/crm/reporting/src/routes/schedules.ts, routes/runs.ts, routes/config.ts, routes/health.ts
+- Files updated: apps/crm/reporting/src/index.ts (registered all four route plugins), src/services/schedule-manager.ts (exported queueRedis)
+- **Learnings for future iterations:**
+  - Fastify 5 `reply.redirect()` signature is `(url: string, statusCode?: number)` — URL comes FIRST, status code second (opposite of Fastify 4)
+  - `queueRedis` exported from schedule-manager.ts can be reused for `/ready` Redis PING — no extra connection needed
+  - Health routes (`/health`, `/ready`) must be registered OUTSIDE the auth scope plugin — they are public and unauthenticated
+  - Schedules DELETE per spec means `setActive(false)` + `removeSchedule()`, NOT `deleteById()` — the row is kept for audit trail
+  - For runs ownership check: `canAccessRun` checks (1) marketing_manager+, (2) triggered_by === userId, (3) location overlap with config.parameters.location_ids — `parameters` is `Record<string, unknown>` so cast location_ids via `Array.isArray()` check
+  - When retrieving schedules for a caller, query configs by `created_by` first, then fan out to `findByReportConfigId` per config — no direct join needed given expected low cardinality
+---
+
 ## 2026-04-10 - US-013
 - Implemented report-configs CRUD routes and on-demand generate endpoint
 - Files created: apps/crm/reporting/src/routes/report-configs.ts
