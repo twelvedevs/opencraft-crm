@@ -1,3 +1,17 @@
+## 2026-04-10 - US-011
+- Implemented src/jobs/generate-report.ts (BullMQ Worker + GENERATE_REPORT_JOB_OPTIONS) and full src/index.ts
+- Files created: apps/crm/reporting/src/jobs/generate-report.ts
+- Files updated: apps/crm/reporting/src/index.ts
+- **Learnings for future iterations:**
+  - GenerateReportJob is exported from report-renderer.ts and re-exported from generate-report.ts — routes/routes import from generate-report.ts, not report-renderer.ts
+  - GENERATE_REPORT_JOB_OPTIONS exported from generate-report.ts holds `attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnFail: false` — spread into each `queue.add()` call from routes
+  - Worker `failed` event fires after each attempt (not just the last); use `job.attemptsMade >= (job.opts.attempts ?? 1)` to detect final failure only
+  - renderReport already marks run as failed on each failed attempt and rethrows — Worker `failed` event is a safety net for the final error message persistence
+  - index.ts imports './jobs/generate-report.js' as a side-effect-only import to start the Worker in the same process as the HTTP server
+  - reconcile(db) is called BEFORE app.listen() — no traffic is served until BullMQ schedules are reconciled with the DB
+  - Route registration slots left as comments in the authenticated scope — US-012/013/014 will add actual routes
+---
+
 ## 2026-04-10 - US-010
 - Implemented email-sender.ts and report-renderer.ts
 - Files created: apps/crm/reporting/src/services/email-sender.ts, apps/crm/reporting/src/services/report-renderer.ts
