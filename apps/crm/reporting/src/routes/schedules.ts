@@ -69,6 +69,15 @@ export async function scheduleRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      const isManager =
+        req.user!.role === 'marketing_manager' || req.user!.role === 'super_admin';
+      if (config.created_by !== req.user!.sub && !isManager) {
+        return reply.code(403).send({
+          error: 'forbidden',
+          message: 'Not authorized to schedule this report config',
+        });
+      }
+
       const schedule = await schedulesRepo.create(db, body, req.user!.sub);
 
       try {

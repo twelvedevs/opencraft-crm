@@ -29,7 +29,7 @@ function canAccessRun(
   const locationIds = Array.isArray(configLocationIds) ? (configLocationIds as string[]) : [];
   if (locationIds.length > 0) {
     const locationSet = new Set(userLocations);
-    return locationIds.some((lid) => locationSet.has(lid));
+    return locationIds.every((lid) => locationSet.has(lid));
   }
   return false;
 }

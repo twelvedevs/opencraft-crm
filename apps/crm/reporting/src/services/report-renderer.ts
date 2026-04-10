@@ -85,6 +85,7 @@ async function uploadToMediaService(
     form.append('location_id', locationId);
   }
   form.append('purpose', 'report');
+  form.append('uploaded_by', SERVICE_CALLER_ID);
 
   const res = await fetch(`${env.MEDIA_SERVICE_URL}/media/internal/store`, {
     method: 'POST',
@@ -112,7 +113,6 @@ async function publishNotification(
   reportName: string,
   runId: string,
 ): Promise<void> {
-  // channel must be 3 segments: user:{id}:{type}
   const res = await fetch(`${env.NOTIFICATION_SERVICE_URL}/notifications/publish`, {
     method: 'POST',
     headers: {
@@ -120,7 +120,7 @@ async function publishNotification(
       Authorization: `Bearer ${env.INTERNAL_API_SECRET}`,
     },
     body: JSON.stringify({
-      channel: `user:${triggeredBy}:reports`,
+      channel: `user:${triggeredBy}`,
       title: 'Report Ready',
       body: `${reportName} is ready to download`,
       payload: { run_id: runId },
@@ -159,6 +159,9 @@ export async function renderReport(job: GenerateReportJob): Promise<void> {
     job;
 
   try {
+    // Mark run as actively processing
+    await runsRepo.updateStatus(db, report_run_id, 'running');
+
     // Step 1: Load report config
     const config = await reportConfigsRepo.findById(db, report_config_id);
     if (!config) {

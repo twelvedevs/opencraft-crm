@@ -71,7 +71,12 @@ export async function coordinatorPerformanceRoutes(app: FastifyInstance): Promis
       };
 
       try {
-        const metrics = await getMetrics('coordinator-performance', analyticsParams);
+        // Include coordinator_id in the cache family to prevent different coordinator
+        // filters from colliding on the same cache entry.
+        const cacheFamily = coordinator_id
+          ? `coordinator-performance:${coordinator_id}`
+          : 'coordinator-performance';
+        const metrics = await getMetrics(cacheFamily, analyticsParams);
 
         const coordinators = metrics.raw.coordinators.coordinators.map(c => ({
           coordinator_id: c.coordinator_id,

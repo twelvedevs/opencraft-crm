@@ -311,12 +311,29 @@ describe.skipIf(!HAS_DB || !HAS_REDIS)('generate-report BullMQ worker (integrati
     expect(updatedRun?.completed_at).not.toBeNull();
   });
 
-  it('Media Service is called with SERVICE_CALLER_ID in the request', async () => {
+  it('Media Service upload includes uploaded_by = SERVICE_CALLER_ID', async () => {
     const config = await insertConfig({
       created_by: USER_ID,
       parameters: { period_type: 'last_30d' },
     });
     const run = await insertRun(config.id, { status: 'pending', triggered_by: USER_ID });
+
+    // Capture the raw FormData body so we can inspect uploaded_by
+    let capturedFormData: FormData | undefined;
+    const originalFetch = fetchMock;
+    fetchMock = vi.fn().mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : (input as Request).url;
+      if (url.includes('/media/internal/store') && init?.body instanceof FormData) {
+        capturedFormData = init.body as FormData;
+      }
+      return originalFetch(input, init);
+    }) as ReturnType<typeof buildFetchMock>;
+    vi.stubGlobal('fetch', fetchMock);
 
     await reportingQueue.add(
       'generate-report',
@@ -329,6 +346,7 @@ describe.skipIf(!HAS_DB || !HAS_REDIS)('generate-report BullMQ worker (integrati
     const mediaCall = fetchCalls.find((c) => c.url.includes('/media/internal/store'));
     expect(mediaCall).toBeDefined();
     expect(mediaCall?.method).toBe('POST');
+    expect(capturedFormData?.get('uploaded_by')).toBe('00000000-0000-0000-0000-000000reporting');
   });
 
   // ─── Email delivery ────────────────────────────────────────────────────────

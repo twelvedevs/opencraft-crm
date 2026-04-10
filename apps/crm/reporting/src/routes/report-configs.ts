@@ -204,6 +204,10 @@ export async function reportConfigRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'not_found', message: 'Report config not found' });
       }
 
+      if (config.created_by !== req.user!.sub && !isManagerRole(req.user!.role)) {
+        return reply.code(403).send({ error: 'forbidden', message: 'Not authorized to generate this report' });
+      }
+
       const run = await runsRepo.create(db, {
         report_config_id: id,
         triggered_by: req.user!.sub,
