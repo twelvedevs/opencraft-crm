@@ -22,7 +22,7 @@ function deriveCron(schedule: ReportSchedule): string {
   return `0 ${hour_utc} ${day_of_month ?? 1} * *`;
 }
 
-const queueRedis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+export const queueRedis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 export const reportingQueue = new Queue(QUEUE_NAME, { connection: queueRedis });
 
 export async function registerSchedule(schedule: ReportSchedule): Promise<void> {

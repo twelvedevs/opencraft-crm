@@ -5,12 +5,16 @@ import { createLogger } from '@ortho/logger';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
 import { reconcile } from './services/schedule-manager.js';
+import { healthRoutes } from './routes/health.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { channelPerformanceRoutes } from './routes/metrics/channel-performance.js';
 import { locationComparisonRoutes } from './routes/metrics/location-comparison.js';
 import { coordinatorPerformanceRoutes } from './routes/metrics/coordinator-performance.js';
 import { campaignAnalyticsRoutes } from './routes/metrics/campaign-analytics.js';
 import { reportConfigRoutes } from './routes/report-configs.js';
+import { scheduleRoutes } from './routes/schedules.js';
+import { runRoutes } from './routes/runs.js';
+import { configRoutes } from './routes/config.js';
 
 // Importing this module starts the BullMQ Worker as a module-level side effect.
 // HTTP server and Worker run in the same process (per spec Section 1.1).
@@ -24,17 +28,15 @@ await app.register(sensible);
 // ---------------------------------------------------------------------------
 // Unauthenticated routes
 // ---------------------------------------------------------------------------
-
-// Minimal health check — a full /health + /ready implementation is added in US-014.
-app.get('/health', async () => ({ status: 'ok' }));
+await app.register(healthRoutes);
 
 // ---------------------------------------------------------------------------
-// Authenticated scope — routes registered by US-012, US-013, US-014
+// Authenticated scope
 // ---------------------------------------------------------------------------
 await app.register(async (scope) => {
   await scope.register(authPlugin, { jwksUrl: env.IDENTITY_JWKS_URL });
 
-  // Metric and dashboard routes  →  US-012
+  // Dashboard and metrics  →  US-012
   await scope.register(dashboardRoutes);
   await scope.register(channelPerformanceRoutes);
   await scope.register(locationComparisonRoutes);
@@ -44,7 +46,10 @@ await app.register(async (scope) => {
   // Report-config CRUD + generate  →  US-013
   await scope.register(reportConfigRoutes);
 
-  // Schedules, runs, revenue config, health  →  US-014
+  // Schedules, runs, revenue config  →  US-014
+  await scope.register(scheduleRoutes);
+  await scope.register(runRoutes);
+  await scope.register(configRoutes);
 });
 
 // ---------------------------------------------------------------------------
