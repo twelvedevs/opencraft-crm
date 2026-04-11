@@ -19,6 +19,7 @@
     "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@fastify/sensible": "^6.0.0",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@sinclair/typebox": "^0.34.0",
     "bullmq": "^5.0.0",

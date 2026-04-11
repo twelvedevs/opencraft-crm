@@ -20,7 +20,9 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   const verifier = new SendgridSignatureVerifier(env.SENDGRID_WEBHOOK_SIGNING_KEY_SECRET_ARN);
   const processor = new WebhookProcessor(app.db, app.eventBus);
 
-  app.post('/webhooks/sendgrid', async (request, reply) => {
+  app.post('/webhooks/sendgrid', {
+    schema: { tags: ['Webhooks'], summary: 'SendGrid event webhook' } as object,
+  }, async (request, reply) => {
     const rawBody = (request as unknown as { rawBody?: string }).rawBody ?? '';
     const signature =
       (request.headers['x-twilio-email-event-webhook-signature'] as string | undefined) ?? '';
