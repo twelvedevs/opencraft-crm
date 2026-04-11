@@ -1,0 +1,42 @@
+{
+  "name": "@ortho/import-service",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/lib-storage": "^3.0.0",
+    "@fastify/multipart": "^9.0.0",
+    "@fastify/sensible": "^6.0.0",
+    "@ortho/auth-middleware": "file:../../../packages/@ortho/auth-middleware",
+    "@ortho/logger": "file:../../../packages/@ortho/logger",
+    "@ortho/types": "file:../../../packages/@ortho/types",
+    "@sinclair/typebox": "^0.34.0",
+    "bullmq": "latest",
+    "csv-parse": "^5.0.0",
+    "fastify": "^5.0.0",
+    "knex": "^3.0.0",
+    "libphonenumber-js": "^1.0.0",
+    "pg": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.0.0",
+    "fast-jwt": "^6.2.0",
+    "nock": "latest",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}
