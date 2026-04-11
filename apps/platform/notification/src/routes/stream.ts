@@ -20,7 +20,7 @@ export async function streamRoute(
 ): Promise<void> {
   const secretKey = createSecretKey(Buffer.from(opts.jwtSecret, 'utf-8'));
 
-  fastify.get('/notifications/stream', async (request, reply) => {
+  fastify.get('/notifications/stream', { schema: { tags: ['Stream'], summary: 'SSE stream of real-time notifications' } as object }, async (request, reply) => {
     // Validate Authorization
     const authHeader = request.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {

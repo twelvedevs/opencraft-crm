@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import knex from 'knex';
 import { Redis } from 'ioredis';
+import { openapiPlugin } from '@ortho/openapi';
 import { config } from './config.js';
 import { NotificationsRepo } from './repositories/notifications.repo.js';
 import { Publisher } from './services/publisher.js';
@@ -13,6 +14,16 @@ import { createPublishRetryWorker } from './queue/publish-retry.worker.js';
 import { createCleanupWorker } from './queue/cleanup.worker.js';
 
 export const app = Fastify({ logger: true });
+
+await app.register(openapiPlugin, {
+  title: 'Notification Service',
+  description: 'Real-time in-app notifications via SSE',
+  tags: [
+    { name: 'Notifications', description: 'Notification management' },
+    { name: 'Publish', description: 'Publish notifications' },
+    { name: 'Stream', description: 'Real-time SSE stream' },
+  ],
+});
 
 // Shared DB + Redis clients (not created during test imports)
 let publisher: Publisher | undefined;
@@ -43,7 +54,7 @@ if (process.env['NODE_ENV'] !== 'test') {
   createCleanupWorker(config.REDIS_URL, repo);
 }
 
-app.get('/health', async () => {
+app.get('/health', { schema: { hide: true } as object }, async () => {
   return { status: 'ok' };
 });
 

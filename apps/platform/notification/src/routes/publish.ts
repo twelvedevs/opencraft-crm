@@ -34,8 +34,10 @@ export async function publishRoute(
     '/notifications/publish',
     {
       schema: {
+        tags: ['Publish'],
+        summary: 'Publish notification to users',
         body: PublishBody,
-      },
+      } as object,
     },
     async (request, reply) => {
       // Validate Authorization header
