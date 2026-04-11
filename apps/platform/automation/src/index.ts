@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
+import { openapiPlugin } from '@ortho/openapi';
 import { createDb } from './db.js';
 import rulesRoutes from './routes/rules.js';
 import { RulesRepository } from './repositories/rules.repository.js';
@@ -26,8 +27,16 @@ import { RetentionService } from './services/retention.js';
 const fastify = Fastify({ logger: true });
 
 await fastify.register(sensible);
+await fastify.register(openapiPlugin, {
+  title: 'Automation Engine',
+  description: 'Event-driven workflow runtime',
+  tags: [
+    { name: 'Rules', description: 'Automation rule management' },
+    { name: 'Executions', description: 'Execution history' },
+  ],
+});
 
-fastify.get('/healthz', async () => {
+fastify.get('/healthz', { schema: { hide: true } as object }, async () => {
   return { ok: true };
 });
 

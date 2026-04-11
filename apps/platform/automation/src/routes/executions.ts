@@ -38,6 +38,8 @@ const executionRoutes: FastifyPluginAsync<{ db: Knex }> = async (fastify, opts) 
     '/executions',
     {
       schema: {
+        tags: ['Executions'],
+        summary: 'List executions',
         querystring: Type.Object({
           rule_id: Type.Optional(Type.String()),
           entity_id: Type.Optional(Type.String()),
@@ -88,6 +90,8 @@ const executionRoutes: FastifyPluginAsync<{ db: Knex }> = async (fastify, opts) 
     '/executions/:executionId/steps/:stepId/output',
     {
       schema: {
+        tags: ['Executions'],
+        summary: 'Get step output',
         params: Type.Object({
           executionId: Type.String(),
           stepId: Type.String(),
