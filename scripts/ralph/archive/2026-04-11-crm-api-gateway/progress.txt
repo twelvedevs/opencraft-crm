@@ -1,0 +1,25 @@
+# Ralph Progress Log
+Started: Sat Apr 11 17:25:58 +03 2026
+---
+
+## Codebase Patterns
+- CRM API Gateway has no DB, no EventBridge, no BullMQ — purely Fastify + @fastify/reply-from + @fastify/rate-limit
+- CRITICAL: Route plugins must NOT be wrapped with fp(). fp() on a route plugin strips the prefix, causing wildcard /* to catch all requests at root scope. Only infrastructure plugins (auth, rate-limit, error-handler, request-id) should use fp().
+- @fastify/rate-limit v10 errorResponseBuilder must return an object with `statusCode` AND `message` properties (not just `error`) so the error-handler plugin can use them to set the HTTP status code and response body correctly. Returning a plain object without statusCode causes 500 instead of 429.
+- For rate-limit tests: register error-handler plugin + use @fastify/rate-limit directly with low limits (3/4/5 vs 60/300/600) — never use the real src/plugins/rate-limit.ts in tests since limits are hardcoded.
+- vi.mock('fast-jwt', ...) with createVerifier returning a function that decodes token payload directly allows different JWT subs to produce different rate-limit keys without real RSA keys.
+
+---
+
+## 2026-04-11 - US-018
+- What was implemented: test/rate-limit.test.ts — 7 Vitest tests covering public IP tier, JWT sub tier, API key hash tier, and /health exclusion. Also fixed a bug in src/plugins/rate-limit.ts where errorResponseBuilder returned a plain object without statusCode, causing 500 instead of 429.
+- Files changed:
+  - apps/crm/api-gateway/test/rate-limit.test.ts (new — 7 tests, all pass)
+  - apps/crm/api-gateway/src/plugins/rate-limit.ts (bugfix: errorResponseBuilder now includes statusCode + message so error-handler can produce correct 429)
+- **Learnings for future iterations:**
+  - @fastify/rate-limit v10 does `throw errorResponseBuilder(req, ctx)` — the thrown value needs `statusCode` for Fastify to use the right HTTP status. Without it, Fastify defaults to 500.
+  - The error-handler plugin checks `error.statusCode` and sends `{ error: error.message }` — so the errorResponseBuilder needs both `statusCode: context.statusCode` and `message: 'rate_limit_exceeded'`.
+  - For rate-limit tier isolation tests: each test creates a new buildApp() which gets a fresh in-memory rate-limit store. Call clearCache() in beforeEach to reset the api-key LRU cache.
+  - The fast-jwt mock can use createVerifier returning a decode-only function (reads payload base64url) to avoid needing per-test mockVerify.mockReturnValue calls — just put the sub in the JWT body with makeJwt(sub).
+  - The Retry-After header is added automatically by @fastify/rate-limit when the limit is exceeded (set in addHeaders configuration, enabled by default).
+---
