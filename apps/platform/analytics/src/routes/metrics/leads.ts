@@ -19,7 +19,7 @@ const LeadsQuerySchema = Type.Intersect([
 
 export async function leadsRoutes(app: FastifyInstance, options: { pool: Pool }): Promise<void> {
   app.get('/analytics/metrics/leads', {
-    schema: { querystring: LeadsQuerySchema },
+    schema: { querystring: LeadsQuerySchema, tags: ['Metrics'], summary: 'Get lead metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

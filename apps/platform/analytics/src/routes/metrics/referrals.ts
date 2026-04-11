@@ -10,7 +10,7 @@ import {
 
 export async function referralsRoutes(app: FastifyInstance, options: { pool: Pool }): Promise<void> {
   app.get('/analytics/metrics/referrals', {
-    schema: { querystring: SharedQuerySchema },
+    schema: { querystring: SharedQuerySchema, tags: ['Metrics'], summary: 'Get referral metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

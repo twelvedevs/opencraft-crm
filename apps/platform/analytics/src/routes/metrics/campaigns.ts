@@ -18,7 +18,7 @@ const CampaignsQuerySchema = Type.Intersect([
 
 export async function campaignsRoutes(app: FastifyInstance, options: { pool: Pool }): Promise<void> {
   app.get('/analytics/metrics/campaigns', {
-    schema: { querystring: CampaignsQuerySchema },
+    schema: { querystring: CampaignsQuerySchema, tags: ['Metrics'], summary: 'Get campaign metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

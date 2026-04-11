@@ -19,7 +19,7 @@ const PipelineQuerySchema = Type.Intersect([
 
 export async function pipelineRoutes(app: FastifyInstance, options: { pool: Pool }): Promise<void> {
   app.get('/analytics/metrics/pipeline', {
-    schema: { querystring: PipelineQuerySchema },
+    schema: { querystring: PipelineQuerySchema, tags: ['Metrics'], summary: 'Get pipeline funnel metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

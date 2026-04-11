@@ -17,7 +17,7 @@ export async function messagesRoutes(
   options: { pool: Pool },
 ): Promise<void> {
   app.get('/analytics/metrics/messages', {
-    schema: { querystring: MessagesQuerySchema },
+    schema: { querystring: MessagesQuerySchema, tags: ['Metrics'], summary: 'Get messaging metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

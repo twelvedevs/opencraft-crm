@@ -21,7 +21,7 @@ export async function conversionsRoutes(
   options: { pool: Pool },
 ): Promise<void> {
   app.get('/analytics/metrics/conversions', {
-    schema: { querystring: ConversionsQuerySchema },
+    schema: { querystring: ConversionsQuerySchema, tags: ['Metrics'], summary: 'Get conversion metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

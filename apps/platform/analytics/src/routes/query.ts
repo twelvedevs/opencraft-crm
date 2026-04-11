@@ -81,7 +81,7 @@ export async function queryRoutes(
   options: { pool: Pool },
 ): Promise<void> {
   app.post('/analytics/query', {
-    schema: { body: QueryBodySchema },
+    schema: { body: QueryBodySchema, tags: ['Query'], summary: 'Execute ad-hoc analytics query' } as object,
     config: { rateLimit: RATE_LIMIT_CONFIG },
   }, async (request, reply) => {
     const body = request.body as {
