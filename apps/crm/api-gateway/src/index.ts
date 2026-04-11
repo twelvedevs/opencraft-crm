@@ -5,6 +5,7 @@ import requestIdPlugin from './plugins/request-id.js';
 import authPlugin from './plugins/auth.js';
 import rateLimitPlugin from './plugins/rate-limit.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
+import healthRoutes from './routes/health.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -33,7 +34,7 @@ await app.register(errorHandlerPlugin);
 // Routes
 // ---------------------------------------------------------------------------
 // Health check (no prefix)
-// await app.register(healthRoutes);
+await app.register(healthRoutes);
 
 // Service proxies under /v1
 // await app.register(leadsRoutes, { prefix: '/v1/leads' });
