@@ -16,6 +16,7 @@ Started: Fri Apr 10 11:46:44 +03 2026
 - Route pattern: factory function `routeName(opts)` returning async Fastify plugin; `requireRole` for role arrays, `requireLocation` for location scoping
 - `@fastify/multipart` needs side-effect `import '@fastify/multipart'` for `req.file()` type augmentation
 - `libphonenumber-js` rejects `555` area codes — use real US area codes (212, 310, etc.) in tests
+- Route integration tests: use `fast-jwt` createSigner + RSA keypair for test JWTs, mock `globalThis.fetch` for JWKS; `vi.hoisted` + `vi.mock` for S3 Upload; multipart inject via manual boundary construction
 
 ---
 
@@ -231,4 +232,41 @@ Started: Fri Apr 10 11:46:44 +03 2026
   - nock `query(true)` matches any query string; `query((qs) => ...)` for specific param assertions
   - `LeadServiceClient` reads env vars at construction time — setup.ts must set env vars before any imports
   - Test helpers in helpers.ts are shared across all integration test files (parse, execute, undo, routes)
+---
+
+## 2026-04-10 - US-018
+- Implemented integration tests for execute phase (4 tests): active_patients happy path with DB state verification inside nock interceptor, completed_patients happy path, partial failure (404 from Pipeline Engine), crash recovery (stuck 'executing' row skipped)
+- Files created: test/integration/execute-phase.test.ts
+- **Learnings for future iterations:**
+  - nock callback reply form `reply(function(uri, body, cb) { ... })` allows async DB reads inside interceptors — use `cb(null, [statusCode, body])` to defer response until read completes
+  - `nock.isActive()` + `nock.activate()` guard in `beforeAll` prevents issues when test files run sequentially and a prior file called `nock.restore()`
+  - Execute phase tests need import rows seeded with status='matched' and matched_lead_id set (unlike parse_match which creates rows from CSV)
+  - For crash recovery tests: seed a row with status='executing' and before_snapshot; it will be detected by `findByImportIdAndStatus(['executing'])` and logged as warn
+  - Spy logger pattern: create object with `vi.fn()` for `warn` method, use `warnSpy.mock.calls[0][0]` to verify structured log fields (e.g., `{ importId, rowId }`)
+  - nock interceptors for sequential row processing are consumed in order of definition — define first row's interceptors before second row's
+---
+
+## 2026-04-10 - US-019
+- Implemented integration tests for undo phase (7 tests): transition undo, transition undo with appointment_id, conversion undo with call ordering, partial undo failure (best-effort), executing rows skipped with warn log, undo past deadline (422), undo when status=undoing (409)
+- Files created: test/integration/undo.test.ts
+- **Learnings for future iterations:**
+  - Undo phase tests seed imports with `status: 'undoing'` (not 'completed') since `initiateUndo` already transitions to 'undoing' before the BullMQ job runs
+  - Partial undo failure: row stays 'executed' (not 'undone') with error_message set; import.status is still 'undone' unconditionally (best-effort semantics)
+  - For undo DESC order tests: row_number=2 is processed first, row_number=1 second — nock interceptors must be defined in that order
+  - Route-level deadline/status guard tests use `ImportService.initiateUndo()` directly against real Postgres — no need for Fastify app setup since the SQL guard is in the service layer
+  - nock body matcher `(body) => { capture = body; return true; }` is useful for capturing and verifying request bodies without blocking the response
+---
+
+## 2026-04-11 - US-020
+- Implemented route integration tests (routes.test.ts, 5 tests) and contract tests (contract.test.ts, 1 test)
+- Added JWT/JWKS infrastructure to helpers.ts (makeJwt, mockFetchForJwks, restoreFetch) following lead service pattern
+- Files created: test/integration/routes.test.ts, test/integration/contract.test.ts
+- Files changed: test/integration/helpers.ts
+- **Learnings for future iterations:**
+  - Route integration tests need Fastify app with auth: generate RSA keypair, create JWKS response, mock `globalThis.fetch` to intercept JWKS URL, sign JWTs with `fast-jwt` createSigner
+  - Multipart file upload in Fastify inject: construct boundary string manually, join parts with `\r\n`, set `content-type: multipart/form-data; boundary=...` header
+  - Mock `@aws-sdk/lib-storage` Upload class with `vi.hoisted` + `vi.mock` — hoisting ensures mock is in place before route module imports Upload
+  - BullMQ Queue mock: `{ add: vi.fn() }` cast as Queue — assert enqueued job payload after route call
+  - Route registration order matters in test app too: register mappings before imports to prevent 'column-mappings' matching :id param
+  - Contract test pattern: capture Pipeline Engine request bodies inside nock interceptors, read DB state inside interceptor callback before responding to verify atomic snapshot writes
 ---

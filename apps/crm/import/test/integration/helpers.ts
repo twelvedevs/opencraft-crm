@@ -1,5 +1,7 @@
+import { generateKeyPairSync, createPublicKey } from 'node:crypto';
 import knexLib, { type Knex } from 'knex';
 import { Readable } from 'node:stream';
+import { createSigner } from 'fast-jwt';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { PipelineEngineClient } from '../../src/clients/pipeline-engine.js';
 
@@ -106,4 +108,59 @@ export function createSilentLogger() {
     debug: () => {},
     child: () => createSilentLogger(),
   } as unknown as import('pino').Logger;
+}
+
+// ---------------------------------------------------------------------------
+// JWT / JWKS helpers for route integration tests
+// ---------------------------------------------------------------------------
+
+const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+
+const jwk = createPublicKey(publicKey as string).export({ format: 'jwk' });
+const TEST_KID = 'test-key-1';
+const JWKS_RESPONSE = JSON.stringify({
+  keys: [{ ...jwk, kid: TEST_KID, use: 'sig', alg: 'RS256' }],
+});
+
+const sign = createSigner({ key: privateKey as string, algorithm: 'RS256', kid: TEST_KID });
+
+export function makeJwt(payload?: {
+  sub?: string;
+  role?: string;
+  locations?: string[];
+  must_change_password?: boolean;
+}): string {
+  return sign({
+    sub: payload?.sub ?? USER_ID,
+    role: payload?.role ?? 'call_center_manager',
+    locations: payload?.locations ?? [LOCATION_ID],
+    must_change_password: payload?.must_change_password ?? false,
+  });
+}
+
+const originalFetch = globalThis.fetch;
+
+function jwksMockFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  if (url.includes('.well-known/jwks.json') || url.includes('/jwks')) {
+    return Promise.resolve(
+      new Response(JWKS_RESPONSE, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  }
+  return originalFetch(input, init);
+}
+
+export function mockFetchForJwks(): void {
+  globalThis.fetch = jwksMockFetch as typeof globalThis.fetch;
+}
+
+export function restoreFetch(): void {
+  globalThis.fetch = originalFetch;
 }
