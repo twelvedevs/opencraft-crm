@@ -52,7 +52,7 @@ export async function referrersRoutes(
 
   // POST /referrers — create doctor referrer + initial link
   app.post('/', {
-    schema: { body: CreateReferrerBody },
+    schema: { body: CreateReferrerBody, tags: ['Referrers'], summary: 'Create referrer' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const body = req.body as {
@@ -79,7 +79,7 @@ export async function referrersRoutes(
 
   // GET /referrers — paginated list
   app.get('/', {
-    schema: { querystring: ListReferrersQuery },
+    schema: { querystring: ListReferrersQuery, tags: ['Referrers'], summary: 'List referrers' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const query = req.query as {
@@ -96,7 +96,7 @@ export async function referrersRoutes(
 
   // GET /referrers/:id — full record with active link + summary counts
   app.get('/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Referrers'], summary: 'Get referrer by ID' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -111,7 +111,7 @@ export async function referrersRoutes(
 
   // PATCH /referrers/:id — update doctor contact fields only
   app.patch('/:id', {
-    schema: { params: IdParams, body: PatchReferrerBody },
+    schema: { params: IdParams, body: PatchReferrerBody, tags: ['Referrers'], summary: 'Update referrer' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -143,7 +143,7 @@ export async function referrersRoutes(
 
   // PATCH /referrers/:id/status — { status: 'active'|'inactive' }
   app.patch('/:id/status', {
-    schema: { params: IdParams, body: PatchStatusBody },
+    schema: { params: IdParams, body: PatchStatusBody, tags: ['Referrers'], summary: 'Update referrer status' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

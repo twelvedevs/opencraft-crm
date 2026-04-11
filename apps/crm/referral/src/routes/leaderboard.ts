@@ -47,7 +47,7 @@ export async function leaderboardRoutes(
 
   // GET /leaderboard — ranked by cases_started DESC
   app.get('/leaderboard', {
-    schema: { querystring: LeaderboardQuery },
+    schema: { querystring: LeaderboardQuery, tags: ['Leaderboard'], summary: 'Get referral leaderboard' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const query = req.query as {

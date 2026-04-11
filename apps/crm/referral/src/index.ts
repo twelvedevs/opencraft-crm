@@ -1,6 +1,7 @@
 import Fastify, { type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
+import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
@@ -21,7 +22,20 @@ const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
 await app.register(sensible);
 
-app.get('/health', async () => ({ ok: true }));
+await app.register(openapiPlugin, {
+  title: 'Referral Service',
+  description: 'Referral link generation, click tracking, and conversion attribution',
+  tags: [
+    { name: 'Referrals', description: 'Referral records' },
+    { name: 'Referrers', description: 'Referring doctor and patient management' },
+    { name: 'Referral Links', description: 'Unique referral link management' },
+    { name: 'Rewards', description: 'Referral reward tracking' },
+    { name: 'Leaderboard', description: 'Top referrers leaderboard' },
+    { name: 'Public', description: 'Public referral link endpoints' },
+  ],
+});
+
+app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
 
 // Public routes — encapsulated scope, no auth
 await app.register(async (scope) => {

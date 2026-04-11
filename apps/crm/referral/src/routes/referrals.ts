@@ -34,7 +34,7 @@ export async function referralsRoutes(
 
   // GET / — paginated list of referrals
   app.get('/', {
-    schema: { querystring: ListReferralsQuery },
+    schema: { querystring: ListReferralsQuery, tags: ['Referrals'], summary: 'List referrals' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const query = req.query as {
@@ -53,7 +53,7 @@ export async function referralsRoutes(
 
   // GET /:id — full referral record including reward_event if exists
   app.get('/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Referrals'], summary: 'Get referral by ID' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -73,7 +73,7 @@ export async function referralsRoutes(
 
   // PATCH /:id/notifications — update notification preferences
   app.patch('/:id/notifications', {
-    schema: { params: IdParams, body: PatchNotificationsBody },
+    schema: { params: IdParams, body: PatchNotificationsBody, tags: ['Referrals'], summary: 'Update referral notification settings' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

@@ -30,7 +30,7 @@ export async function referralLinksRoutes(
 
   // POST /referrers/:id/links — generate new link, deactivate existing active link
   app.post('/referrers/:id/links', {
-    schema: { params: ReferrerIdParams },
+    schema: { params: ReferrerIdParams, tags: ['Referral Links'], summary: 'Create referral link' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -56,7 +56,7 @@ export async function referralLinksRoutes(
 
   // GET /referrers/:id/links — all links (active + inactive) with click_count
   app.get('/referrers/:id/links', {
-    schema: { params: ReferrerIdParams },
+    schema: { params: ReferrerIdParams, tags: ['Referral Links'], summary: 'List referral links' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -72,7 +72,7 @@ export async function referralLinksRoutes(
 
   // PATCH /links/:id/status — activating deactivates other active links for same referrer
   app.patch('/links/:id/status', {
-    schema: { params: LinkIdParams, body: PatchLinkStatusBody },
+    schema: { params: LinkIdParams, body: PatchLinkStatusBody, tags: ['Referral Links'], summary: 'Update referral link status' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
