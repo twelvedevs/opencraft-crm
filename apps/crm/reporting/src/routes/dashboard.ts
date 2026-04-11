@@ -48,7 +48,7 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/reporting/dashboard',
     {
-      schema: { querystring: MetricsQueryParams },
+      schema: { querystring: MetricsQueryParams, tags: ['Dashboard'], summary: 'Get executive dashboard summary' },
       preHandler: [readPerm],
     },
     async (req, reply) => {

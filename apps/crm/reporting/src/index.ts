@@ -1,6 +1,7 @@
 import Fastify, { type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
+import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
@@ -24,6 +25,19 @@ const log = createLogger('crm-reporting');
 const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
 await app.register(sensible);
+
+await app.register(openapiPlugin, {
+  title: 'Reporting Service',
+  description: 'Ortho-specific reporting — cost per case, ROAS, funnel rates, coordinator metrics',
+  tags: [
+    { name: 'Dashboard', description: 'Executive dashboard' },
+    { name: 'Metrics', description: 'Aggregated performance metrics' },
+    { name: 'Runs', description: 'Report run management' },
+    { name: 'Schedules', description: 'Scheduled report delivery' },
+    { name: 'Report Configs', description: 'Saved report configurations' },
+    { name: 'Config', description: 'Revenue and global config' },
+  ],
+});
 
 // ---------------------------------------------------------------------------
 // Unauthenticated routes

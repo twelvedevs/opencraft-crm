@@ -55,7 +55,7 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     '/reporting/runs',
-    { schema: { querystring: RunListQuery }, preHandler: [readPerm] },
+    { schema: { querystring: RunListQuery, tags: ['Runs'], summary: 'List report runs' }, preHandler: [readPerm] },
     async (req, reply) => {
       const q = req.query as { config_id?: string };
       if (!q.config_id) {
@@ -88,7 +88,7 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     '/reporting/runs/:id',
-    { schema: { params: RunParams }, preHandler: [readPerm] },
+    { schema: { params: RunParams, tags: ['Runs'], summary: 'Get report run by ID' }, preHandler: [readPerm] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const run = await runsRepo.findById(db, id);
@@ -119,7 +119,7 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     '/reporting/runs/:id/download',
-    { schema: { params: RunParams }, preHandler: [readPerm] },
+    { schema: { params: RunParams, tags: ['Runs'], summary: 'Download report run as PDF/CSV' }, preHandler: [readPerm] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
 
@@ -159,7 +159,7 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post(
     '/reporting/runs/:id/retry',
-    { schema: { params: RunParams }, preHandler: [readPerm] },
+    { schema: { params: RunParams, tags: ['Runs'], summary: 'Retry failed report run' }, preHandler: [readPerm] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
 
