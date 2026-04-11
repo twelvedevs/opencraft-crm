@@ -38,8 +38,18 @@ const app = Fastify({
 await app.register(replyFrom, {
   disableRequestLogging: true,
   undici: {
+    // headersTimeout: guards all routes against upstreams that never start responding.
+    // bodyTimeout: 0 — no body-read deadline. REST responses are small JSON that complete
+    // near-instantly; the SSE stream at GET /v1/notifications/stream is long-lived and must
+    // not be cut at any fixed duration. Setting bodyTimeout globally to 0 is correct for
+    // both cases. headersTimeout remains the primary protection against hung upstreams.
     headersTimeout: config.UPSTREAM_TIMEOUT_MS,
-    bodyTimeout: config.UPSTREAM_TIMEOUT_MS,
+    bodyTimeout: 0,
+    // maxRedirections: 0 — undici does not follow redirects by default, but we make this
+    // explicit. The gateway is a transparent proxy; upstream 3xx responses (e.g. the 302
+    // from the Referral Service click-redirect at GET /v1/referrals/r/:code) must be
+    // returned to the caller as-is to preserve click-tracking intent.
+    maxRedirections: 0,
   },
 });
 
@@ -50,6 +60,48 @@ await app.register(requestIdPlugin);
 await app.register(authPlugin);
 await app.register(rateLimitPlugin);
 await app.register(errorHandlerPlugin);
+
+// ---------------------------------------------------------------------------
+// Structured request logging — Section 6.4
+// Logs request_id, method, path, status_code, duration_ms, upstream_service,
+// plus user_id (JWT routes) and key_hash (API key routes). No body logging.
+// ---------------------------------------------------------------------------
+const SERVICE_BY_PREFIX: Record<string, string> = {
+  leads: 'lead-service',
+  pipeline: 'pipeline-service',
+  conversations: 'conversation-service',
+  campaigns: 'campaign-service',
+  referrals: 'referral-service',
+  reports: 'reporting-service',
+  imports: 'import-service',
+  notifications: 'notification-service',
+};
+
+function resolveUpstreamService(rawUrl: string): string {
+  if (rawUrl === '/health' || rawUrl.startsWith('/health?')) return 'health';
+  const match = /^\/v1\/([^/?]+)/.exec(rawUrl);
+  const segment = match?.[1];
+  return (segment !== undefined && SERVICE_BY_PREFIX[segment]) || 'unknown';
+}
+
+app.addHook('onResponse', (request, reply, done) => {
+  const fields: Record<string, unknown> = {
+    request_id: request.requestId,
+    method: request.method,
+    path: request.url.split('?')[0],
+    status_code: reply.statusCode,
+    duration_ms: Math.round(reply.elapsedTime),
+    upstream_service: resolveUpstreamService(request.url),
+  };
+  if (request.jwtClaims?.sub) {
+    fields['user_id'] = request.jwtClaims.sub;
+  }
+  if (request.apiKeyContext?.keyHash) {
+    fields['key_hash'] = request.apiKeyContext.keyHash;
+  }
+  request.log.info(fields, 'request completed');
+  done();
+});
 
 // ---------------------------------------------------------------------------
 // Routes

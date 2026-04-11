@@ -28,6 +28,10 @@ declare module 'fastify' {
     /** Headers to inject when forwarding to upstream services */
     authHeaders: Record<string, string>;
   }
+  interface FastifyContextConfig {
+    /** Set to false on routes that bypass JWT/API-key enforcement (public routes) */
+    auth?: boolean;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -115,24 +119,24 @@ async function authPluginImpl(app: FastifyInstance): Promise<void> {
   // Warm JWKS cache at startup
   await loadJwks();
 
+  // In-flight deduplication: all concurrent requests for an unknown kid share one
+  // JWKS fetch rather than each spawning their own — prevents thundering herd on
+  // key rotation where N concurrent requests would all hit the Identity Service at once.
+  let jwksInflight: Promise<void> | null = null;
+
   async function getVerifier(kid: string): Promise<Verifier | null> {
     if (verifierCache.has(kid)) return verifierCache.get(kid)!;
 
-    // Unknown kid — re-fetch JWKS with retries (cap at 5s per retry, 3 attempts)
-    const now = Date.now();
-    if (now - jwksCachedAt > config.JWKS_CACHE_TTL_MS) {
-      try {
-        await loadJwks();
-      } catch {
-        return null; // JWKS unreachable
-      }
-    } else {
-      // Force a refresh even within TTL when we see an unknown kid
-      try {
-        await loadJwks();
-      } catch {
-        return null;
-      }
+    // Unknown kid — re-fetch JWKS once; all concurrent callers await the same promise.
+    if (!jwksInflight) {
+      jwksInflight = loadJwks().finally(() => {
+        jwksInflight = null;
+      });
+    }
+    try {
+      await jwksInflight;
+    } catch {
+      return null; // JWKS unreachable — fail closed
     }
 
     return verifierCache.get(kid) ?? null;
