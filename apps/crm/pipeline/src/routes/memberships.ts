@@ -43,7 +43,7 @@ export async function membershipRoutes(
 ): Promise<void> {
   const { db, eventBus } = opts;
 
-  app.post('/memberships', { schema: { body: EnrollBodySchema } }, async (req, reply) => {
+  app.post('/memberships', { schema: { body: EnrollBodySchema, tags: ['Memberships'], summary: 'Enroll lead in pipeline' } as object }, async (req, reply) => {
     const body = req.body as {
       lead_id: string;
       location_id: string;
@@ -116,7 +116,7 @@ export async function membershipRoutes(
     return reply.status(201).send(membership);
   });
 
-  app.get('/memberships', { schema: { querystring: ListQuerySchema } }, async (req, reply) => {
+  app.get('/memberships', { schema: { querystring: ListQuerySchema, tags: ['Memberships'], summary: 'List pipeline memberships' } as object }, async (req, reply) => {
     const query = req.query as {
       lead_id?: string;
       pipeline?: string;
@@ -140,7 +140,7 @@ export async function membershipRoutes(
     return reply.status(200).send(result);
   });
 
-  app.get('/memberships/:id', async (req, reply) => {
+  app.get('/memberships/:id', { schema: { tags: ['Memberships'], summary: 'Get membership by ID' } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const membership = await findById(db, id);
     if (!membership) {

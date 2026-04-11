@@ -17,7 +17,7 @@ export async function closeRoutes(
 
   app.post(
     '/memberships/:id/close',
-    { schema: { body: CloseBodySchema } },
+    { schema: { body: CloseBodySchema, tags: ['Close'], summary: 'Close/archive membership' } as object },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = req.body as { triggered_by: string; closed_reason: string };
