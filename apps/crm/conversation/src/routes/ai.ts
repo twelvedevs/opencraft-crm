@@ -18,7 +18,7 @@ export async function aiRoute(
   const { db } = opts;
 
   // POST /conversations/:id/ai/drafts
-  app.post('/:id/ai/drafts', { schema: { params: IdParams } }, async (req, reply) => {
+  app.post('/:id/ai/drafts', { schema: { tags: ['AI'], summary: 'Generate AI reply drafts', params: IdParams } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     if (!req.user) {
@@ -39,7 +39,7 @@ export async function aiRoute(
   });
 
   // POST /conversations/:id/ai/summary
-  app.post('/:id/ai/summary', { schema: { params: IdParams } }, async (req, reply) => {
+  app.post('/:id/ai/summary', { schema: { tags: ['AI'], summary: 'Generate conversation summary', params: IdParams } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     if (!req.user) {
@@ -60,7 +60,7 @@ export async function aiRoute(
   });
 
   // POST /conversations/:id/ai/objection
-  app.post('/:id/ai/objection', { schema: { params: IdParams, body: ObjectionBody } }, async (req, reply) => {
+  app.post('/:id/ai/objection', { schema: { tags: ['AI'], summary: 'Get objection handling suggestions', params: IdParams, body: ObjectionBody } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as { objection_type: string };
 

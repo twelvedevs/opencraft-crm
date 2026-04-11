@@ -25,7 +25,7 @@ export async function messagesRoute(
   const { db } = opts;
 
   // GET /conversations/:id/messages
-  app.get('/:id/messages', { schema: { params: IdParams, querystring: MessagesQuery } }, async (req, reply) => {
+  app.get('/:id/messages', { schema: { tags: ['Messages'], summary: 'List conversation messages', params: IdParams, querystring: MessagesQuery } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const query = req.query as { before?: string; limit?: number };
 
@@ -55,7 +55,7 @@ export async function messagesRoute(
   });
 
   // POST /conversations/:id/messages
-  app.post('/:id/messages', { schema: { params: IdParams, body: SendBody } }, async (req, reply) => {
+  app.post('/:id/messages', { schema: { tags: ['Messages'], summary: 'Send message in conversation', params: IdParams, body: SendBody } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as { body: string; media_url?: string };
 

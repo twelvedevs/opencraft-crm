@@ -22,7 +22,7 @@ export async function bulkSendsRoute(
   const { db, bulkSendQueue } = opts;
 
   // POST /conversations/bulk-sends
-  app.post('/bulk-sends', { schema: { body: CreateBulkSendBody } }, async (req, reply) => {
+  app.post('/bulk-sends', { schema: { tags: ['Bulk Sends'], summary: 'Send bulk SMS to segment', body: CreateBulkSendBody } as object }, async (req, reply) => {
     const body = req.body as { segment: unknown; body: string; location_id: string };
 
     if (!req.user) {
@@ -56,7 +56,7 @@ export async function bulkSendsRoute(
   });
 
   // GET /conversations/bulk-sends/:job_id
-  app.get('/bulk-sends/:job_id', { schema: { params: JobIdParams } }, async (req, reply) => {
+  app.get('/bulk-sends/:job_id', { schema: { tags: ['Bulk Sends'], summary: 'Get bulk send job status', params: JobIdParams } as object }, async (req, reply) => {
     const { job_id } = req.params as { job_id: string };
 
     if (!req.user) {

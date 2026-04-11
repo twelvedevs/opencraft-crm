@@ -26,7 +26,7 @@ export async function scheduledRoute(
   const { db, scheduledSendQueue } = opts;
 
   // POST /conversations/:id/scheduled-messages
-  app.post('/:id/scheduled-messages', { schema: { params: IdParams, body: CreateScheduledBody } }, async (req, reply) => {
+  app.post('/:id/scheduled-messages', { schema: { tags: ['Scheduled Messages'], summary: 'Schedule a future message', params: IdParams, body: CreateScheduledBody } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as { body: string; media_url?: string; scheduled_for: string };
 
@@ -66,7 +66,7 @@ export async function scheduledRoute(
   });
 
   // GET /conversations/:id/scheduled-messages
-  app.get('/:id/scheduled-messages', { schema: { params: IdParams } }, async (req, reply) => {
+  app.get('/:id/scheduled-messages', { schema: { tags: ['Scheduled Messages'], summary: 'List scheduled messages', params: IdParams } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     if (!req.user) {
@@ -87,7 +87,7 @@ export async function scheduledRoute(
   });
 
   // DELETE /conversations/:id/scheduled-messages/:msg_id
-  app.delete('/:id/scheduled-messages/:msg_id', { schema: { params: ScheduledMsgParams } }, async (req, reply) => {
+  app.delete('/:id/scheduled-messages/:msg_id', { schema: { tags: ['Scheduled Messages'], summary: 'Cancel scheduled message', params: ScheduledMsgParams } as object }, async (req, reply) => {
     const { id, msg_id } = req.params as { id: string; msg_id: string };
 
     if (!req.user) {

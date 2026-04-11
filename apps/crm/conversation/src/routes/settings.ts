@@ -22,7 +22,7 @@ export async function settingsRoute(
   const { db } = opts;
 
   // GET /conversations/settings/locations/:id
-  app.get('/settings/locations/:id', { schema: { params: LocationIdParams } }, async (req, reply) => {
+  app.get('/settings/locations/:id', { schema: { tags: ['Settings'], summary: 'Get location inbox settings', params: LocationIdParams } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     if (!req.user || !SETTINGS_ROLES.includes(req.user.role)) {
@@ -38,7 +38,7 @@ export async function settingsRoute(
   });
 
   // PATCH /conversations/settings/locations/:id
-  app.patch('/settings/locations/:id', { schema: { params: LocationIdParams, body: PatchSettingsBody } }, async (req, reply) => {
+  app.patch('/settings/locations/:id', { schema: { tags: ['Settings'], summary: 'Update location inbox settings', params: LocationIdParams, body: PatchSettingsBody } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as {
       inactivity_days?: number;

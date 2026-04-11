@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { createLogger } from '@ortho/logger';
+import { openapiPlugin } from '@ortho/openapi';
 import type { EventBus } from '@ortho/event-bus';
 import type { Knex } from 'knex';
 import type { Queue } from 'bullmq';
@@ -25,6 +26,20 @@ export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues)
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
   await app.register(sensible);
+
+  await app.register(openapiPlugin, {
+    title: 'Conversation Service',
+    description: 'SMS inbox per location — conversation threading and AI-assisted messaging',
+    tags: [
+      { name: 'Conversations', description: 'Conversation management' },
+      { name: 'Messages', description: 'Message sending and retrieval' },
+      { name: 'Notes', description: 'Internal staff notes' },
+      { name: 'Bulk Sends', description: 'Bulk SMS to segments' },
+      { name: 'AI', description: 'AI-assisted reply drafting and summaries' },
+      { name: 'Scheduled Messages', description: 'Future-dated message scheduling' },
+      { name: 'Settings', description: 'Location inbox settings' },
+    ],
+  });
 
   // Internal auth hook at root scope
   app.addHook('onRequest', async (request, reply) => {
@@ -53,7 +68,7 @@ export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues)
     }
   });
 
-  app.get('/health', async () => ({ ok: true }));
+  app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
 
   // Route plugins — bulk-sends and settings registered before /:id to avoid param conflicts
   if (queues?.bulkSendQueue) {

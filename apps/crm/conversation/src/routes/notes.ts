@@ -23,7 +23,7 @@ export async function notesRoute(
   const { db } = opts;
 
   // POST /conversations/:id/notes
-  app.post('/:id/notes', { schema: { params: IdParams, body: CreateNoteBody } }, async (req, reply) => {
+  app.post('/:id/notes', { schema: { tags: ['Notes'], summary: 'Add internal note', params: IdParams, body: CreateNoteBody } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as { body: string };
 
@@ -50,7 +50,7 @@ export async function notesRoute(
   });
 
   // DELETE /conversations/:id/notes/:note_id
-  app.delete('/:id/notes/:note_id', { schema: { params: NoteIdParams } }, async (req, reply) => {
+  app.delete('/:id/notes/:note_id', { schema: { tags: ['Notes'], summary: 'Delete internal note', params: NoteIdParams } as object }, async (req, reply) => {
     const { id, note_id } = req.params as { id: string; note_id: string };
 
     if (!req.user) {
