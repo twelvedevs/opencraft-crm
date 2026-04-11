@@ -21,6 +21,7 @@
     "@fastify/multipart": "^9.0.0",
     "@fastify/sensible": "^6.0.0",
     "@ortho/auth-middleware": "file:../../../packages/@ortho/auth-middleware",
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@sinclair/typebox": "^0.34.0",

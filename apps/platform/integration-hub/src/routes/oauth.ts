@@ -26,6 +26,7 @@ export async function oauthRoutes(
   // GET /integrations/connect/:platform
   fastify.get<{ Params: { platform: string } }>(
     '/integrations/connect/:platform',
+    { schema: { tags: ['OAuth'], summary: 'Start OAuth authorization flow' } as object },
     async (request, reply) => {
       const connector = getConnector(request.params.platform);
       const { state, codeChallenge } = createState(oauthStateSecret);
@@ -40,6 +41,7 @@ export async function oauthRoutes(
     Querystring: { code: string; state: string };
   }>(
     '/integrations/oauth/:platform/callback',
+    { schema: { tags: ['OAuth'], summary: 'OAuth callback handler' } as object },
     async (request, reply) => {
       const { platform } = request.params;
       const { code, state } = request.query;
@@ -90,6 +92,7 @@ export async function oauthRoutes(
   // DELETE /integrations/accounts/:id
   fastify.delete<{ Params: { id: string } }>(
     '/integrations/accounts/:id',
+    { schema: { tags: ['OAuth'], summary: 'Disconnect integration account' } as object },
     async (request, reply) => {
       const { id } = request.params;
 

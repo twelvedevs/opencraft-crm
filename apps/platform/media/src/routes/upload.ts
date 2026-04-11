@@ -28,7 +28,7 @@ export async function uploadRoutes(
   app.post(
     '/media/upload-url',
     {
-      schema: { body: UploadUrlBody },
+      schema: { body: UploadUrlBody, tags: ['Upload'], summary: 'Request presigned S3 upload URL' } as object,
     },
     async (request, reply) => {
       const body = request.body as {
@@ -112,6 +112,7 @@ export async function uploadRoutes(
 
   app.post(
     '/media/confirm/:upload_id',
+    { schema: { tags: ['Upload'], summary: 'Confirm upload completion' } as object },
     async (request, reply) => {
       const { upload_id } = request.params as { upload_id: string };
       const userSub = (request as any).user.sub;
@@ -224,6 +225,7 @@ export async function uploadRoutes(
 
   app.post(
     '/media/upload',
+    { schema: { tags: ['Upload'], summary: 'Direct multipart upload' } as object },
     async (request, reply) => {
       const userSub = (request as any).user.sub;
 

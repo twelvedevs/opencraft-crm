@@ -13,6 +13,7 @@ export async function fileRoutes(
 
   app.get(
     '/media/:file_id',
+    { schema: { tags: ['Files'], summary: 'Get file metadata and CDN URL' } as object },
     async (request, reply) => {
       const { file_id } = request.params as { file_id: string };
 
@@ -70,6 +71,7 @@ export async function fileRoutes(
 
   app.delete(
     '/media/:file_id',
+    { schema: { tags: ['Files'], summary: 'Delete file' } as object },
     async (request, reply) => {
       const { file_id } = request.params as { file_id: string };
 
