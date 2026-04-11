@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import { createLogger } from '@ortho/logger';
 import { config } from './config.js';
+import requestIdPlugin from './plugins/request-id.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -19,9 +20,8 @@ const app = Fastify({
 
 // ---------------------------------------------------------------------------
 // Global plugins (registered in order: request-id → auth → rate-limit → error-handler)
-// Placeholder imports — implemented in later stories.
 // ---------------------------------------------------------------------------
-// await app.register(requestIdPlugin);
+await app.register(requestIdPlugin);
 // await app.register(authPlugin);
 // await app.register(rateLimitPlugin);
 // await app.register(errorHandlerPlugin);
