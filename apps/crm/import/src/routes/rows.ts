@@ -34,7 +34,7 @@ export function rowsRoutes(opts: {
     app.get(
       '/imports/:id/rows',
       {
-        schema: { params: GetRowsParamsSchema, querystring: GetRowsQuerySchema },
+        schema: { tags: ['Rows'], summary: 'List import rows with match status', params: GetRowsParamsSchema, querystring: GetRowsQuerySchema } as object,
         preHandler: [rolePre],
       },
       async (req, reply) => {

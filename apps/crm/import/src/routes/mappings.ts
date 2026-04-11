@@ -23,7 +23,7 @@ export function mappingsRoutes(opts: {
     app.get(
       '/imports/column-mappings/:type',
       {
-        schema: { params: GetMappingParamsSchema },
+        schema: { tags: ['Mappings'], summary: 'Get column mapping template by type', params: GetMappingParamsSchema } as object,
         preHandler: [rolePre],
       },
       async (req, reply) => {

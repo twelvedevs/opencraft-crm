@@ -29,7 +29,7 @@ export function actionsRoutes(opts: {
     app.post(
       '/imports/:id/confirm',
       {
-        schema: { params: ActionParamsSchema, body: ConfirmBodySchema },
+        schema: { tags: ['Actions'], summary: 'Confirm and execute import', params: ActionParamsSchema, body: ConfirmBodySchema } as object,
         preHandler: [rolePre],
       },
       async (req, reply) => {
@@ -55,7 +55,7 @@ export function actionsRoutes(opts: {
     app.post(
       '/imports/:id/cancel',
       {
-        schema: { params: ActionParamsSchema },
+        schema: { tags: ['Actions'], summary: 'Cancel pending import', params: ActionParamsSchema } as object,
         preHandler: [rolePre],
       },
       async (req, reply) => {
@@ -79,7 +79,7 @@ export function actionsRoutes(opts: {
     app.post(
       '/imports/:id/undo',
       {
-        schema: { params: ActionParamsSchema },
+        schema: { tags: ['Actions'], summary: 'Undo completed import', params: ActionParamsSchema } as object,
         preHandler: [rolePre],
       },
       async (req, reply) => {

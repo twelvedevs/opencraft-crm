@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import multipart from '@fastify/multipart';
 import { authPlugin } from '@ortho/auth-middleware';
 import { createLogger } from '@ortho/logger';
+import { openapiPlugin } from '@ortho/openapi';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Queue } from 'bullmq';
 import db, { destroy } from './db.js';
@@ -65,8 +66,19 @@ const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 await app.register(sensible);
 await app.register(multipart);
 
+await app.register(openapiPlugin, {
+  title: 'Data Import Service',
+  description: 'Ortho2 CSV parsing, column mapping, and 5-tier match logic',
+  tags: [
+    { name: 'Imports', description: 'Import job management' },
+    { name: 'Mappings', description: 'Column mapping templates' },
+    { name: 'Rows', description: 'Import row inspection' },
+    { name: 'Actions', description: 'Confirm, cancel, and undo imports' },
+  ],
+});
+
 // Health check (unauthenticated)
-app.get('/health', async () => ({ ok: true }));
+app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
 
 // ---------------------------------------------------------------------------
 // Authenticated scope — all routes
