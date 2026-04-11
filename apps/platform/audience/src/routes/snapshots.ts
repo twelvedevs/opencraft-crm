@@ -9,7 +9,9 @@ export async function snapshotRoutes(app: FastifyInstance): Promise<void> {
         limit: Type.Optional(Type.Integer({ default: 1000, minimum: 1, maximum: 10000 })),
         offset: Type.Optional(Type.Integer({ default: 0, minimum: 0 })),
       }),
-    },
+      tags: ['Snapshots'],
+      summary: 'Get audience snapshot',
+    } as object,
   }, async (request, reply) => {
     const { snapshot_id } = request.params as { snapshot_id: string };
     const query = request.query as { limit?: number; offset?: number };

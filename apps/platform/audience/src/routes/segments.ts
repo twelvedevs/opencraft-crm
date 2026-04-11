@@ -24,7 +24,7 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /audiences/segments
   app.post('/audiences/segments', {
-    schema: { body: CreateSegmentBody },
+    schema: { body: CreateSegmentBody, tags: ['Segments'], summary: 'Create audience segment' } as object,
   }, async (request, reply) => {
     const body = request.body as { name: string; filter: unknown };
 
@@ -62,7 +62,7 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
 
   // PUT /audiences/segments/:id
   app.put('/audiences/segments/:id', {
-    schema: { body: UpdateSegmentBody },
+    schema: { body: UpdateSegmentBody, tags: ['Segments'], summary: 'Update audience segment' } as object,
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as { filter: unknown };
@@ -113,7 +113,7 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
 
   // GET /audiences/segments
   app.get('/audiences/segments', {
-    schema: { querystring: ListSegmentsQuery },
+    schema: { querystring: ListSegmentsQuery, tags: ['Segments'], summary: 'List audience segments' } as object,
   }, async (request, reply) => {
     const query = request.query as { limit?: number; offset?: number; status?: string };
     const limit = query.limit ?? 100;
@@ -140,7 +140,7 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /audiences/segments/:id/activate
   // TODO: Add Marketing Manager role check (403) when @ortho/auth-middleware is wired up
-  app.post('/audiences/segments/:id/activate', async (request, reply) => {
+  app.post('/audiences/segments/:id/activate', { schema: { tags: ['Segments'], summary: 'Activate segment' } as object }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
     const segment = await segmentsRepo.findById(id);
@@ -170,7 +170,7 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /audiences/segments/:id/disable
   // TODO: Add Marketing Manager role check (403) when @ortho/auth-middleware is wired up
-  app.post('/audiences/segments/:id/disable', async (request, reply) => {
+  app.post('/audiences/segments/:id/disable', { schema: { tags: ['Segments'], summary: 'Disable segment' } as object }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
     const segment = await segmentsRepo.findById(id);
@@ -190,7 +190,7 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /audiences/segments/:id
-  app.get('/audiences/segments/:id', async (request, reply) => {
+  app.get('/audiences/segments/:id', { schema: { tags: ['Segments'], summary: 'Get segment by ID' } as object }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
     const segment = await segmentsRepo.findById(id);

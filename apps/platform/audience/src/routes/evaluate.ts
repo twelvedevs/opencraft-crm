@@ -21,7 +21,7 @@ const InlineEvaluateBody = Type.Object({
 export async function evaluateRoutes(app: FastifyInstance): Promise<void> {
   // Named segment batch evaluate
   app.post('/audiences/segments/:id/evaluate', {
-    schema: { body: EvaluateBody },
+    schema: { body: EvaluateBody, tags: ['Evaluation'], summary: 'Evaluate segment membership' } as object,
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as {
@@ -93,7 +93,7 @@ export async function evaluateRoutes(app: FastifyInstance): Promise<void> {
 
   // Inline evaluate (no stored segment)
   app.post('/audiences/evaluate', {
-    schema: { body: InlineEvaluateBody },
+    schema: { body: InlineEvaluateBody, tags: ['Evaluation'], summary: 'Evaluate filter against entity list' } as object,
   }, async (request, reply) => {
     const body = request.body as {
       snapshot_id?: string;

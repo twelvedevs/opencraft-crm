@@ -11,7 +11,7 @@ export async function checkRoutes(app: FastifyInstance): Promise<void> {
   const filterEvaluator = new FilterEvaluator();
 
   app.post('/audiences/segments/:id/check', {
-    schema: { body: CheckBody },
+    schema: { body: CheckBody, tags: ['Evaluation'], summary: 'Check single entity membership' } as object,
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { entity } = request.body as { entity: Record<string, unknown> };
