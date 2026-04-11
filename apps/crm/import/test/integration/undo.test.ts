@@ -234,9 +234,9 @@ describe.skipIf(!HAS_DB)('undo phase (integration)', () => {
     expect(closeBody!.triggered_by).toBe(USER_ID);
     expect(closeBody!.reason).toBe('import_undo');
 
-    // Verify enrollMembership args
+    // Verify enrollMembership args — lead_id must be the matched lead's UUID, not the membership id
     expect(enrollBody).not.toBeNull();
-    expect(enrollBody!.lead_id).toBe(PRE_IMPORT_MEMBERSHIP_ID);
+    expect(enrollBody!.lead_id).toBe(LEAD_ID_1);
     expect(enrollBody!.pipeline).toBe('new_patient');
     expect(enrollBody!.stage).toBe('contacted');
     expect(enrollBody!.triggered_by).toBe(USER_ID);

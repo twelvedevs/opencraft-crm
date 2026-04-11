@@ -22,7 +22,7 @@ export class UndoService {
     if (snapshot.type === 'transition') {
       await this.undoTransition(snapshot, triggeredBy, row.matched_lead_id!);
     } else if (snapshot.type === 'conversion') {
-      await this.undoConversion(snapshot, importRecord, triggeredBy);
+      await this.undoConversion(snapshot, importRecord, triggeredBy, row.matched_lead_id!);
     } else {
       throw new Error(`Unknown snapshot type: ${snapshot.type as string}`);
     }
@@ -55,6 +55,7 @@ export class UndoService {
     snapshot: Record<string, unknown>,
     importRecord: Import,
     triggeredBy: string,
+    leadId: string,
   ): Promise<void> {
     await this.pipelineEngineClient.closeMembership(
       snapshot.post_import_membership_id as string,
@@ -65,7 +66,7 @@ export class UndoService {
     );
 
     await this.pipelineEngineClient.enrollMembership({
-      lead_id: snapshot.pre_import_membership_id as string,
+      lead_id: leadId,
       location_id: importRecord.location_id,
       pipeline: snapshot.pre_import_pipeline as string,
       stage: snapshot.pre_import_stage as string,

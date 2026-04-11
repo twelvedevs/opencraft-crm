@@ -38,7 +38,7 @@ export function actionsRoutes(opts: {
 
         try {
           const record = await importService.confirmImport(id, column_mapping, req.user!.sub);
-          await importQueue.add('import-job', { import_id: id, phase: 'execute' });
+          await importQueue.add('import-job', { import_id: id, phase: 'execute' }, { attempts: 1, removeOnComplete: true, removeOnFail: false });
           return reply.code(202).send(record);
         } catch (err) {
           if (err instanceof ImportServiceError) {
@@ -87,7 +87,7 @@ export function actionsRoutes(opts: {
 
         try {
           const record = await importService.initiateUndo(id);
-          await importQueue.add('import-job', { import_id: id, phase: 'undo' });
+          await importQueue.add('import-job', { import_id: id, phase: 'undo' }, { attempts: 1, removeOnComplete: true, removeOnFail: false });
           return reply.code(202).send(record);
         } catch (err) {
           if (err instanceof ImportServiceError) {

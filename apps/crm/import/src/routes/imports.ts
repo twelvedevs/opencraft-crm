@@ -89,7 +89,7 @@ export function importsRoutes(opts: {
           fileKey,
         });
 
-        await importQueue.add('import-job', { import_id: importId, phase: 'parse_match' });
+        await importQueue.add('import-job', { import_id: importId, phase: 'parse_match' }, { attempts: 1, removeOnComplete: true, removeOnFail: false });
 
         return reply.code(201).send(record);
       },

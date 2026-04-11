@@ -166,13 +166,14 @@ describe('UndoService', () => {
       );
     });
 
-    it('calls enrollMembership second with pre_import_pipeline and pre_import_stage', async () => {
-      const preMembershipId = crypto.randomUUID();
+    it('calls enrollMembership second with pre_import_pipeline and pre_import_stage, lead_id from row.matched_lead_id', async () => {
+      const matchedLeadId = crypto.randomUUID();
       const row = makeImportRow({
+        matched_lead_id: matchedLeadId,
         before_snapshot: {
           type: 'conversion',
           post_import_membership_id: crypto.randomUUID(),
-          pre_import_membership_id: preMembershipId,
+          pre_import_membership_id: crypto.randomUUID(),
           pre_import_pipeline: 'new_patient',
           pre_import_stage: 'contract_signed',
         },
@@ -181,7 +182,7 @@ describe('UndoService', () => {
       await service.undoRow(row, importRecord);
 
       expect(vi.mocked(pipelineClient.enrollMembership)).toHaveBeenCalledWith({
-        lead_id: preMembershipId,
+        lead_id: matchedLeadId,
         location_id: importRecord.location_id,
         pipeline: 'new_patient',
         stage: 'contract_signed',

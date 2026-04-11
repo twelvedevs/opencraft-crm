@@ -225,12 +225,16 @@ async function executeActivePatients(
     channel: 'import',
   })) as { id: string };
 
-  // Update snapshot with post_import_membership_id and mark executed
-  const currentRow = await importRowRepo.update(row.id, { status: 'executed' });
-  const snapshot = currentRow.before_snapshot as Record<string, unknown>;
-  snapshot.post_import_membership_id = convertResponse.id;
+  // Atomically write post_import_membership_id into snapshot and mark executed in one update
   await importRowRepo.update(row.id, {
-    before_snapshot: JSON.stringify(snapshot) as unknown as Record<string, unknown>,
+    before_snapshot: JSON.stringify({
+      type: 'conversion',
+      pre_import_membership_id: membership.id,
+      pre_import_pipeline: 'new_patient',
+      pre_import_stage: membership.stage,
+      post_import_membership_id: convertResponse.id,
+    }) as unknown as Record<string, unknown>,
+    status: 'executed',
   });
   return true;
 }
@@ -280,11 +284,16 @@ async function executeCompletedPatients(
     channel: 'import',
   })) as { id: string };
 
-  const currentRow2 = await importRowRepo.update(row.id, { status: 'executed' });
-  const snapshot2 = currentRow2.before_snapshot as Record<string, unknown>;
-  snapshot2.post_import_membership_id = convertResponse.id;
+  // Atomically write post_import_membership_id into snapshot and mark executed in one update
   await importRowRepo.update(row.id, {
-    before_snapshot: JSON.stringify(snapshot2) as unknown as Record<string, unknown>,
+    before_snapshot: JSON.stringify({
+      type: 'conversion',
+      pre_import_membership_id: membership.id,
+      pre_import_pipeline: 'in_treatment',
+      pre_import_stage: membership.stage,
+      post_import_membership_id: convertResponse.id,
+    }) as unknown as Record<string, unknown>,
+    status: 'executed',
   });
   return true;
 }
@@ -312,6 +321,7 @@ async function executeScheduledAppointments(
     before_snapshot: JSON.stringify({
       type: 'transition',
       membership_id: membership.id,
+      pipeline: 'new_patient',
       stage: membership.stage,
       appointment_id: null,
     }) as unknown as Record<string, unknown>,
@@ -346,12 +356,16 @@ async function executeScheduledAppointments(
     created_by: triggeredBy,
   })) as { id: string };
 
-  // Update snapshot with appointment_id and mark executed
-  const currentRow3 = await importRowRepo.update(row.id, { status: 'executed' });
-  const snapshot3 = currentRow3.before_snapshot as Record<string, unknown>;
-  snapshot3.appointment_id = appointmentResponse.id;
+  // Atomically write appointment_id into snapshot and mark executed in one update
   await importRowRepo.update(row.id, {
-    before_snapshot: JSON.stringify(snapshot3) as unknown as Record<string, unknown>,
+    before_snapshot: JSON.stringify({
+      type: 'transition',
+      membership_id: membership.id,
+      pipeline: 'new_patient',
+      stage: membership.stage,
+      appointment_id: appointmentResponse.id,
+    }) as unknown as Record<string, unknown>,
+    status: 'executed',
   });
   return true;
 }
@@ -382,7 +396,9 @@ async function executeNoShows(
     before_snapshot: JSON.stringify({
       type: 'transition',
       membership_id: membership.id,
+      pipeline: 'new_patient',
       stage: membership.stage,
+      appointment_id: null,
     }) as unknown as Record<string, unknown>,
     status: 'executing',
   });
