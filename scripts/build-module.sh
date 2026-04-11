@@ -149,10 +149,28 @@ if [ "$SKIP_TO" -le 4 ]; then
   echo "✓ Step 4: Committed."
 fi
 
-# ─── Step 5: Ralph implementation loop ───────────────────────────────────────
+# ─── Step 5: Ralph implementation loop (reruns until all tasks pass) ─────────
 if [ "$SKIP_TO" -le 5 ]; then
-  echo "▶ Step 5: Running Ralph implementation loop (max $MAX_RALPH_ITERATIONS iterations)..."
-  ./scripts/ralph/ralph-cc.sh "$MAX_RALPH_ITERATIONS"
+  RALPH_ROUND=1
+  while true; do
+    REMAINING=$(grep '"passes"' scripts/ralph/prd.json | grep false | wc -l | tr -d ' ')
+    if [ "$REMAINING" -eq 0 ]; then
+      echo "✓ Step 5: All tasks complete."
+      break
+    fi
+
+    echo "▶ Step 5 (round $RALPH_ROUND): $REMAINING task(s) remaining — running Ralph (max $MAX_RALPH_ITERATIONS iterations)..."
+    ./scripts/ralph/ralph-cc.sh "$MAX_RALPH_ITERATIONS" || true
+
+    REMAINING_AFTER=$(grep '"passes"' scripts/ralph/prd.json | grep false | wc -l | tr -d ' ')
+    if [ "$REMAINING_AFTER" -eq "$REMAINING" ]; then
+      echo "⚠️  Step 5: No progress after round $RALPH_ROUND ($REMAINING_AFTER task(s) still pending). Stopping to avoid infinite loop."
+      echo "   Check scripts/ralph/progress.txt for details, then resume with: --skip-to 5"
+      exit 1
+    fi
+
+    RALPH_ROUND=$((RALPH_ROUND + 1))
+  done
 fi
 
 # ─── Step 6: Archive prd.json + progress.txt ─────────────────────────────────
