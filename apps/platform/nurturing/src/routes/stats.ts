@@ -23,6 +23,8 @@ const statsRoutes: FastifyPluginAsync<StatsRouteOptions> = async (fastify, opts)
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Stats'],
+        summary: 'Get sequence statistics',
         params: ParamsSchema,
       },
     },

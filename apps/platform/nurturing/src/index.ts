@@ -4,6 +4,7 @@ import sensible from '@fastify/sensible';
 import { Redis } from 'ioredis';
 import type { FastifyInstance } from 'fastify';
 import type { Queue } from 'bullmq';
+import { openapiPlugin } from '@ortho/openapi';
 import authPlugin from './plugins/auth.js';
 import { createDb } from './db.js';
 import { SequenceDefinitionsRepository } from './repositories/sequence-definitions.repo.js';
@@ -71,6 +72,15 @@ export async function createApp(opts?: {
   );
 
   await fastify.register(sensible);
+  await fastify.register(openapiPlugin, {
+    title: 'Nurturing Engine',
+    description: 'Generic drip/lifecycle sequence runtime',
+    tags: [
+      { name: 'Sequences', description: 'Sequence definition management' },
+      { name: 'Enrollments', description: 'Entity enrollment in sequences' },
+      { name: 'Stats', description: 'Sequence statistics' },
+    ],
+  });
   await fastify.register(authPlugin);
   await fastify.register(sequencesRoutes, { definitionsRepo, versionsRepo, versioningService });
   await fastify.register(enrollmentsRoutes, { enrollmentManager, enrollmentsRepo, stepExecutionsRepo, db, stepQueue: queue, publisher });
@@ -80,7 +90,7 @@ export async function createApp(opts?: {
     await fastify.register(safetyNetPollerPlugin, { stepExecutionsRepo, stepQueue: queue, redis, logger: fastify.log as Logger });
   }
 
-  fastify.get('/healthz', async () => {
+  fastify.get('/healthz', { schema: { hide: true } as object }, async () => {
     return { ok: true };
   });
 
