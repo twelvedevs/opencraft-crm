@@ -142,6 +142,7 @@ if [ "$SKIP_TO" -le 4 ]; then
   git add \
     "docs/superpowers/specs/$UPDATED_SPEC" \
     "$TASKS_PATH" \
+    "scripts/ralph/progress.txt" \
     "scripts/ralph/prd.json" 2>/dev/null || true
   git diff --cached --quiet && echo "(nothing to commit)" || \
     git commit -m "chore($SLUG): prepare implementation plan"
