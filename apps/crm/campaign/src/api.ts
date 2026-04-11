@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
+import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
 import type { Knex } from 'knex';
 import { env } from './env.js';
@@ -15,12 +16,23 @@ export async function buildApp(db: Knex): Promise<FastifyInstance> {
 
   await app.register(sensible);
 
+  await app.register(openapiPlugin, {
+    title: 'Campaign Service',
+    description: 'Email broadcast campaigns with approval workflow',
+    tags: [
+      { name: 'Campaigns', description: 'Campaign management' },
+      { name: 'Workflow', description: 'Approval and scheduling workflow' },
+      { name: 'Comments', description: 'Review comments' },
+      { name: 'Diagnostics', description: 'Send diagnostics and spam checking' },
+    ],
+  });
+
   await app.register(authPlugin, {
     jwksUrl: env.IDENTITY_JWKS_URL,
     allowedPaths: ['/health'],
   });
 
-  app.get('/health', async () => ({ ok: true }));
+  app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
 
   await app.register(campaignsRoutes, { prefix: '/campaigns', db });
   await app.register(workflowRoutes, { prefix: '/campaigns', db });
