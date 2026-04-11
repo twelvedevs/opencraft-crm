@@ -47,3 +47,14 @@ Started: Sat Apr 11 17:25:58 +03 2026
   - In the pipeline tests, mockVerify.mockReturnValue() is set inside buildApp() AFTER authPlugin is registered — this works because mockVerify is the same mock object reference that gets called at request time, not at plugin registration time.
   - The @fastify/reply-from mock using fp() IS correct for the mock itself — it ensures reply.from is decorated at the parent scope and accessible in child scopes (route plugin child scopes).
 ---
+
+## 2026-04-11 - US-017
+- What was implemented: test/referrals.test.ts — 8 Vitest tests covering public route bypass (r/:code, links/:code, portal/:token), 302 redirect forwarding, and JWT enforcement on non-public wildcard routes.
+- Files changed:
+  - apps/crm/api-gateway/test/referrals.test.ts (new — 8 tests, all pass)
+- **Learnings for future iterations:**
+  - The reply.from mock can be made flexible by returning { status, body, headers } from mockFrom. This lets tests simulate any upstream response including 302 redirects without changing the mock implementation.
+  - mockFrom.mockReturnValue({ status: 200, body: { proxied: true } }) set in beforeEach provides a safe default; tests can override with mockReturnValueOnce for specific responses.
+  - For the 302 redirect test: configure mockFrom before app.inject (not before buildApp — reply.from is only called during request handling, not during app construction).
+  - Non-public wildcard routes use /*; they match /v1/referrals/anything but the test should use a clear path like /v1/referrals/list, not /v1/referrals (without trailing slash — that may not match /*.
+---
