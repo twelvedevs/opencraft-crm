@@ -1,4 +1,3 @@
-import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 
@@ -83,7 +82,4 @@ async function referralsRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-export default fp(referralsRoutes, {
-  name: 'referrals-routes',
-  fastify: '5.x',
-});
+export default referralsRoutes;

@@ -1,4 +1,3 @@
-import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
 
 // ---------------------------------------------------------------------------
@@ -14,7 +13,4 @@ async function healthRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-export default fp(healthRoutes, {
-  name: 'health-routes',
-  fastify: '5.x',
-});
+export default healthRoutes;

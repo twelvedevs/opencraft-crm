@@ -1,3 +1,49 @@
 # Ralph Progress Log
 Started: Sat Apr 11 17:25:58 +03 2026
 ---
+
+## Codebase Patterns
+- CRM API Gateway has no DB, no EventBridge, no BullMQ — purely Fastify + @fastify/reply-from + @fastify/rate-limit
+- Service name in package.json uses `@ortho/crm-api-gateway` (not `@crm/` prefix)
+- All services: `"type": "module"`, `"module": "NodeNext"`, `"moduleResolution": "NodeNext"`, target ES2022
+- Dockerfile uses multi-stage build: builder (full npm ci + tsc) → runtime (npm ci --omit=dev + dist/)
+- @ortho/auth-middleware exports `authPlugin` with JWKS-based JWT verification (not used directly in gateway — gateway has its own auth plugin)
+- CRITICAL: Route plugins (leads, pipeline, referrals, etc.) must NOT be wrapped with fp(). Using fp() on a route plugin causes routes to register at the ROOT scope without the prefix, making wildcard /* catch all requests instead of specific named routes. Only infrastructure plugins (auth, rate-limit, error-handler, request-id) should use fp().
+
+---
+
+## 2026-04-11 - US-001
+- What was implemented: Service scaffold for CRM API Gateway (apps/crm/api-gateway/)
+- Files changed:
+  - apps/crm/api-gateway/package.json
+  - apps/crm/api-gateway/tsconfig.json
+  - apps/crm/api-gateway/src/config.ts (requireEnv + optionalEnvInt helpers, typed config object)
+  - apps/crm/api-gateway/src/index.ts (Fastify instance with placeholder plugin/route registrations)
+  - apps/crm/api-gateway/Dockerfile (multi-stage alpine build)
+  - apps/crm/api-gateway/package-lock.json
+- **Learnings for future iterations:**
+  - This service is a pure API gateway — no database, no queue, no event bus
+  - The `@ortho/auth-middleware` authPlugin is designed for downstream services; the gateway builds its own auth plugin (US-005) that handles both JWT + API key flows
+  - index.ts uses commented-out placeholders for plugins/routes — uncomment as each story is implemented
+  - Gateway's bodyLimit comes from config.MAX_BODY_SIZE_BYTES at Fastify instance level; import route overrides with IMPORT_MAX_BODY_SIZE_BYTES (US-013)
+---
+
+## 2026-04-11 - US-016
+- What was implemented: test/pipeline.test.ts — 15 Vitest tests covering override RBAC on POST /transitions and channel resolution on POST /convert. Also fixed a critical routing bug in all 8 route plugins.
+- Files changed:
+  - apps/crm/api-gateway/test/pipeline.test.ts (new — 15 tests, all pass)
+  - apps/crm/api-gateway/src/routes/pipeline.ts (removed fp() wrapper from export)
+  - apps/crm/api-gateway/src/routes/leads.ts (removed fp() wrapper)
+  - apps/crm/api-gateway/src/routes/campaigns.ts (removed fp() wrapper)
+  - apps/crm/api-gateway/src/routes/conversations.ts (removed fp() wrapper)
+  - apps/crm/api-gateway/src/routes/reports.ts (removed fp() wrapper)
+  - apps/crm/api-gateway/src/routes/health.ts (removed fp() wrapper)
+  - apps/crm/api-gateway/src/routes/referrals.ts (removed fp() wrapper)
+  - apps/crm/api-gateway/src/routes/imports.ts (removed fp() wrapper)
+  - apps/crm/api-gateway/src/routes/notifications.ts (removed fp() wrapper)
+- **Learnings for future iterations:**
+  - CRITICAL BUG: Route plugins wrapped with fp(plugin) + register({prefix}) do NOT get the prefix applied. Routes register at the ROOT scope without the prefix. The wildcard /* then catches all requests including those meant for specific named routes. Fix: never wrap route plugins with fp(). Only plugin plugins (auth, rate-limit, error-handler, request-id) should use fp().
+  - vi.hoisted() correctly solves TDZ issues for mock references used inside vi.mock() factories that are hoisted before imports.
+  - In the pipeline tests, mockVerify.mockReturnValue() is set inside buildApp() AFTER authPlugin is registered — this works because mockVerify is the same mock object reference that gets called at request time, not at plugin registration time.
+  - The @fastify/reply-from mock using fp() IS correct for the mock itself — it ensures reply.from is decorated at the parent scope and accessible in child scopes (route plugin child scopes).
+---

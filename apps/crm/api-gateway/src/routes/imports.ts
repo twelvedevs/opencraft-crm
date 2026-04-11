@@ -1,4 +1,3 @@
-import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 
@@ -47,7 +46,4 @@ async function importsRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-export default fp(importsRoutes, {
-  name: 'imports-routes',
-  fastify: '5.x',
-});
+export default importsRoutes;

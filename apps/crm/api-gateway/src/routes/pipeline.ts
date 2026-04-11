@@ -1,4 +1,3 @@
-import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 import { resolveChannel } from '../lib/channel-resolver.js';
@@ -111,7 +110,4 @@ async function pipelineRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-export default fp(pipelineRoutes, {
-  name: 'pipeline-routes',
-  fastify: '5.x',
-});
+export default pipelineRoutes;

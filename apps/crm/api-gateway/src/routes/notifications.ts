@@ -1,4 +1,3 @@
-import fp from 'fastify-plugin';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 
@@ -95,7 +94,4 @@ async function notificationsRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-export default fp(notificationsRoutes, {
-  name: 'notifications-routes',
-  fastify: '5.x',
-});
+export default notificationsRoutes;
