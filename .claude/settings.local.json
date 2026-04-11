@@ -52,7 +52,8 @@
       "Bash(ls /Users/andrey/dev/pre-sale/ortho/apps/crm/lead/src/events/ cat /Users/andrey/dev/pre-sale/ortho/apps/crm/lead/src/events/*.ts)",
       "Bash(chmod +x:*)",
       "Bash(rm -rf ~/.claude/cache/*)",
-      "Bash(rm -rf ~/.claude/plugins/cache/*)"
+      "Bash(rm -rf ~/.claude/plugins/cache/*)",
+      "Bash(ls /Users/andrey/dev/pre-sale/ortho/*.yml /Users/andrey/dev/pre-sale/ortho/*.yaml)"
     ]
   }
 }

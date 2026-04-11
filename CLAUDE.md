@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. Implementation is in progress; services are built one at a time using the Ralph autonomous agent loop (see below).
+This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. All 21 services (12 platform + 8 CRM + 1 frontend) are implemented. New services are built using the Ralph autonomous agent loop (see below).
 
 ## Key Documents
 
@@ -64,13 +64,12 @@ ortho/
 │       └── web/         # React SPA
 ├── packages/
 │   ├── @ortho/types         # shared TS interfaces for events + API contracts
-│   ├── @ortho/event-bus     # typed EventBridge client
+│   ├── @ortho/event-bus     # typed EventBridge client (MockDriver available for tests)
 │   ├── @ortho/auth-middleware
-│   ├── @ortho/db            # Knex/Drizzle, migration runner
+│   ├── @ortho/interpolator  # template variable interpolation
 │   ├── @ortho/logger        # Pino, Datadog-compatible
-│   ├── @ortho/testing       # fixtures, mocks, factories
 │   ├── @platform/filter-engine  # shared pure-function filter evaluator (Automation + Audience engines)
-│   └── @platform/*-ui       # React component packages
+│   └── @platform/audience-ui    # Audience segment builder React component
 └── infra/               # IaC (AWS CDK or Terraform)
 ```
 
@@ -89,9 +88,24 @@ Each service follows: `src/{routes,services,repositories,events,queue}/` + `migr
 3. Pipeline Engine only manages state — emits events; Automation Engine acts.
 4. Platform UIs (`@platform/*`) call their own service's API directly from the browser (not proxied through CRM API Gateway). Auth uses the same Identity Service JWT.
 
+## Local Development
+
+Infrastructure (Postgres, Redis, Supabase Auth, MailHog) runs via Docker Compose. Before first run, generate crypto keys:
+
+```bash
+./scripts/dev/gen-keys.sh   # writes .env from .env.example, generates JWT secrets
+./scripts/dev/up.sh          # start infrastructure only
+./scripts/dev/up-all.sh      # start infrastructure + all services
+./scripts/dev/down.sh        # stop everything
+./scripts/dev/reset.sh       # wipe volumes and restart
+./scripts/dev/logs.sh        # tail service logs
+```
+
+Each service reads from the root `.env` file. Copy `.env.example` → `.env` and fill in API credentials (Twilio, SendGrid, etc.) before running.
+
 ## Development Commands
 
-Services are standalone — there is no monorepo-level script runner yet. Run commands from inside the service directory (e.g. `apps/platform/automation/`):
+Services are standalone — there is no root package.json or monorepo script runner. Run commands from inside the service directory (e.g. `apps/platform/automation/`):
 
 ```bash
 npm run build        # tsc compile to dist/
