@@ -32,8 +32,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
   // POST /messages/send
   app.post('/messages/send', {
     schema: {
+      tags: ['Messages'],
+      summary: 'Send SMS message',
       body: SendBodySchema,
-    },
+    } as object,
   }, async (request, reply) => {
     const body = request.body as {
       to: string;
@@ -80,8 +82,10 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
   // GET /messages/:id
   app.get('/messages/:id', {
     schema: {
+      tags: ['Messages'],
+      summary: 'Get message by ID',
       params: Type.Object({ id: Type.String() }),
-    },
+    } as object,
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const message = await messagesRepo.findById(id);
@@ -92,7 +96,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /messages
-  app.get('/messages', async (request, reply) => {
+  app.get('/messages', { schema: { tags: ['Messages'], summary: 'List messages' } as object }, async (request, reply) => {
     const query = request.query as {
       to?: string;
       from_number?: string;

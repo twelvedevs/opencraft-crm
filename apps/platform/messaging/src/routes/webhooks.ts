@@ -45,7 +45,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   // POST /webhooks/twilio/inbound
   app.post(
     '/webhooks/twilio/inbound',
-    { preHandler: validateSignature },
+    { preHandler: validateSignature, schema: { tags: ['Webhooks'], summary: 'Twilio inbound message webhook' } as object },
     async (request, reply) => {
       const params = request.body as Record<string, string>;
       const from = params['From'] ?? '';
@@ -129,7 +129,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   // POST /webhooks/twilio/status
   app.post(
     '/webhooks/twilio/status',
-    { preHandler: validateSignature },
+    { preHandler: validateSignature, schema: { tags: ['Webhooks'], summary: 'Twilio status callback webhook' } as object },
     async (request, reply) => {
       const params = request.body as Record<string, string>;
       const messageSid = params['MessageSid'] ?? '';

@@ -19,9 +19,11 @@ export async function numberRoutes(app: FastifyInstance): Promise<void> {
   // POST /numbers
   app.post('/numbers', {
     schema: {
+      tags: ['Numbers'],
+      summary: 'Provision Twilio number',
       body: CreateBodySchema,
       response: { 201: NumberSchema, 409: ErrorSchema },
-    },
+    } as object,
   }, async (request, reply) => {
     const body = request.body as {
       location_id: string;
@@ -44,8 +46,10 @@ export async function numberRoutes(app: FastifyInstance): Promise<void> {
   // DELETE /numbers/:id
   app.delete('/numbers/:id', {
     schema: {
+      tags: ['Numbers'],
+      summary: 'Release Twilio number',
       params: IdParamsSchema,
-    },
+    } as object,
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const number = await repo.findById(id);
@@ -59,8 +63,10 @@ export async function numberRoutes(app: FastifyInstance): Promise<void> {
   // GET /numbers
   app.get('/numbers', {
     schema: {
+      tags: ['Numbers'],
+      summary: 'List numbers',
       response: { 200: Type.Array(NumberSchema) },
-    },
+    } as object,
   }, async (request, reply) => {
     const query = request.query as {
       location_id?: string;
@@ -78,6 +84,8 @@ export async function numberRoutes(app: FastifyInstance): Promise<void> {
   // GET /numbers/resolve
   app.get('/numbers/resolve', {
     schema: {
+      tags: ['Numbers'],
+      summary: 'Resolve number by phone',
       querystring: Type.Object({
         location_id: Type.String(),
         channel: Type.String(),
@@ -86,7 +94,7 @@ export async function numberRoutes(app: FastifyInstance): Promise<void> {
         200: Type.Object({ phone_number: Type.String() }),
         422: ErrorSchema,
       },
-    },
+    } as object,
   }, async (request, reply) => {
     const { location_id, channel } = request.query as {
       location_id: string;
