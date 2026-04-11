@@ -1,6 +1,6 @@
 # OpenAPI / Swagger Support Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add interactive OpenAPI 3.0 docs (Swagger UI at `/docs`, spec at `/openapi.json`) to all 19 backend services via a shared `@ortho/openapi` Fastify plugin.
 
@@ -64,13 +64,13 @@ fastify.get('/integrations/accounts', { schema: { tags: ['Accounts'], summary: '
 - Create: `packages/@ortho/openapi/src/index.ts`
 - Create: `packages/@ortho/openapi/test/plugin.test.ts`
 
-- [ ] **Step 1: Create directory structure**
+- [x] **Step 1: Create directory structure**
 
 ```bash
 mkdir -p packages/@ortho/openapi/src packages/@ortho/openapi/test
 ```
 
-- [ ] **Step 2: Create `packages/@ortho/openapi/package.json`**
+- [x] **Step 2: Create `packages/@ortho/openapi/package.json`**
 
 ```json
 {
@@ -112,7 +112,7 @@ mkdir -p packages/@ortho/openapi/src packages/@ortho/openapi/test
 }
 ```
 
-- [ ] **Step 3: Create `packages/@ortho/openapi/tsconfig.json`**
+- [x] **Step 3: Create `packages/@ortho/openapi/tsconfig.json`**
 
 ```json
 {
@@ -134,7 +134,7 @@ mkdir -p packages/@ortho/openapi/src packages/@ortho/openapi/test
 }
 ```
 
-- [ ] **Step 4: Write failing test at `packages/@ortho/openapi/test/plugin.test.ts`**
+- [x] **Step 4: Write failing test at `packages/@ortho/openapi/test/plugin.test.ts`**
 
 ```ts
 import Fastify from 'fastify';
@@ -209,7 +209,7 @@ describe('openapiPlugin — production', () => {
 });
 ```
 
-- [ ] **Step 5: Run tests — expect failure (plugin not implemented yet)**
+- [x] **Step 5: Run tests — expect failure (plugin not implemented yet)**
 
 ```bash
 cd packages/@ortho/openapi && npm install && npm test
@@ -217,7 +217,7 @@ cd packages/@ortho/openapi && npm install && npm test
 
 Expected: tests fail with `Cannot find module '../src/index.js'` or similar.
 
-- [ ] **Step 6: Implement `packages/@ortho/openapi/src/index.ts`**
+- [x] **Step 6: Implement `packages/@ortho/openapi/src/index.ts`**
 
 ```ts
 import fp from 'fastify-plugin';
@@ -268,7 +268,7 @@ export const openapiPlugin = fp(plugin, {
 });
 ```
 
-- [ ] **Step 7: Run tests — expect all pass**
+- [x] **Step 7: Run tests — expect all pass**
 
 ```bash
 npm test
@@ -276,7 +276,7 @@ npm test
 
 Expected output: `Tests 6 passed (6)`
 
-- [ ] **Step 8: Typecheck**
+- [x] **Step 8: Typecheck**
 
 ```bash
 npm run typecheck
@@ -284,7 +284,7 @@ npm run typecheck
 
 Expected: no errors.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd ../../.. && git add packages/@ortho/openapi && git commit -m "feat(@ortho/openapi): add shared Fastify OpenAPI plugin"
@@ -315,20 +315,20 @@ cd ../../.. && git add packages/@ortho/openapi && git commit -m "feat(@ortho/ope
 | executions.ts | GET | /executions | Executions | List executions |
 | executions.ts | GET | /executions/:executionId/steps/:stepId/output | Executions | Get step output |
 
-- [ ] **Step 1: Add dependency to `apps/platform/automation/package.json`**
+- [x] **Step 1: Add dependency to `apps/platform/automation/package.json`**
 
 Add to `"dependencies"`:
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/automation && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/automation/src/index.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/automation/src/index.ts`**
 
 Add import after existing imports:
 ```ts
@@ -347,7 +347,7 @@ await fastify.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide healthz in `apps/platform/automation/src/index.ts`**
+- [x] **Step 4: Hide healthz in `apps/platform/automation/src/index.ts`**
 
 Change:
 ```ts
@@ -362,7 +362,7 @@ fastify.get('/healthz', { schema: { hide: true } }, async () => {
 });
 ```
 
-- [ ] **Step 5: Add tags+summary to every route schema in `rules.ts` and `executions.ts`**
+- [x] **Step 5: Add tags+summary to every route schema in `rules.ts` and `executions.ts`**
 
 For each route in the table above, add `tags` and `summary` to its `schema` object. Example for `GET /rules`:
 ```ts
@@ -378,7 +378,7 @@ fastify.get('/rules', {
 
 Apply to all 10 routes listed in the table.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
@@ -386,7 +386,7 @@ npm run typecheck
 
 Expected: no errors.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/automation && git commit -m "feat(automation): add OpenAPI/Swagger docs"
@@ -420,20 +420,20 @@ cd ../../.. && git add apps/platform/automation && git commit -m "feat(automatio
 | enrollments.ts | POST | /sequences/unenroll | Enrollments | Unenroll entity from sequence |
 | stats.ts | GET | /sequences/:id/stats | Stats | Get sequence statistics |
 
-- [ ] **Step 1: Add dependency to `apps/platform/nurturing/package.json`**
+- [x] **Step 1: Add dependency to `apps/platform/nurturing/package.json`**
 
 Add to `"dependencies"`:
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/nurturing && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `createApp()` in `apps/platform/nurturing/src/index.ts`**
+- [x] **Step 3: Register plugin in `createApp()` in `apps/platform/nurturing/src/index.ts`**
 
 Add import at top:
 ```ts
@@ -453,7 +453,7 @@ await fastify.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide healthz in `createApp()` in `apps/platform/nurturing/src/index.ts`**
+- [x] **Step 4: Hide healthz in `createApp()` in `apps/platform/nurturing/src/index.ts`**
 
 Change:
 ```ts
@@ -468,17 +468,17 @@ fastify.get('/healthz', { schema: { hide: true } }, async () => {
 });
 ```
 
-- [ ] **Step 5: Add tags+summary to all routes in sequences.ts, enrollments.ts, stats.ts**
+- [x] **Step 5: Add tags+summary to all routes in sequences.ts, enrollments.ts, stats.ts**
 
 Apply the table above to each route's `schema` object. For routes without an existing schema, add `schema: { tags: [...], summary: '...' }`.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/nurturing && git commit -m "feat(nurturing): add OpenAPI/Swagger docs"
@@ -505,20 +505,20 @@ cd ../../.. && git add apps/platform/nurturing && git commit -m "feat(nurturing)
 | publish.ts | POST | /notifications/publish | Publish | Publish notification to users |
 | stream.ts | GET | /notifications/stream | Stream | SSE stream of real-time notifications |
 
-- [ ] **Step 1: Add dependency to `apps/platform/notification/package.json`**
+- [x] **Step 1: Add dependency to `apps/platform/notification/package.json`**
 
 Add to `"dependencies"`:
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/notification && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/notification/src/index.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/notification/src/index.ts`**
 
 Add import at top:
 ```ts
@@ -538,7 +538,7 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/platform/notification/src/index.ts`**
+- [x] **Step 4: Hide health route in `apps/platform/notification/src/index.ts`**
 
 Change:
 ```ts
@@ -553,17 +553,17 @@ app.get('/health', { schema: { hide: true } }, async () => {
 });
 ```
 
-- [ ] **Step 5: Add tags+summary to all routes in notifications.ts, publish.ts, stream.ts**
+- [x] **Step 5: Add tags+summary to all routes in notifications.ts, publish.ts, stream.ts**
 
 Apply the table above.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/notification && git commit -m "feat(notification): add OpenAPI/Swagger docs"
@@ -599,20 +599,20 @@ cd ../../.. && git add apps/platform/notification && git commit -m "feat(notific
 | webhooks.ts | POST | /webhooks/twilio/inbound | Webhooks | Twilio inbound message webhook |
 | webhooks.ts | POST | /webhooks/twilio/status | Webhooks | Twilio status callback webhook |
 
-- [ ] **Step 1: Add dependency to `apps/platform/messaging/package.json`**
+- [x] **Step 1: Add dependency to `apps/platform/messaging/package.json`**
 
 Add to `"dependencies"`:
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/messaging && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/messaging/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/messaging/src/app.ts`**
 
 Add import at top:
 ```ts
@@ -633,7 +633,7 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/platform/messaging/src/routes/health.ts`**
+- [x] **Step 4: Hide health route in `apps/platform/messaging/src/routes/health.ts`**
 
 Change:
 ```ts
@@ -644,17 +644,17 @@ To:
 app.get('/health', { schema: { hide: true } }, async (_req, reply) => {
 ```
 
-- [ ] **Step 5: Add tags+summary to all routes in messages.ts, numbers.ts, opt-outs.ts, webhooks.ts**
+- [x] **Step 5: Add tags+summary to all routes in messages.ts, numbers.ts, opt-outs.ts, webhooks.ts**
 
 Apply the table above to each route's schema.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/messaging && git commit -m "feat(messaging): add OpenAPI/Swagger docs"
@@ -690,20 +690,20 @@ cd ../../.. && git add apps/platform/messaging && git commit -m "feat(messaging)
 | spam-check.ts | POST | /spam-check | Spam Check | Check email spam score |
 | webhooks.ts | POST | /webhooks/sendgrid | Webhooks | SendGrid event webhook |
 
-- [ ] **Step 1: Add dependency to `apps/platform/email/package.json`**
+- [x] **Step 1: Add dependency to `apps/platform/email/package.json`**
 
 Add to `"dependencies"`:
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/email && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/email/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/email/src/app.ts`**
 
 Add import at top:
 ```ts
@@ -725,7 +725,7 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/platform/email/src/routes/health.ts`**
+- [x] **Step 4: Hide health route in `apps/platform/email/src/routes/health.ts`**
 
 Change:
 ```ts
@@ -736,17 +736,17 @@ To:
 app.get('/health', { schema: { hide: true } }, async (_req, reply) => {
 ```
 
-- [ ] **Step 5: Add tags+summary to all routes in sends.ts, campaigns.ts, domains.ts, spam-check.ts, webhooks.ts**
+- [x] **Step 5: Add tags+summary to all routes in sends.ts, campaigns.ts, domains.ts, spam-check.ts, webhooks.ts**
 
 Apply the table above.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/email && git commit -m "feat(email): add OpenAPI/Swagger docs"
@@ -777,19 +777,19 @@ cd ../../.. && git add apps/platform/email && git commit -m "feat(email): add Op
 
 The `app.ts` for template service has its health route inline. Check `apps/platform/template/src/app.ts` for the health route and add `{ schema: { hide: true } }` to it.
 
-- [ ] **Step 1: Add dependency to `apps/platform/template/package.json`**
+- [x] **Step 1: Add dependency to `apps/platform/template/package.json`**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/template && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/template/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/template/src/app.ts`**
 
 Add import:
 ```ts
@@ -808,21 +808,21 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/platform/template/src/app.ts`**
+- [x] **Step 4: Hide health route in `apps/platform/template/src/app.ts`**
 
 Find the inline `/health` route and add `{ schema: { hide: true } }`.
 
-- [ ] **Step 5: Add tags+summary to all routes in templates.ts and render.ts**
+- [x] **Step 5: Add tags+summary to all routes in templates.ts and render.ts**
 
 Apply the table above.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/template && git commit -m "feat(template): add OpenAPI/Swagger docs"
@@ -856,19 +856,19 @@ cd ../../.. && git add apps/platform/template && git commit -m "feat(template): 
 | check.ts | POST | /audiences/segments/:id/check | Evaluation | Check single entity membership |
 | snapshots.ts | GET | /audiences/snapshots/:snapshot_id | Snapshots | Get audience snapshot |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/audience && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/audience/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/audience/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -887,23 +887,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health in `apps/platform/audience/src/routes/health.ts`**
+- [x] **Step 4: Hide health in `apps/platform/audience/src/routes/health.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async (_req, reply) => {
 ```
 
-- [ ] **Step 5: Add tags+summary to segments.ts, evaluate.ts, check.ts, snapshots.ts**
+- [x] **Step 5: Add tags+summary to segments.ts, evaluate.ts, check.ts, snapshots.ts**
 
 Apply the table above.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/audience && git commit -m "feat(audience): add OpenAPI/Swagger docs"
@@ -925,19 +925,19 @@ cd ../../.. && git add apps/platform/audience && git commit -m "feat(audience): 
 |------|--------|------|-----|---------|
 | complete.ts | POST | /ai/complete | Completions | Request Claude completion |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/ai && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/ai/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/ai/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -954,23 +954,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health in `apps/platform/ai/src/routes/health.ts`**
+- [x] **Step 4: Hide health in `apps/platform/ai/src/routes/health.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async (_req, reply) => {
 ```
 
-- [ ] **Step 5: Add tags+summary to complete.ts**
+- [x] **Step 5: Add tags+summary to complete.ts**
 
 Apply the table above.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/ai && git commit -m "feat(ai): add OpenAPI/Swagger docs"
@@ -1012,19 +1012,19 @@ cd ../../.. && git add apps/platform/ai && git commit -m "feat(ai): add OpenAPI/
 | metrics/messages.ts | GET | /analytics/metrics/messages | Metrics | Get messaging metrics |
 | metrics/referrals.ts | GET | /analytics/metrics/referrals | Metrics | Get referral metrics |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/analytics && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/analytics/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/analytics/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1043,23 +1043,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health in `apps/platform/analytics/src/routes/health.ts`**
+- [x] **Step 4: Hide health in `apps/platform/analytics/src/routes/health.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async (_req, reply) => {
 ```
 
-- [ ] **Step 5: Add tags+summary to all routes listed in the table**
+- [x] **Step 5: Add tags+summary to all routes listed in the table**
 
 Apply all 12 route annotations.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/analytics && git commit -m "feat(analytics): add OpenAPI/Swagger docs"
@@ -1094,19 +1094,19 @@ cd ../../.. && git add apps/platform/analytics && git commit -m "feat(analytics)
 
 The `app.ts` has an inline health route. Add `{ schema: { hide: true } }` to it.
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/integration-hub && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/integration-hub/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/integration-hub/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1126,21 +1126,21 @@ await fastify.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/platform/integration-hub/src/app.ts`**
+- [x] **Step 4: Hide health route in `apps/platform/integration-hub/src/app.ts`**
 
 Find `fastify.get('/health', ...)` inline and add `{ schema: { hide: true } }`.
 
-- [ ] **Step 5: Add tags+summary to all routes listed in the table**
+- [x] **Step 5: Add tags+summary to all routes listed in the table**
 
 Apply all 10 route annotations.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/integration-hub && git commit -m "feat(integration-hub): add OpenAPI/Swagger docs"
@@ -1180,19 +1180,19 @@ cd ../../.. && git add apps/platform/integration-hub && git commit -m "feat(inte
 | me.ts | PUT | /identity/me/password | Me | Change own password |
 | jwks.ts | GET | /identity/.well-known/jwks.json | JWKS | Get public key set |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/identity && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/identity/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/identity/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1213,23 +1213,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health in `apps/platform/identity/src/routes/health.ts`**
+- [x] **Step 4: Hide health in `apps/platform/identity/src/routes/health.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async (_req, reply) => {
 ```
 
-- [ ] **Step 5: Add tags+summary to all 15 routes listed in the table**
+- [x] **Step 5: Add tags+summary to all 15 routes listed in the table**
 
 Apply all route annotations.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/identity && git commit -m "feat(identity): add OpenAPI/Swagger docs"
@@ -1260,19 +1260,19 @@ cd ../../.. && git add apps/platform/identity && git commit -m "feat(identity): 
 
 The `app.ts` has an inline health route. Add `{ schema: { hide: true } }` to it.
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/platform/media && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/platform/media/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/platform/media/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1291,21 +1291,21 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/platform/media/src/app.ts`**
+- [x] **Step 4: Hide health route in `apps/platform/media/src/app.ts`**
 
 Find `app.get('/health', ...)` inline and add `{ schema: { hide: true } }`.
 
-- [ ] **Step 5: Add tags+summary to upload.ts, files.ts, internal.ts**
+- [x] **Step 5: Add tags+summary to upload.ts, files.ts, internal.ts**
 
 Apply the table above.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/platform/media && git commit -m "feat(media): add OpenAPI/Swagger docs"
@@ -1347,19 +1347,19 @@ cd ../../.. && git add apps/platform/media && git commit -m "feat(media): add Op
 | tags.ts | POST | /leads/:id/tags | Tags | Apply tag to lead |
 | tags.ts | DELETE | /leads/:id/tags/:tag_id | Tags | Remove tag from lead |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/crm/lead && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/crm/lead/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/crm/lead/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1379,7 +1379,7 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/crm/lead/src/app.ts`**
+- [x] **Step 4: Hide health route in `apps/crm/lead/src/app.ts`**
 
 Change:
 ```ts
@@ -1390,17 +1390,17 @@ To:
 app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 ```
 
-- [ ] **Step 5: Add tags+summary to leads.ts, activities.ts, appointments.ts, tags.ts**
+- [x] **Step 5: Add tags+summary to leads.ts, activities.ts, appointments.ts, tags.ts**
 
 Apply all 19 route annotations from the table.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/crm/lead && git commit -m "feat(lead): add OpenAPI/Swagger docs"
@@ -1431,19 +1431,19 @@ cd ../../.. && git add apps/crm/lead && git commit -m "feat(lead): add OpenAPI/S
 | close.ts | POST | /memberships/:id/close | Close | Close/archive membership |
 | history.ts | GET | /memberships/:id/history | History | Get membership stage history |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/crm/pipeline && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/crm/pipeline/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/crm/pipeline/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1464,23 +1464,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/crm/pipeline/src/app.ts`**
+- [x] **Step 4: Hide health route in `apps/crm/pipeline/src/app.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 ```
 
-- [ ] **Step 5: Add tags+summary to memberships.ts, transitions.ts, conversions.ts, close.ts, history.ts**
+- [x] **Step 5: Add tags+summary to memberships.ts, transitions.ts, conversions.ts, close.ts, history.ts**
 
 Apply the table above. For routes that currently have `schema: { body: ... }` without tags, add `tags` and `summary` to the existing schema. For routes without any schema, add `schema: { tags: [...], summary: '...' }`.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/crm/pipeline && git commit -m "feat(pipeline): add OpenAPI/Swagger docs"
@@ -1524,19 +1524,19 @@ cd ../../.. && git add apps/crm/pipeline && git commit -m "feat(pipeline): add O
 | settings.ts | GET | /settings/locations/:id | Settings | Get location inbox settings |
 | settings.ts | PATCH | /settings/locations/:id | Settings | Update location inbox settings |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/crm/conversation && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/crm/conversation/src/app.ts`**
+- [x] **Step 3: Register plugin in `apps/crm/conversation/src/app.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1559,23 +1559,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/crm/conversation/src/app.ts`**
+- [x] **Step 4: Hide health route in `apps/crm/conversation/src/app.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 ```
 
-- [ ] **Step 5: Add tags+summary to all 18 routes in the table**
+- [x] **Step 5: Add tags+summary to all 18 routes in the table**
 
 Apply all route annotations.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/crm/conversation && git commit -m "feat(conversation): add OpenAPI/Swagger docs"
@@ -1614,19 +1614,19 @@ cd ../../.. && git add apps/crm/conversation && git commit -m "feat(conversation
 | diagnostics.ts | POST | /campaigns/:id/test-send | Diagnostics | Send test email |
 | diagnostics.ts | POST | /campaigns/:id/spam-check | Diagnostics | Check campaign spam score |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/crm/campaign && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/crm/campaign/src/api.ts`**
+- [x] **Step 3: Register plugin in `apps/crm/campaign/src/api.ts`**
 
 The Fastify instance is created in `buildApp()` in `api.ts`. Add import and registration:
 
@@ -1648,23 +1648,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/crm/campaign/src/api.ts`**
+- [x] **Step 4: Hide health route in `apps/crm/campaign/src/api.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 ```
 
-- [ ] **Step 5: Add tags+summary to campaigns.ts, workflow.ts, comments.ts, diagnostics.ts**
+- [x] **Step 5: Add tags+summary to campaigns.ts, workflow.ts, comments.ts, diagnostics.ts**
 
 Apply all 16 route annotations.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/crm/campaign && git commit -m "feat(campaign): add OpenAPI/Swagger docs"
@@ -1707,19 +1707,19 @@ cd ../../.. && git add apps/crm/campaign && git commit -m "feat(campaign): add O
 | public/links.ts | GET | /referrals/links/:code | Public | Resolve referral link metadata |
 | public/portal.ts | GET | /referrals/portal/:token | Public | Get referring doctor portal view |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/crm/referral && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/crm/referral/src/index.ts`**
+- [x] **Step 3: Register plugin in `apps/crm/referral/src/index.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1741,23 +1741,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/crm/referral/src/index.ts`**
+- [x] **Step 4: Hide health route in `apps/crm/referral/src/index.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 ```
 
-- [ ] **Step 5: Add tags+summary to all 17 routes in the table**
+- [x] **Step 5: Add tags+summary to all 17 routes in the table**
 
 Apply all route annotations.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/crm/referral && git commit -m "feat(referral): add OpenAPI/Swagger docs"
@@ -1806,19 +1806,19 @@ cd ../../.. && git add apps/crm/referral && git commit -m "feat(referral): add O
 | metrics/campaign-analytics.ts | GET | /reporting/metrics/campaign-analytics | Metrics | Get campaign analytics metrics |
 | metrics/coordinator-performance.ts | GET | /reporting/metrics/coordinator-performance | Metrics | Get coordinator performance metrics |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/crm/reporting && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/crm/reporting/src/index.ts`**
+- [x] **Step 3: Register plugin in `apps/crm/reporting/src/index.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1840,23 +1840,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health in `apps/crm/reporting/src/routes/health.ts`**
+- [x] **Step 4: Hide health in `apps/crm/reporting/src/routes/health.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async (_req, reply) => {
 ```
 
-- [ ] **Step 5: Add tags+summary to all 20 routes in the table**
+- [x] **Step 5: Add tags+summary to all 20 routes in the table**
 
 Apply all route annotations.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/crm/reporting && git commit -m "feat(reporting): add OpenAPI/Swagger docs"
@@ -1887,19 +1887,19 @@ cd ../../.. && git add apps/crm/reporting && git commit -m "feat(reporting): add
 | actions.ts | POST | /imports/:id/cancel | Actions | Cancel pending import |
 | actions.ts | POST | /imports/:id/undo | Actions | Undo completed import |
 
-- [ ] **Step 1: Add dependency**
+- [x] **Step 1: Add dependency**
 
 ```json
 "@ortho/openapi": "file:../../../packages/@ortho/openapi"
 ```
 
-- [ ] **Step 2: Install**
+- [x] **Step 2: Install**
 
 ```bash
 cd apps/crm/import && npm install
 ```
 
-- [ ] **Step 3: Register plugin in `apps/crm/import/src/index.ts`**
+- [x] **Step 3: Register plugin in `apps/crm/import/src/index.ts`**
 
 ```ts
 import { openapiPlugin } from '@ortho/openapi';
@@ -1919,23 +1919,23 @@ await app.register(openapiPlugin, {
 });
 ```
 
-- [ ] **Step 4: Hide health route in `apps/crm/import/src/index.ts`**
+- [x] **Step 4: Hide health route in `apps/crm/import/src/index.ts`**
 
 ```ts
 app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 ```
 
-- [ ] **Step 5: Add tags+summary to imports.ts, mappings.ts, rows.ts, actions.ts**
+- [x] **Step 5: Add tags+summary to imports.ts, mappings.ts, rows.ts, actions.ts**
 
 Apply the 8 route annotations from the table above.
 
-- [ ] **Step 6: Typecheck**
+- [x] **Step 6: Typecheck**
 
 ```bash
 npm run typecheck
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd ../../.. && git add apps/crm/import && git commit -m "feat(import): add OpenAPI/Swagger docs"
