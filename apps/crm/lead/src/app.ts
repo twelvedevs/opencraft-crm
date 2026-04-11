@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
+import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
 import type { EventBus } from '@ortho/event-bus';
 import type { Knex } from 'knex';
@@ -16,6 +17,17 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
 
   await app.register(sensible);
 
+  await app.register(openapiPlugin, {
+    title: 'Lead Service',
+    description: 'Lead records, attribution, deduplication, and activity timeline',
+    tags: [
+      { name: 'Leads', description: 'Lead CRUD and deduplication' },
+      { name: 'Activities', description: 'Lead activity timeline' },
+      { name: 'Appointments', description: 'Lead appointment management' },
+      { name: 'Tags', description: 'Tag management and assignment' },
+    ],
+  });
+
   await app.register(authPlugin, {
     jwksUrl: env.IDENTITY_JWKS_URL,
     allowedPaths: ['/health'],
@@ -23,7 +35,7 @@ export async function buildApp(db: Knex, eventBus: EventBus): Promise<FastifyIns
 
   app.decorate('eventBus', eventBus);
 
-  app.get('/health', async () => ({ ok: true }));
+  app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
 
   await app.register(leadsRoutes, { db, eventBus });
   await app.register(appointmentRoutes, { db, eventBus });

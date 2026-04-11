@@ -40,7 +40,7 @@ export async function tagRoutes(
 
   // GET /tags
   app.get('/tags', {
-    schema: { querystring: ListTagsQuery },
+    schema: { querystring: ListTagsQuery, tags: ['Tags'], summary: 'List all tags' } as object,
   }, async (req, reply) => {
     const { location_id } = req.query as { location_id?: string };
     const tags = await tagService.listTags(db, location_id);
@@ -49,7 +49,7 @@ export async function tagRoutes(
 
   // POST /tags
   app.post('/tags', {
-    schema: { body: CreateTagBody },
+    schema: { body: CreateTagBody, tags: ['Tags'], summary: 'Create tag' } as object,
     preHandler: [requireRole(MANAGER_PLUS)],
   }, async (req, reply) => {
     const body = req.body as { name: string; location_id?: string };
@@ -76,7 +76,7 @@ export async function tagRoutes(
 
   // DELETE /tags/:id
   app.delete('/tags/:id', {
-    schema: { params: TagIdParams },
+    schema: { params: TagIdParams, tags: ['Tags'], summary: 'Delete tag' } as object,
     preHandler: [requireRole(MANAGER_PLUS)],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -92,7 +92,7 @@ export async function tagRoutes(
 
   // POST /leads/:id/tags
   app.post('/leads/:id/tags', {
-    schema: { params: Type.Object({ id: Type.String() }), body: ApplyTagBody },
+    schema: { params: Type.Object({ id: Type.String() }), body: ApplyTagBody, tags: ['Tags'], summary: 'Apply tag to lead' } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { tag_id } = req.body as { tag_id: string };
@@ -113,7 +113,7 @@ export async function tagRoutes(
 
   // DELETE /leads/:id/tags/:tag_id
   app.delete('/leads/:id/tags/:tag_id', {
-    schema: { params: LeadTagParams },
+    schema: { params: LeadTagParams, tags: ['Tags'], summary: 'Remove tag from lead' } as object,
   }, async (req, reply) => {
     const { id, tag_id } = req.params as { id: string; tag_id: string };
     await tagService.removeTagFromLead(db, id, tag_id);
