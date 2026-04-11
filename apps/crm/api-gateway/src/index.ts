@@ -9,6 +9,8 @@ import errorHandlerPlugin from './plugins/error-handler.js';
 import healthRoutes from './routes/health.js';
 import leadsRoutes from './routes/leads.js';
 import conversationsRoutes from './routes/conversations.js';
+import campaignsRoutes from './routes/campaigns.js';
+import reportsRoutes from './routes/reports.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -54,8 +56,8 @@ await app.register(healthRoutes);
 // Service proxies under /v1
 await app.register(leadsRoutes, { prefix: '/v1/leads' });
 await app.register(conversationsRoutes, { prefix: '/v1/conversations' });
-// await app.register(campaignsRoutes, { prefix: '/v1/campaigns' });
-// await app.register(reportsRoutes, { prefix: '/v1/reports' });
+await app.register(campaignsRoutes, { prefix: '/v1/campaigns' });
+await app.register(reportsRoutes, { prefix: '/v1/reports' });
 // await app.register(pipelineRoutes, { prefix: '/v1/pipeline' });
 // await app.register(referralsRoutes, { prefix: '/v1/referrals' });
 // await app.register(importsRoutes, { prefix: '/v1/imports' });
