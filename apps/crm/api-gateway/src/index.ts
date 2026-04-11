@@ -14,6 +14,7 @@ import reportsRoutes from './routes/reports.js';
 import pipelineRoutes from './routes/pipeline.js';
 import referralsRoutes from './routes/referrals.js';
 import importsRoutes from './routes/imports.js';
+import notificationsRoutes from './routes/notifications.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -64,7 +65,7 @@ await app.register(reportsRoutes, { prefix: '/v1/reports' });
 await app.register(pipelineRoutes, { prefix: '/v1/pipeline' });
 await app.register(referralsRoutes, { prefix: '/v1/referrals' });
 await app.register(importsRoutes, { prefix: '/v1/imports' });
-// await app.register(notificationsRoutes, { prefix: '/v1/notifications' });
+await app.register(notificationsRoutes, { prefix: '/v1/notifications' });
 
 // ---------------------------------------------------------------------------
 // Start server
