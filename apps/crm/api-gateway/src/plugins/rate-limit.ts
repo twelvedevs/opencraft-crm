@@ -40,8 +40,13 @@ async function rateLimitPlugin(app: FastifyInstance): Promise<void> {
       return 60; // public / unauthenticated
     },
     timeWindow: 60_000, // 1 minute
-    errorResponseBuilder: (_request, _context) => ({
+    // errorResponseBuilder must include statusCode so the error-handler plugin
+    // can use it to set the HTTP status code (plain thrown objects need it).
+    // message is used by error-handler to build { error: error.message }.
+    errorResponseBuilder: (_request, context) => ({
       error: 'rate_limit_exceeded',
+      message: 'rate_limit_exceeded',
+      statusCode: context.statusCode,
     }),
   });
 }
