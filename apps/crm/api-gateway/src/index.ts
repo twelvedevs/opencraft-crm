@@ -3,6 +3,7 @@ import { createLogger } from '@ortho/logger';
 import { config } from './config.js';
 import requestIdPlugin from './plugins/request-id.js';
 import authPlugin from './plugins/auth.js';
+import rateLimitPlugin from './plugins/rate-limit.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -24,7 +25,7 @@ const app = Fastify({
 // ---------------------------------------------------------------------------
 await app.register(requestIdPlugin);
 await app.register(authPlugin);
-// await app.register(rateLimitPlugin);
+await app.register(rateLimitPlugin);
 // await app.register(errorHandlerPlugin);
 
 // ---------------------------------------------------------------------------
