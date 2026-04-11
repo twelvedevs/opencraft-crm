@@ -156,7 +156,7 @@ Campaign, nurturing, and email services run a BullMQ worker process alongside th
 | `@fastify/swagger` | `^9` | OpenAPI 3.0 spec generation from Fastify route schemas |
 | `@fastify/swagger-ui` | `^5` | Swagger UI served at `/docs` |
 
-Both are devDependencies in `@ortho/openapi/package.json`. Services inherit them transitively; no direct install in service packages required.
+Both are `dependencies` (not devDependencies) in `@ortho/openapi/package.json` — the plugin imports them at runtime. Services install them transitively when they add `@ortho/openapi`; no direct install in service packages required.
 
 ---
 
