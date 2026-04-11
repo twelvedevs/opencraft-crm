@@ -10,4 +10,5 @@
 - [ ] Implement `@platform/integration-hub-ui`
 - [ ] надо отдельно провалидировать все ивенты и все типы и пейлоуды на целостность всей конструкции
 - [ ] build map of inter-service communications, who talks to whom, data streams
+- [ ] implement Swagger for each service
 
