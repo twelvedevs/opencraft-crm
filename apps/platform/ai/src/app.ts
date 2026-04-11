@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
+import { openapiPlugin } from '@ortho/openapi';
 import type { Pool } from 'pg';
 import { createCompletionsRepository } from './repositories/completions.js';
 import { createCompletionCache } from './services/completion-cache.js';
@@ -11,6 +12,14 @@ export async function buildApp(pool: Pool): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
 
   await app.register(sensible);
+
+  await app.register(openapiPlugin, {
+    title: 'AI Service',
+    description: 'Claude API gateway with prompt management and response caching',
+    tags: [
+      { name: 'Completions', description: 'Claude API completions' },
+    ],
+  });
 
   const repo = createCompletionsRepository(pool);
   const completionCache = createCompletionCache(repo);
