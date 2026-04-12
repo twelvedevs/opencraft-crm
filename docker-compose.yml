@@ -10,6 +10,7 @@ services:
       POSTGRES_USER: ${Postgres__User}
       POSTGRES_PASSWORD: ${Postgres__Password}
       POSTGRES_DB: ${Postgres__DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "${Postgres__Port}:5432"
     volumes:
@@ -32,14 +33,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 5s # Дать 5 секунд на начальную загрузку перед первой проверкой
 
   supabase_auth:
-    image: supabase/gotrue:latest
+    image: supabase/gotrue:v2.189.0-rc.13
     environment:
-      GOTRUE_API_HOST: "0.0.0.0"
-      GOTRUE_API_PORT: "9999"
+      # Конфигурация для Auth (GoTrue)
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgresql://${Postgres__User}:${Postgres__Password}@${Postgres__Host}:${Postgres__Port}/${Postgres__DB}?search_path=auth
+      GOTRUE_DB_DATABASE_URL: postgres://${GoTrue__DB_User}:${Postgres__Password}@${Postgres__Host}:${Postgres__Port}/${Postgres__DB}?search_path=auth&sslmode=disable
       GOTRUE_SITE_URL: http://localhost:3000
       GOTRUE_JWT_SECRET: ${GoTrue__JWT_Secret}
       GOTRUE_JWT_EXP: "3600"
@@ -50,6 +54,26 @@ services:
       GOTRUE_SMTP_PORT: ${MailHog__SMTP_Port}
       GOTRUE_SMTP_ADMIN_EMAIL: admin@example.com
       GOTRUE_SMTP_MAX_FREQUENCY: 1s
+
+
+      # Адрес вашего фронтенда (куда редиректить после логина/подтверждения почты)
+      SITE_URL: http://localhost:3000
+
+      # Главный внешний адрес Supabase (обычно это адрес шлюза Kong)
+      # Именно это значение используется в API_EXTERNAL_URL
+      SUPABASE_PUBLIC_URL: http://localhost:8000
+
+      # ВАЖНО: Это должен быть публичный URL, а не внутренний docker-адрес
+      API_EXTERNAL_URL: http://localhost:8000
+
+      # # База данных (убедитесь, что пароли совпадают с сервисом db)
+      # POSTGRES_PASSWORD: your-super-secret-password
+      # GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:your-super-secret-password@db:5432/postgres
+
+      # # Безопасность (JWT_SECRET должен быть минимум 32 символа)
+      # JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters
+      # GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters
+
     ports:
       - "${GoTrue__Port}:9999"
     depends_on:
