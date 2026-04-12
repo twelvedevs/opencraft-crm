@@ -89,6 +89,7 @@ All specs are **Approved** unless noted otherwise.
 | [2026-03-27-automation-engine-phase-1.md](superpowers/plans/2026-03-27-automation-engine-phase-1.md) | Automation Engine — Phase 1 implementation plan |
 | [2026-04-03-docker-compose.md](superpowers/plans/2026-04-03-docker-compose.md) | Local docker-compose — implementation plan |
 | [2026-04-12-openapi-swagger.md](superpowers/plans/2026-04-12-openapi-swagger.md) | OpenAPI/Swagger — 20-task plan (package + 19 services) |
+| [2026-04-12-crm-cli.md](superpowers/plans/2026-04-12-crm-cli.md) | CRM CLI — 14-task plan (leads, pipeline, conversations) |
 
 ## Phase / Rollout Specs (`docs/superpowers/specs/`)
 
