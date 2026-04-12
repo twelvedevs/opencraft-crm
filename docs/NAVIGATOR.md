@@ -74,6 +74,7 @@ All specs are **Approved** unless noted otherwise.
 | [event-bus-adapter-design.md](superpowers/specs/2026-03-29-event-bus-adapter-design.md) | EventBridge adapter design |
 | [docker-compose-design.md](superpowers/specs/2026-04-03-docker-compose-design.md) | Local development docker-compose setup |
 | [openapi-swagger-design.md](superpowers/specs/2026-04-11-openapi-swagger-design.md) | OpenAPI/Swagger support via shared `@ortho/openapi` plugin (19 services) |
+| [crm-cli-design.md](superpowers/specs/2026-04-12-crm-cli-design.md) | CRM CLI — developer debug tool for leads, pipeline, and conversations via API Gateway |
 
 ## Development Guides (`docs/development/`)
 
