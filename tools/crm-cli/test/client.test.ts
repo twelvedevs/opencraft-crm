@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const mockResolveToken = vi.fn(() => 'test-token');
 vi.mock('../src/config.js', () => ({
   readConfig: vi.fn(() => ({
     gateway_url: 'http://localhost:3000',
     gotrue_url:  'http://localhost:9999',
     identity_url: 'http://localhost:3100',
   })),
-  resolveToken: vi.fn(() => 'test-token'),
+  resolveToken: mockResolveToken,
 }));
 
 const mockFetch = vi.fn();
@@ -15,7 +16,10 @@ vi.stubGlobal('fetch', mockFetch);
 const { request, ApiError, NetworkError } = await import('../src/client.js');
 
 describe('request', () => {
-  beforeEach(() => mockFetch.mockReset());
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockResolveToken.mockReset().mockReturnValue('test-token');
+  });
 
   it('sends GET to gateway with Authorization header and /v1 prefix', async () => {
     mockFetch.mockResolvedValueOnce({
@@ -79,13 +83,15 @@ describe('request', () => {
     expect(err.apiError).toMatch(/Server error/);
   });
 
-  it('uses override token when provided', async () => {
+  it('passes override token to resolveToken', async () => {
+    mockResolveToken.mockReturnValueOnce('my-override');
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
     await request('/leads', { token: 'my-override' });
+    expect(mockResolveToken).toHaveBeenCalledWith('my-override');
     expect(mockFetch).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        headers: expect.objectContaining({ Authorization: 'Bearer my-override' }),
       })
     );
   });

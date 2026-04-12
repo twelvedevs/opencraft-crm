@@ -28,8 +28,7 @@ export function registerLoginCommand(program: Command): void {
         }
         const data = await res.json() as { access_token: string };
         providerToken = data.access_token;
-      } catch (e) {
-        if (e instanceof Error && e.message.includes('process.exit')) throw e;
+      } catch {
         printError(`Cannot reach auth server at ${config.gotrue_url}. Is the stack running?`);
         process.exit(1);
       }
@@ -49,8 +48,7 @@ export function registerLoginCommand(program: Command): void {
         const session = await res.json() as { access_token: string; refresh_token: string };
         writeConfig({ ...config, access_token: session.access_token, refresh_token: session.refresh_token });
         printSuccess('Logged in. Token saved to ~/.crm/config.json');
-      } catch (e) {
-        if (e instanceof Error && e.message.includes('process.exit')) throw e;
+      } catch {
         printError(`Cannot reach Identity Service at ${config.identity_url}. Is the stack running?`);
         process.exit(1);
       }

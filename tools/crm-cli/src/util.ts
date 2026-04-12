@@ -28,5 +28,7 @@ export function handleError(err: unknown): never {
     printError(err.message);
     process.exit(1);
   }
-  throw err;
+  const message = err instanceof Error ? err.message : String(err);
+  printError(`Unexpected error: ${message}`);
+  process.exit(1);
 }

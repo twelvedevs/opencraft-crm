@@ -52,7 +52,10 @@ export function registerConversationsCommands(program: Command): void {
       try {
         let locationId = opts.location;
         if (!locationId) {
-          locationId = await input({ message: 'Location ID:' });
+          locationId = await input({
+            message: 'Location ID:',
+            validate: (v: string) => v.trim() ? true : 'Location ID is required',
+          });
         }
 
         const params = new URLSearchParams({ location_id: locationId });

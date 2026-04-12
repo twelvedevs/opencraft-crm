@@ -97,17 +97,25 @@ export function registerPipelineCommands(program: Command): void {
   // crm pipeline transition <membership-id>
   withGlobals(pipeline.command('transition <membership-id>'))
     .description('Transition a membership to a new stage (interactive)')
-    .action(async (membershipId: string, opts: GlobalOpts) => {
+    .option('--pipeline <name>', 'Current pipeline (skips membership lookup)')
+    .option('--stage <name>',    'Current stage (shown for reference)')
+    .action(async (membershipId: string, opts: GlobalOpts & { pipeline?: string; stage?: string }) => {
       try {
-        const current = await request(`/pipeline/memberships/${membershipId}`, {
-          token: opts.token, gatewayUrl: opts.url,
-        }) as Membership;
-
-        console.log(`Current: ${current.pipeline} / ${current.stage}`);
+        let currentPipeline: Pipeline;
+        if (opts.pipeline) {
+          currentPipeline = opts.pipeline as Pipeline;
+          if (opts.stage) console.log(`Current: ${opts.pipeline} / ${opts.stage}`);
+        } else {
+          const current = await request(`/pipeline/memberships/${membershipId}`, {
+            token: opts.token, gatewayUrl: opts.url,
+          }) as Membership;
+          currentPipeline = current.pipeline;
+          console.log(`Current: ${current.pipeline} / ${current.stage}`);
+        }
 
         const stage    = await select({
           message: 'Target stage:',
-          choices: ALL_STAGES[current.pipeline as Pipeline].map(s => ({ value: s, name: s })),
+          choices: ALL_STAGES[currentPipeline].map(s => ({ value: s, name: s })),
         });
         const reason   = await select({ message: 'Reason:', choices: REASON_CHOICES });
         const override = await confirm({ message: 'Override transition rules?', default: false });

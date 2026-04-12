@@ -60,17 +60,21 @@ export async function promptCreateLead(): Promise<CreateLeadAnswers> {
 }
 
 export interface UpdateLeadAnswers {
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
-  email?: string;
-  treatment_interest?: string;
-  location_id?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  treatment_interest?: string | null;
+  location_id?: string | null;
 }
 
 export async function promptUpdateLead(current: Record<string, unknown>): Promise<UpdateLeadAnswers> {
   const str = (k: string) => (current[k] as string | undefined) ?? '';
-  const ans = (v: string, orig: string) => v !== orig ? v || undefined : undefined;
+  const ans = (v: string, orig: string): string | null | undefined => {
+    if (v === orig) return undefined;   // unchanged — omit from PATCH
+    if (v.trim() === '') return null;   // explicitly cleared
+    return v;                           // changed value
+  };
 
   const fn = await input({ message: 'First name:',        default: str('first_name') });
   const ln = await input({ message: 'Last name:',         default: str('last_name') });

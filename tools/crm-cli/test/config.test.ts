@@ -46,8 +46,29 @@ describe('writeConfig', () => {
     expect(mockFs.writeFileSync).toHaveBeenCalledWith(
       expect.stringContaining('config.json'),
       expect.stringContaining('"access_token": "tok"'),
-      'utf-8'
+      { mode: 0o600, encoding: 'utf-8' }
     );
+  });
+});
+
+describe('updateConfig', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('merges updates into existing config', () => {
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ gateway_url: 'http://localhost:3000', access_token: 'old' })
+    );
+    mockFs.mkdirSync.mockImplementation(() => undefined);
+    mockFs.writeFileSync.mockImplementation(() => undefined);
+    updateConfig({ gateway_url: 'http://staging:3000' });
+    expect(mockFs.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('config.json'),
+      expect.stringContaining('"gateway_url": "http://staging:3000"'),
+      { mode: 0o600, encoding: 'utf-8' }
+    );
+    // Verify existing fields are preserved
+    const written = (mockFs.writeFileSync.mock.calls[0] as unknown[])[1] as string;
+    expect(written).toContain('"access_token": "old"');
   });
 });
 

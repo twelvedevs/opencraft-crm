@@ -21,7 +21,7 @@ vi.mock('cli-table3', () => ({
   },
 }));
 
-const { printJson, printSuccess, printError, printKeyValue, colorizeStatus } = await import('../src/output.js');
+const { printJson, printTable, printSuccess, printError, printKeyValue, colorizeStatus } = await import('../src/output.js');
 
 describe('output', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -57,5 +57,32 @@ describe('output', () => {
     expect(colorizeStatus('open')).toBe('open');
     expect(colorizeStatus('lost')).toBe('lost');
     expect(colorizeStatus('unknown')).toBe('unknown');
+  });
+
+  it('printTable renders rows', () => {
+    printTable(['Name', 'Age'], [['Jane', 30], ['Bob', null]]);
+    expect(logSpy).toHaveBeenCalled();
+    const output = logSpy.mock.calls[0][0] as string;
+    expect(output).toContain('Jane');
+    expect(output).toContain('30');
+  });
+
+  it('printTable handles empty rows', () => {
+    printTable(['Name'], []);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it('printKeyValue renders with title', () => {
+    printKeyValue({ status: 'active' }, 'Details');
+    expect(logSpy).toHaveBeenCalledWith('Details');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('active'));
+  });
+
+  it('printKeyValue skips null values', () => {
+    logSpy.mockClear();
+    printKeyValue({ a: 'yes', b: null, c: undefined });
+    const calls = logSpy.mock.calls.map(c => c[0] as string);
+    expect(calls.some(c => c.includes('yes'))).toBe(true);
+    expect(calls.some(c => c.includes('null'))).toBe(false);
   });
 });

@@ -30,7 +30,7 @@ export function readConfig(): CrmConfig {
 
 export function writeConfig(config: CrmConfig): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600, encoding: 'utf-8' });
 }
 
 export function updateConfig(updates: Partial<CrmConfig>): void {

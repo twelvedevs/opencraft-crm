@@ -25,8 +25,14 @@ export function registerConfigCommands(program: Command): void {
     .command('set-url <url>')
     .description('Update gateway URL without re-authenticating')
     .action((url: string) => {
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        printError('URL must start with http:// or https://');
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          printError('URL must use http:// or https://');
+          process.exit(1);
+        }
+      } catch {
+        printError('Invalid URL format');
         process.exit(1);
       }
       updateConfig({ gateway_url: url });
