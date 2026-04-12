@@ -14,3 +14,12 @@ CREATE SCHEMA IF NOT EXISTS platform_messaging;
 CREATE SCHEMA IF NOT EXISTS platform_notifications;
 CREATE SCHEMA IF NOT EXISTS platform_nurturing;
 CREATE SCHEMA IF NOT EXISTS platform_templates;
+CREATE SCHEMA IF NOT EXISTS platform_media;
+
+CREATE SCHEMA IF NOT EXISTS crm_leads;
+CREATE SCHEMA IF NOT EXISTS crm_pipeline;
+CREATE SCHEMA IF NOT EXISTS crm_conversations;
+CREATE SCHEMA IF NOT EXISTS crm_campaigns;
+CREATE SCHEMA IF NOT EXISTS crm_referrals;
+CREATE SCHEMA IF NOT EXISTS crm_reporting;
+CREATE SCHEMA IF NOT EXISTS crm_imports;

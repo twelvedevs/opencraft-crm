@@ -548,6 +548,440 @@ services:
       timeout: 5s
       retries: 5
 
+  media_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/platform/media
+    image: ortho-media
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Media_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  media:
+    image: ortho-media
+    profiles: [services]
+    ports:
+      - "${Media_Service__Port}:3111"
+    environment:
+      PORT: "3111"
+      DATABASE_URL: ${Media_Service__DB_URL}
+      AWS_REGION: ${Media_Service__AWS_Region}
+      S3_PUBLIC_BUCKET: ${Media_Service__S3_Public_Bucket}
+      S3_PRIVATE_BUCKET: ${Media_Service__S3_Private_Bucket}
+      CLOUDFRONT_BASE_URL: ${Media_Service__CloudFront_Base_URL}
+      SERVICE_AUTH_TOKEN: ${Media_Service__Auth_Token}
+      SERVICE_CALLER_ID: ${Media_Service__Caller_ID}
+      IDENTITY_JWKS_URL: ${Identity_Service__URL}/identity/.well-known/jwks.json
+      LOG_LEVEL: info
+    depends_on:
+      media_migrations:
+        condition: service_completed_successfully
+      identity:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3111/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── CRM Services (profile: services) ─────────────────────────────────────────
+
+  lead_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/lead
+    image: ortho-lead
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Lead_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  lead:
+    image: ortho-lead
+    profiles: [services]
+    ports:
+      - "${Lead_Service__Port}:3200"
+    environment:
+      PORT: "3200"
+      DATABASE_URL: ${Lead_Service__DB_URL}
+      IDENTITY_JWKS_URL: ${Identity_Service__URL}/identity/.well-known/jwks.json
+      PIPELINE_ENGINE_URL: ${Pipeline_Service__URL}
+      AI_SERVICE_URL: ${Ai_Service__URL}
+      SERVICE_AUTH_TOKEN: ${Lead_Service__Auth_Token}
+      EVENT_BUS_DRIVER: redis
+      REDIS_URL: ${Redis__URL}
+      EVENT_BUS_CONSUMER_GROUP: ${Lead_Service__Consumer_Group}
+      LOG_LEVEL: info
+    depends_on:
+      lead_migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      pipeline:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pipeline_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/pipeline
+    image: ortho-pipeline
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Pipeline_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pipeline:
+    image: ortho-pipeline
+    profiles: [services]
+    ports:
+      - "${Pipeline_Service__Port}:3201"
+    environment:
+      PORT: "3201"
+      DATABASE_URL: ${Pipeline_Service__DB_URL}
+      INTERNAL_API_KEY: ${Pipeline_Service__Internal_API_Key}
+      EVENT_BUS_DRIVER: redis
+      LOG_LEVEL: info
+    depends_on:
+      pipeline_migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3201/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  conversation_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/conversation
+    image: ortho-conversation
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Conversation_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  conversation:
+    image: ortho-conversation
+    profiles: [services]
+    ports:
+      - "${Conversation_Service__Port}:3202"
+    environment:
+      PORT: "3202"
+      DATABASE_URL: ${Conversation_Service__DB_URL}
+      REDIS_URL: ${Redis__URL}
+      BULLMQ_REDIS_URL: ${Redis__URL}
+      EVENT_BUS_DRIVER: redis
+      EVENT_BUS_NAME: ortho-events
+      EVENT_BUS_CONSUMER_GROUP: ${Conversation_Service__Consumer_Group}
+      INTERNAL_API_KEY: ${Conversation_Service__Internal_API_Key}
+      MESSAGING_SERVICE_URL: ${Messaging_Service__URL}
+      LEAD_SERVICE_URL: ${Lead_Service__URL}
+      AI_SERVICE_URL: ${Ai_Service__URL}
+      AUDIENCE_ENGINE_URL: ${Audience_Service__URL}
+      NOTIFICATION_SERVICE_URL: ${Notification_Service__URL}
+      LOG_LEVEL: info
+    depends_on:
+      conversation_migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      lead:
+        condition: service_healthy
+      messaging:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      audience:
+        condition: service_healthy
+      notification:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3202/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  campaign_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/campaign
+    image: ortho-campaign
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Campaign_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  campaign:
+    image: ortho-campaign
+    profiles: [services]
+    ports:
+      - "${Campaign_Service__Port}:3203"
+    environment:
+      PORT: "3203"
+      DATABASE_URL: ${Campaign_Service__DB_URL}
+      REDIS_URL: ${Redis__URL}
+      BULLMQ_REDIS_URL: ${Redis__URL}
+      EVENT_BUS_DRIVER: redis
+      SQS_QUEUE_URL: UNUSED-IN-DEV
+      EVENTBRIDGE_BUS_NAME: ortho-events
+      AUDIENCE_ENGINE_URL: ${Audience_Service__URL}
+      LEAD_SERVICE_URL: ${Lead_Service__URL}
+      EMAIL_SERVICE_URL: ${Email_Service__URL}
+      TEMPLATE_SERVICE_URL: ${Template_Service__URL}
+      IDENTITY_JWKS_URL: ${Identity_Service__URL}/identity/.well-known/jwks.json
+      LOG_LEVEL: info
+    depends_on:
+      campaign_migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      lead:
+        condition: service_healthy
+      audience:
+        condition: service_healthy
+      email:
+        condition: service_healthy
+      template:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3203/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  referral_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/referral
+    image: ortho-referral
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Referral_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  referral:
+    image: ortho-referral
+    profiles: [services]
+    ports:
+      - "${Referral_Service__Port}:3204"
+    environment:
+      PORT: "3204"
+      DATABASE_URL: ${Referral_Service__DB_URL}
+      IDENTITY_JWKS_URL: ${Identity_Service__URL}/identity/.well-known/jwks.json
+      LEAD_SERVICE_URL: ${Lead_Service__URL}
+      LEAD_SERVICE_API_KEY: ${Lead_Service__API_Key}
+      MESSAGING_SERVICE_URL: ${Messaging_Service__URL}
+      DEFAULT_REFERRAL_LANDING_URL: ${Referral_Service__Landing_URL}
+      REFERRAL_BASE_URL: ${Referral_Service__Base_URL}
+      EVENT_BUS_DRIVER: redis
+      SQS_QUEUE_URL: UNUSED-IN-DEV
+      LOG_LEVEL: info
+    depends_on:
+      referral_migrations:
+        condition: service_completed_successfully
+      identity:
+        condition: service_healthy
+      lead:
+        condition: service_healthy
+      messaging:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3204/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  reporting_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/reporting
+    image: ortho-reporting
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Reporting_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  reporting:
+    image: ortho-reporting
+    profiles: [services]
+    ports:
+      - "${Reporting_Service__Port}:3205"
+    environment:
+      PORT: "3205"
+      DATABASE_URL: ${Reporting_Service__DB_URL}
+      REDIS_URL: ${Redis__URL}
+      ANALYTICS_SERVICE_URL: ${Analytics_Service__URL}
+      ANALYTICS_API_KEY: ${Reporting_Service__Analytics_API_Key}
+      MEDIA_SERVICE_URL: ${Media_Service__URL}
+      INTERNAL_API_SECRET: ${Reporting_Service__Internal_API_Secret}
+      EMAIL_SERVICE_URL: ${Email_Service__URL}
+      NOTIFICATION_SERVICE_URL: ${Notification_Service__URL}
+      CRM_BASE_URL: ${Reporting_Service__CRM_Base_URL}
+      IDENTITY_JWKS_URL: ${Identity_Service__URL}/identity/.well-known/jwks.json
+      LOG_LEVEL: info
+    depends_on:
+      reporting_migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+      media:
+        condition: service_healthy
+      email:
+        condition: service_healthy
+      notification:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3205/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  import_migrations:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/import
+    image: ortho-import
+    command: npm run migrate
+    profiles: [services]
+    environment:
+      DATABASE_URL: ${Import_Service__DB_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  import:
+    image: ortho-import
+    profiles: [services]
+    ports:
+      - "${Import_Service__Port}:3206"
+    environment:
+      PORT: "3206"
+      DATABASE_URL: ${Import_Service__DB_URL}
+      REDIS_URL: ${Redis__URL}
+      AWS_REGION: ${Import_Service__AWS_Region}
+      S3_BUCKET: ${Import_Service__S3_Bucket}
+      PIPELINE_ENGINE_URL: ${Pipeline_Service__URL}
+      LEAD_SERVICE_URL: ${Lead_Service__URL}
+      IMPORT_SERVICE_API_KEY: ${Import_Service__API_Key}
+      IDENTITY_JWKS_URL: ${Identity_Service__URL}/identity/.well-known/jwks.json
+    depends_on:
+      import_migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      lead:
+        condition: service_healthy
+      pipeline:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3206/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api_gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+      args:
+        SERVICE_PATH: apps/crm/api-gateway
+    image: ortho-api-gateway
+    profiles: [services]
+    ports:
+      - "${CRM_Gateway__Port}:3207"
+    environment:
+      PORT: "3207"
+      LEAD_SERVICE_URL: ${Lead_Service__URL}
+      PIPELINE_SERVICE_URL: ${Pipeline_Service__URL}
+      CONVERSATION_SERVICE_URL: ${Conversation_Service__URL}
+      CAMPAIGN_SERVICE_URL: ${Campaign_Service__URL}
+      REFERRAL_SERVICE_URL: ${Referral_Service__URL}
+      REPORTING_SERVICE_URL: ${Reporting_Service__URL}
+      IMPORT_SERVICE_URL: ${Import_Service__URL}
+      NOTIFICATION_SERVICE_URL: ${Notification_Service__URL}
+      IDENTITY_SERVICE_URL: ${Identity_Service__URL}
+      LEAD_SERVICE_API_KEY: ${Lead_Service__API_Key}
+      INTERNAL_API_SECRET: ${CRM_Gateway__Internal_API_Secret}
+    depends_on:
+      identity:
+        condition: service_healthy
+      lead:
+        condition: service_healthy
+      pipeline:
+        condition: service_healthy
+      conversation:
+        condition: service_healthy
+      campaign:
+        condition: service_healthy
+      referral:
+        condition: service_healthy
+      reporting:
+        condition: service_healthy
+      import:
+        condition: service_healthy
+      notification:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3207/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   redis_data:
