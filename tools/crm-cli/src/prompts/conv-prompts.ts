@@ -8,6 +8,6 @@ export async function promptMessageBody(label: string): Promise<string> {
   return editor({
     message: label,
     postfix: '.txt',
-    waitForUseInput: true,
+    waitForUserInput: true,
   });
 }
