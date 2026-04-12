@@ -27,7 +27,7 @@ export async function sessionRoutes(
 
   // POST /identity/session — exchange provider token for enriched JWT
   app.post('/identity/session', {
-    schema: { body: PostSessionBody },
+    schema: { body: PostSessionBody, tags: ['Session'], summary: 'Create session (login)' } as object,
   }, async (req, reply) => {
     const { provider_token } = req.body as { provider_token: string };
 
@@ -67,7 +67,7 @@ export async function sessionRoutes(
 
   // POST /identity/refresh — rotate refresh token and issue new JWT
   app.post('/identity/refresh', {
-    schema: { body: PostRefreshBody },
+    schema: { body: PostRefreshBody, tags: ['Session'], summary: 'Refresh access token' } as object,
   }, async (req, reply) => {
     const { refresh_token } = req.body as { refresh_token: string };
 
@@ -103,7 +103,7 @@ export async function sessionRoutes(
 
   // DELETE /identity/session — revoke a specific refresh token (requires JWT)
   app.delete('/identity/session', {
-    schema: { body: DeleteSessionBody },
+    schema: { body: DeleteSessionBody, tags: ['Session'], summary: 'Delete session (logout)' } as object,
   }, async (req, reply) => {
     const { refresh_token } = req.body as { refresh_token: string };
 

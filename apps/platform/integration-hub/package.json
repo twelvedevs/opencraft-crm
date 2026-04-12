@@ -20,6 +20,7 @@
     "@fastify/rate-limit": "^9.0.0",
     "@fastify/sensible": "^6.0.0",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@ortho/types": "file:../../../packages/@ortho/types",
     "@sinclair/typebox": "^0.34.0",

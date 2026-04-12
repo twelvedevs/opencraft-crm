@@ -18,7 +18,7 @@ const CoordinatorsQuerySchema = Type.Intersect([
 
 export async function coordinatorsRoutes(app: FastifyInstance, options: { pool: Pool }): Promise<void> {
   app.get('/analytics/metrics/coordinators', {
-    schema: { querystring: CoordinatorsQuerySchema },
+    schema: { querystring: CoordinatorsQuerySchema, tags: ['Metrics'], summary: 'Get coordinator metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

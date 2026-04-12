@@ -19,6 +19,7 @@ export async function internalRoutes(
 
   app.post(
     '/media/internal/store',
+    { schema: { tags: ['Internal'], summary: 'Store file from internal service' } as object },
     async (request, reply) => {
       let file: Awaited<ReturnType<typeof request.file>>;
       try {
@@ -129,6 +130,7 @@ export async function internalRoutes(
 
   app.get(
     '/media/internal/:file_id/signed-url',
+    { schema: { tags: ['Internal'], summary: 'Get internal signed URL' } as object },
     async (request, reply) => {
       const { file_id } = request.params as { file_id: string };
 

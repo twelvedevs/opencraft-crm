@@ -38,6 +38,8 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Sequences'],
+        summary: 'Create sequence',
         body: CreateBodySchema,
       },
     },
@@ -70,6 +72,8 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Sequences'],
+        summary: 'List sequences',
         querystring: ListQuerySchema,
       },
     },
@@ -108,6 +112,8 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Sequences'],
+        summary: 'Get sequence by ID',
         params: ParamsSchema,
       },
     },
@@ -138,6 +144,8 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Sequences'],
+        summary: 'Update sequence',
         params: ParamsSchema,
         body: SaveDraftBodySchema,
       },
@@ -168,6 +176,8 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
     {
       preHandler: [fastify.authenticate, fastify.requireRole(['marketing_manager'])],
       schema: {
+        tags: ['Sequences'],
+        summary: 'Activate sequence',
         params: ParamsSchema,
       },
     },
@@ -189,6 +199,8 @@ const sequencesRoutes: FastifyPluginAsync<SequencesRouteOptions> = async (fastif
     {
       preHandler: [fastify.authenticate, fastify.requireRole(['marketing_manager'])],
       schema: {
+        tags: ['Sequences'],
+        summary: 'Disable sequence',
         params: ParamsSchema,
       },
     },

@@ -21,7 +21,7 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     '/reporting/config/revenue',
-    { preHandler: [readPerm] },
+    { schema: { tags: ['Config'], summary: 'Get revenue config' } as object, preHandler: [readPerm] },
     async (req, reply) => {
       const configs = SCOPED_ROLES.has(req.user!.role)
         ? await revenueConfigRepo.findByLocationIds(db, req.user!.locations)
@@ -38,7 +38,7 @@ export async function configRoutes(app: FastifyInstance): Promise<void> {
   app.put(
     '/reporting/config/revenue/:location_id',
     {
-      schema: { params: LocationParams, body: RevenueConfigBody },
+      schema: { params: LocationParams, body: RevenueConfigBody, tags: ['Config'], summary: 'Get revenue config for location' },
       preHandler: [writePerm],
     },
     async (req, reply) => {

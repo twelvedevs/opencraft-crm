@@ -17,7 +17,7 @@ export async function publicPortalRoutes(
 
   // GET /referrals/portal/:token — doctor portal view
   app.get('/referrals/portal/:token', {
-    schema: { params: TokenParams },
+    schema: { params: TokenParams, tags: ['Public'], summary: 'Get referring doctor portal view' } as object,
   }, async (req, reply) => {
     const { token } = req.params as { token: string };
 

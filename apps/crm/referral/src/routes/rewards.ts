@@ -34,7 +34,7 @@ export async function rewardsRoutes(
 
   // GET /rewards — paginated list, default sort created_at ASC
   app.get('/rewards', {
-    schema: { querystring: ListRewardsQuery },
+    schema: { querystring: ListRewardsQuery, tags: ['Rewards'], summary: 'List pending rewards' } as object,
     preHandler: [readPerm],
   }, async (req, reply) => {
     const query = req.query as {
@@ -51,7 +51,7 @@ export async function rewardsRoutes(
 
   // PATCH /rewards/:id — issue reward
   app.patch('/rewards/:id', {
-    schema: { params: IdParams, body: PatchRewardBody },
+    schema: { params: IdParams, body: PatchRewardBody, tags: ['Rewards'], summary: 'Mark reward as issued' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

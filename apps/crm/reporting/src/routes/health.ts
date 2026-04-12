@@ -3,9 +3,9 @@ import db from '../db.js';
 import { queueRedis } from '../services/schedule-manager.js';
 
 export async function healthRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/health', async () => ({ status: 'ok' }));
+  app.get('/health', { schema: { hide: true } as object }, async () => ({ status: 'ok' }));
 
-  app.get('/ready', async (_req, reply) => {
+  app.get('/ready', { schema: { hide: true } as object }, async (_req, reply) => {
     let dbOk = false;
     let redisOk = false;
 

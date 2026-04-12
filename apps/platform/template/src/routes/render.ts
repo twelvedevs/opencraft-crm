@@ -13,11 +13,13 @@ export default async function renderRoutes(app: FastifyInstance): Promise<void> 
     '/templates/render',
     {
       schema: {
+        tags: ['Render'],
+        summary: 'Render template with merge tags',
         body: Type.Object({
           template_id: Type.String(),
           context: Type.Record(Type.String(), Type.Unknown()),
         }),
-      },
+      } as object,
     },
     async (request, reply) => {
       const { template_id, context } = request.body as {

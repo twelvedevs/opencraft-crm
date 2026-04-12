@@ -16,7 +16,7 @@ export async function publicLinksRoutes(
 
   // GET /referrals/r/:code — click redirect
   app.get('/referrals/r/:code', {
-    schema: { params: CodeParams },
+    schema: { params: CodeParams, tags: ['Public'], summary: 'Redirect referral link click' } as object,
   }, async (req, reply) => {
     const { code } = req.params as { code: string };
 
@@ -37,7 +37,7 @@ export async function publicLinksRoutes(
 
   // GET /referrals/links/:code — code resolution
   app.get('/referrals/links/:code', {
-    schema: { params: CodeParams },
+    schema: { params: CodeParams, tags: ['Public'], summary: 'Resolve referral link metadata' } as object,
   }, async (req, reply) => {
     const { code } = req.params as { code: string };
 

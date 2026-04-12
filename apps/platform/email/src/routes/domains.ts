@@ -24,9 +24,11 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   // POST /domains
   app.post('/domains', {
     schema: {
+      tags: ['Domains'],
+      summary: 'Add sending domain',
       body: CreateBodySchema,
       response: { 201: SendingDomainSchema, 409: ErrorSchema },
-    },
+    } as object,
   }, async (request, reply) => {
     const body = request.body as {
       location_id: string;
@@ -52,8 +54,10 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   // GET /domains
   app.get('/domains', {
     schema: {
+      tags: ['Domains'],
+      summary: 'List sending domains',
       response: { 200: Type.Object({ domains: Type.Array(SendingDomainSchema) }) },
-    },
+    } as object,
   }, async (_request, reply) => {
     const domains = await repo.findAll();
     return reply.send({ domains });
@@ -62,9 +66,11 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   // GET /domains/:id — live SendGrid verification sync when sendgrid_domain_id is set
   app.get('/domains/:id', {
     schema: {
+      tags: ['Domains'],
+      summary: 'Get domain by ID',
       params: IdParamsSchema,
       response: { 200: SendingDomainSchema, 404: ErrorSchema },
-    },
+    } as object,
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     let domain = await repo.findById(id);
@@ -93,8 +99,10 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
   // DELETE /domains/:id
   app.delete('/domains/:id', {
     schema: {
+      tags: ['Domains'],
+      summary: 'Delete sending domain',
       params: IdParamsSchema,
-    },
+    } as object,
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const domain = await repo.findById(id);

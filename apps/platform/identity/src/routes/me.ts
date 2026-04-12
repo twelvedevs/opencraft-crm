@@ -17,7 +17,7 @@ export async function meRoutes(
   const { pool, provider } = opts;
 
   // GET /identity/me — current user profile
-  app.get('/identity/me', async (req, reply) => {
+  app.get('/identity/me', { schema: { tags: ['Me'], summary: 'Get current user profile' } as object }, async (req, reply) => {
     const log = req.log.child({ userId: req.user.sub });
     const user = await userService.getUser(pool, req.user.sub);
     log.info('profile fetched');
@@ -34,7 +34,7 @@ export async function meRoutes(
 
   // PUT /identity/me/password — change own password
   app.put('/identity/me/password', {
-    schema: { body: PutPasswordBody },
+    schema: { body: PutPasswordBody, tags: ['Me'], summary: 'Change own password' } as object,
   }, async (req, reply) => {
     const body = req.body as { current_password?: string; new_password: string };
 

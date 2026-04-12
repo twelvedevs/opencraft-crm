@@ -2,11 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 
 export async function healthRoutes(app: FastifyInstance, options: { pool: Pool }): Promise<void> {
-  app.get('/health', async (_req, reply) => {
+  app.get('/health', { schema: { hide: true } as object }, async (_req, reply) => {
     return reply.status(200).send({ status: 'ok' });
   });
 
-  app.get('/ready', async (_req, reply) => {
+  app.get('/ready', { schema: { hide: true } as object }, async (_req, reply) => {
     try {
       await options.pool.query('SELECT 1');
       return reply.status(200).send({ status: 'ready' });

@@ -27,7 +27,7 @@ export async function transitionRoutes(
 
   app.post(
     '/memberships/:id/transition',
-    { schema: { body: TransitionBodySchema } },
+    { schema: { body: TransitionBodySchema, tags: ['Transitions'], summary: 'Transition membership to stage' } as object },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = req.body as {

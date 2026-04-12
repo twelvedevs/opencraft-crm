@@ -45,6 +45,7 @@ export function importsRoutes(opts: {
     app.post(
       '/imports',
       {
+        schema: { tags: ['Imports'], summary: 'Upload and create import job' } as object,
         preHandler: [rolePre, locationPre],
       },
       async (req, reply) => {
@@ -101,7 +102,7 @@ export function importsRoutes(opts: {
     app.get(
       '/imports',
       {
-        schema: { querystring: GetImportsQuerySchema },
+        schema: { tags: ['Imports'], summary: 'List import jobs', querystring: GetImportsQuerySchema } as object,
         preHandler: [rolePre, locationPre],
       },
       async (req, reply) => {
@@ -128,7 +129,7 @@ export function importsRoutes(opts: {
     app.get(
       '/imports/:id',
       {
-        schema: { params: GetImportParamsSchema },
+        schema: { tags: ['Imports'], summary: 'Get import job by ID', params: GetImportParamsSchema } as object,
         preHandler: [rolePre],
       },
       async (req, reply) => {

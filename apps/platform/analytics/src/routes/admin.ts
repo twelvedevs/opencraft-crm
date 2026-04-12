@@ -56,7 +56,7 @@ export async function adminRoutes(
 ): Promise<void> {
   // POST /analytics/admin/recompute
   app.post('/analytics/admin/recompute', {
-    schema: { body: RecomputeBodySchema },
+    schema: { body: RecomputeBodySchema, tags: ['Admin'], summary: 'Trigger metric recomputation' } as object,
   }, async (request, reply) => {
     if (!checkAdminKey(request.headers['x-admin-key'])) {
       return reply.status(401).send({ error: 'Unauthorized' });
@@ -76,7 +76,9 @@ export async function adminRoutes(
   });
 
   // GET /analytics/admin/recompute/:job_id
-  app.get('/analytics/admin/recompute/:job_id', async (request, reply) => {
+  app.get('/analytics/admin/recompute/:job_id', {
+    schema: { tags: ['Admin'], summary: 'Get recomputation job status' } as object,
+  }, async (request, reply) => {
     if (!checkAdminKey(request.headers['x-admin-key'])) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }

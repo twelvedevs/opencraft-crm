@@ -16,6 +16,7 @@
 | [arch/adr-interpolator.md](arch/adr-interpolator.md) | ADR: `@ortho/interpolator` — field interpolation & active hours |
 | [arch/adr-filter-engine.md](arch/adr-filter-engine.md) | ADR: `@platform/filter-engine` — shared filter evaluation package |
 | [arch/adr-auth-middleware.md](arch/adr-auth-middleware.md) | ADR: `@ortho/auth-middleware` — JWT verification and RBAC Fastify plugin |
+| [arch/adr-openapi.md](arch/adr-openapi.md) | ADR: `@ortho/openapi` — shared OpenAPI/Swagger plugin (19 services) |
 
 ## Component Design Specs (`docs/superpowers/specs/`)
 

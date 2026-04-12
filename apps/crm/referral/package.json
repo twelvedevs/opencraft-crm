@@ -20,6 +20,7 @@
   "dependencies": {
     "@fastify/sensible": "^6.0.0",
     "@ortho/auth-middleware": "file:../../../packages/@ortho/auth-middleware",
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@ortho/types": "file:../../../packages/@ortho/types",

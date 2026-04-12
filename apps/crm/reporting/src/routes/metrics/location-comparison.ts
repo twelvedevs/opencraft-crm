@@ -34,7 +34,7 @@ export async function locationComparisonRoutes(app: FastifyInstance): Promise<vo
   app.get(
     '/reporting/metrics/location-comparison',
     {
-      schema: { querystring: MetricsQueryParams },
+      schema: { querystring: MetricsQueryParams, tags: ['Metrics'], summary: 'Get location comparison metrics' },
       preHandler: [readPerm],
     },
     async (req, reply) => {

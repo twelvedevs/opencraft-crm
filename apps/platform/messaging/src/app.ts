@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import formbody from '@fastify/formbody';
+import { openapiPlugin } from '@ortho/openapi';
 import type { Redis } from 'ioredis';
 import type { Knex } from './db.js';
 import type { EventBus } from '@ortho/event-bus';
@@ -22,6 +23,16 @@ export async function buildApp(
   const app = Fastify({ logger: true });
 
   await app.register(sensible);
+  await app.register(openapiPlugin, {
+    title: 'Messaging Service',
+    description: 'SMS/MMS/Voice via Twilio',
+    tags: [
+      { name: 'Messages', description: 'SMS message sending and retrieval' },
+      { name: 'Numbers', description: 'Twilio number pool management' },
+      { name: 'Opt-outs', description: 'STOP/opt-out handling' },
+      { name: 'Webhooks', description: 'Twilio webhook receivers' },
+    ],
+  });
   await app.register(formbody);
 
   app.decorate('db', db);

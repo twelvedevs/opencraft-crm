@@ -59,7 +59,7 @@ export async function campaignsRoutes(
 
   // POST /campaigns — create draft
   app.post('/', {
-    schema: { body: CreateCampaignBody },
+    schema: { body: CreateCampaignBody, tags: ['Campaigns'], summary: 'Create campaign' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const body = req.body as {
@@ -126,7 +126,7 @@ export async function campaignsRoutes(
 
   // GET /campaigns — list with filters
   app.get('/', {
-    schema: { querystring: ListCampaignsQuery },
+    schema: { querystring: ListCampaignsQuery, tags: ['Campaigns'], summary: 'List campaigns' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const query = req.query as {
@@ -152,7 +152,7 @@ export async function campaignsRoutes(
 
   // GET /campaigns/:id — get by ID
   app.get('/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Campaigns'], summary: 'Get campaign by ID' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -167,7 +167,7 @@ export async function campaignsRoutes(
 
   // PATCH /campaigns/:id — update fields
   app.patch('/:id', {
-    schema: { params: IdParams, body: PatchCampaignBody },
+    schema: { params: IdParams, body: PatchCampaignBody, tags: ['Campaigns'], summary: 'Update campaign' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -196,7 +196,7 @@ export async function campaignsRoutes(
 
   // DELETE /campaigns/:id — only draft campaigns
   app.delete('/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Campaigns'], summary: 'Delete campaign' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

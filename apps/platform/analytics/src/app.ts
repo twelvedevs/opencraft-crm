@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
 import type { Pool } from 'pg';
 import type { Queue } from 'bullmq';
+import { openapiPlugin } from '@ortho/openapi';
 import { apiKeyAuthPlugin } from './plugins/api-key-auth.js';
 import { healthRoutes } from './routes/health.js';
 import { leadsRoutes } from './routes/metrics/leads.js';
@@ -20,6 +21,15 @@ export async function buildApp(pool: Pool, queue: Queue): Promise<FastifyInstanc
   const app = Fastify({ logger: true });
 
   await app.register(sensible);
+  await app.register(openapiPlugin, {
+    title: 'Analytics Service',
+    description: 'Event ingestion pipeline and metric aggregation',
+    tags: [
+      { name: 'Metrics', description: 'Aggregated metric queries' },
+      { name: 'Query', description: 'Ad-hoc raw event queries' },
+      { name: 'Admin', description: 'Administrative operations' },
+    ],
+  });
   await app.register(apiKeyAuthPlugin);
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 

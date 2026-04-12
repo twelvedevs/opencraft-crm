@@ -18,6 +18,7 @@
   "dependencies": {
     "@fastify/sensible": "^6.0.0",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@platform/filter-engine": "file:../../../packages/@platform/filter-engine",
     "@sinclair/typebox": "^0.34.0",
     "bullmq": "^5.0.0",

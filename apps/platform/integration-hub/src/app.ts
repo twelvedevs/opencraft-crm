@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
+import { openapiPlugin } from '@ortho/openapi';
 import { jwtAuthPlugin, type JwtAuthOptions } from './plugins/jwt-auth.js';
 import { oauthRoutes, type OAuthRoutesOpts } from './routes/oauth.js';
 import { accountsRoutes, type AccountsRoutesOpts } from './routes/accounts.js';
@@ -22,10 +23,20 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   });
 
   await fastify.register(sensible);
+  await fastify.register(openapiPlugin, {
+    title: 'Integration Hub',
+    description: 'External API connectors — Google Ads and Meta Marketing APIs',
+    tags: [
+      { name: 'Accounts', description: 'Integration account management' },
+      { name: 'OAuth', description: 'OAuth authorization flows' },
+      { name: 'Backfill', description: 'Historical data backfill jobs' },
+      { name: 'Webhooks', description: 'Ad platform webhook receivers' },
+    ],
+  });
   await fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
   // Health check (no auth)
-  fastify.get('/health', async () => ({ status: 'ok' }));
+  fastify.get('/health', { schema: { hide: true } as object }, async () => ({ status: 'ok' }));
 
   // Webhook routes — NO JWT auth (must be registered before the JWT-scoped routes)
   await fastify.register(

@@ -50,7 +50,7 @@ export async function notificationsRoute(
   const { repo, redis } = opts;
 
   // GET /notifications — paginated notification history
-  fastify.get('/notifications', async (request, reply) => {
+  fastify.get('/notifications', { schema: { tags: ['Notifications'], summary: 'List notifications' } as object }, async (request, reply) => {
     // Validate Authorization
     const authHeader = request.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -127,7 +127,7 @@ export async function notificationsRoute(
   });
 
   // POST /notifications/read-all — mark all unread in channels as read
-  fastify.post('/notifications/read-all', async (request, reply) => {
+  fastify.post('/notifications/read-all', { schema: { tags: ['Notifications'], summary: 'Mark all notifications as read' } as object }, async (request, reply) => {
     const authHeader = request.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return reply.status(401).send({ error: 'missing_token' });
@@ -170,7 +170,7 @@ export async function notificationsRoute(
   });
 
   // POST /notifications/:id/read — mark a single notification as read
-  fastify.post('/notifications/:id/read', async (request, reply) => {
+  fastify.post('/notifications/:id/read', { schema: { tags: ['Notifications'], summary: 'Mark notification as read' } as object }, async (request, reply) => {
     const authHeader = request.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return reply.status(401).send({ error: 'missing_token' });

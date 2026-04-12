@@ -18,7 +18,7 @@ export async function channelPerformanceRoutes(app: FastifyInstance): Promise<vo
   app.get(
     '/reporting/metrics/channel-performance',
     {
-      schema: { querystring: MetricsQueryParams },
+      schema: { querystring: MetricsQueryParams, tags: ['Metrics'], summary: 'Get channel performance metrics' },
       preHandler: [readPerm],
     },
     async (req, reply) => {

@@ -27,6 +27,7 @@ export async function backfillRoutes(
   // POST /integrations/accounts/:id/backfill
   fastify.post<{ Params: { id: string }; Body: unknown }>(
     '/integrations/accounts/:id/backfill',
+    { schema: { tags: ['Backfill'], summary: 'Trigger historical data backfill' } as object },
     async (request, reply) => {
       if (!Value.Check(BackfillBodySchema, request.body)) {
         return reply.code(400).send({
@@ -88,6 +89,7 @@ export async function backfillRoutes(
   // GET /integrations/accounts/:id/backfill/:job_id
   fastify.get<{ Params: { id: string; job_id: string } }>(
     '/integrations/accounts/:id/backfill/:job_id',
+    { schema: { tags: ['Backfill'], summary: 'Get backfill job status' } as object },
     async (request, reply) => {
       const { id, job_id } = request.params;
 

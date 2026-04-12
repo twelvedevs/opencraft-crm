@@ -28,7 +28,7 @@ export async function commentsRoutes(
 
   // POST /campaigns/:id/comments
   app.post('/:id/comments', {
-    schema: { params: IdParams, body: CreateCommentBody },
+    schema: { params: IdParams, body: CreateCommentBody, tags: ['Comments'], summary: 'Add review comment' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -59,7 +59,7 @@ export async function commentsRoutes(
 
   // GET /campaigns/:id/comments
   app.get('/:id/comments', {
-    schema: { params: IdParams, querystring: ListCommentsQuery },
+    schema: { params: IdParams, querystring: ListCommentsQuery, tags: ['Comments'], summary: 'List campaign comments' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

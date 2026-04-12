@@ -46,7 +46,7 @@ export async function usersRoutes(
 
   // POST /identity/users — create user
   app.post('/identity/users', {
-    schema: { body: CreateUserBody },
+    schema: { body: CreateUserBody, tags: ['Users'], summary: 'Create user' } as object,
     preHandler: [adminOnly],
   }, async (req, reply) => {
     const log = req.log.child({ userId: req.user.sub });
@@ -83,7 +83,7 @@ export async function usersRoutes(
 
   // GET /identity/users — list users with cursor pagination
   app.get('/identity/users', {
-    schema: { querystring: ListUsersQuery },
+    schema: { querystring: ListUsersQuery, tags: ['Users'], summary: 'List users' } as object,
     preHandler: [adminOnly],
   }, async (req, reply) => {
     const query = req.query as { role?: string; status?: string; limit?: number; cursor?: string };
@@ -101,7 +101,7 @@ export async function usersRoutes(
 
   // GET /identity/users/:id — get user by ID
   app.get('/identity/users/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Users'], summary: 'Get user by ID' } as object,
     preHandler: [adminOnly],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -126,7 +126,7 @@ export async function usersRoutes(
 
   // PUT /identity/users/:id — update user
   app.put('/identity/users/:id', {
-    schema: { params: IdParams, body: UpdateUserBody },
+    schema: { params: IdParams, body: UpdateUserBody, tags: ['Users'], summary: 'Update user' } as object,
     preHandler: [adminOnly],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -152,7 +152,7 @@ export async function usersRoutes(
 
   // PUT /identity/users/:id/password — admin reset password
   app.put('/identity/users/:id/password', {
-    schema: { params: IdParams, body: ResetPasswordBody },
+    schema: { params: IdParams, body: ResetPasswordBody, tags: ['Users'], summary: 'Update user password' } as object,
     preHandler: [adminOnly],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

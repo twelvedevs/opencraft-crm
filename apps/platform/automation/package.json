@@ -15,6 +15,7 @@
     "migrate": "npx tsx node_modules/knex/bin/cli.js migrate:latest --knexfile migrations/knexfile.ts"
   },
   "dependencies": {
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@aws-sdk/client-eventbridge": "^3.0.0",
     "@aws-sdk/client-secrets-manager": "^3.1018.0",
     "@aws-sdk/client-sqs": "^3.0.0",

@@ -10,8 +10,10 @@ export async function optOutRoutes(app: FastifyInstance): Promise<void> {
   // GET /opt-outs/:phone
   app.get('/opt-outs/:phone', {
     schema: {
+      tags: ['Opt-outs'],
+      summary: 'Check opt-out status for phone',
       params: Type.Object({ phone: Type.String() }),
-    },
+    } as object,
   }, async (request, reply) => {
     const { phone } = request.params as { phone: string };
     const record = await repo.findByPhone(phone);
@@ -24,12 +26,14 @@ export async function optOutRoutes(app: FastifyInstance): Promise<void> {
   // POST /opt-outs
   app.post('/opt-outs', {
     schema: {
+      tags: ['Opt-outs'],
+      summary: 'Add opt-out',
       body: Type.Object({
         phone_number: Type.String(),
         source: Type.Optional(Type.String()),
       }),
       response: { 201: OptOutSchema },
-    },
+    } as object,
   }, async (request, reply) => {
     const { phone_number, source } = request.body as { phone_number: string; source?: string };
     await registry.register(phone_number, source ?? 'admin');
@@ -40,8 +44,10 @@ export async function optOutRoutes(app: FastifyInstance): Promise<void> {
   // DELETE /opt-outs/:phone
   app.delete('/opt-outs/:phone', {
     schema: {
+      tags: ['Opt-outs'],
+      summary: 'Remove opt-out',
       params: Type.Object({ phone: Type.String() }),
-    },
+    } as object,
   }, async (request, reply) => {
     const { phone } = request.params as { phone: string };
     const removed = await registry.remove(phone);

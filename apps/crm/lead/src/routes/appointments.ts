@@ -46,7 +46,7 @@ export async function appointmentRoutes(
 
   // POST /leads/:id/appointments
   app.post('/leads/:id/appointments', {
-    schema: { params: LeadIdParams, body: CreateAppointmentBody },
+    schema: { params: LeadIdParams, body: CreateAppointmentBody, tags: ['Appointments'], summary: 'Create appointment' } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as { appointment_type: string; scheduled_at: string; notes?: string };
@@ -64,7 +64,7 @@ export async function appointmentRoutes(
 
   // GET /leads/:id/appointments
   app.get('/leads/:id/appointments', {
-    schema: { params: LeadIdParams },
+    schema: { params: LeadIdParams, tags: ['Appointments'], summary: 'List lead appointments' } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const lead = await leadRepository.findById(db, id);
@@ -77,7 +77,7 @@ export async function appointmentRoutes(
 
   // PATCH /leads/:id/appointments/:appt_id
   app.patch('/leads/:id/appointments/:appt_id', {
-    schema: { params: AppointmentParams, body: PatchAppointmentBody },
+    schema: { params: AppointmentParams, body: PatchAppointmentBody, tags: ['Appointments'], summary: 'Update appointment' } as object,
   }, async (req, reply) => {
     const { id, appt_id } = req.params as { id: string; appt_id: string };
     const body = req.body as { status?: string; scheduled_at?: string; notes?: string };
@@ -95,7 +95,7 @@ export async function appointmentRoutes(
 
   // DELETE /leads/:id/appointments/:appt_id — internal service-auth only
   app.delete('/leads/:id/appointments/:appt_id', {
-    schema: { params: AppointmentParams },
+    schema: { params: AppointmentParams, tags: ['Appointments'], summary: 'Delete appointment' } as object,
     config: { skipAuth: true },
     preHandler: [serviceAuthHook],
   }, async (req, reply) => {

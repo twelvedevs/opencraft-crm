@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { authPlugin } from '@ortho/auth-middleware';
+import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
 import type { Pool } from 'pg';
 import type { Knex } from 'knex';
@@ -16,6 +17,15 @@ export async function buildApp(pool: Pool, knex: Knex): Promise<FastifyInstance>
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
   await app.register(sensible);
+  await app.register(openapiPlugin, {
+    title: 'Media Service',
+    description: 'File upload, S3 storage, and CDN delivery',
+    tags: [
+      { name: 'Upload', description: 'File upload flows' },
+      { name: 'Files', description: 'File retrieval and deletion' },
+      { name: 'Internal', description: 'Internal service file operations' },
+    ],
+  });
   await app.register(cors, { origin: env.CORS_ORIGIN });
   await app.register(multipart, { limits: { fileSize: env.MAX_FILE_SIZE_BYTES } });
 
@@ -27,8 +37,8 @@ export async function buildApp(pool: Pool, knex: Knex): Promise<FastifyInstance>
   app.decorate('pool', pool);
   app.decorate('knex', knex);
 
-  app.get('/health', async () => ({ status: 'ok' }));
-  app.get('/ready', async (_req, reply) => {
+  app.get('/health', { schema: { hide: true } as object }, async () => ({ status: 'ok' }));
+  app.get('/ready', { schema: { hide: true } as object }, async (_req, reply) => {
     reply.code(200).send();
   });
 

@@ -93,7 +93,7 @@ export async function leadsRoutes(
 
   // POST /leads
   app.post('/leads', {
-    schema: { body: CreateLeadBody },
+    schema: { body: CreateLeadBody, tags: ['Leads'], summary: 'Create lead' } as object,
   }, async (req, reply) => {
     const body = req.body as {
       first_name: string;
@@ -143,7 +143,9 @@ export async function leadsRoutes(
         cursor: Type.Optional(Type.String()),
         limit: Type.Optional(Type.Integer({ default: 50, maximum: 200 })),
       }),
-    },
+      tags: ['Leads'],
+      summary: 'List duplicate lead pairs',
+    } as object,
   }, async (req, reply) => {
     const query = req.query as { cursor?: string; limit?: number };
     const userLocations = req.user?.locations ?? [];
@@ -163,7 +165,9 @@ export async function leadsRoutes(
       body: Type.Object({
         status: Type.Literal('resolved'),
       }),
-    },
+      tags: ['Leads'],
+      summary: 'Update duplicate status',
+    } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
@@ -187,7 +191,9 @@ export async function leadsRoutes(
         merge_lead_id: Type.String({ format: 'uuid' }),
         winning_stage: Type.String(),
       }),
-    },
+      tags: ['Leads'],
+      summary: 'Merge duplicate leads',
+    } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as { merge_lead_id: string; winning_stage: string };
@@ -213,7 +219,7 @@ export async function leadsRoutes(
 
   // GET /leads — list with filters, bulk lookup, search, cursor pagination
   app.get('/leads', {
-    schema: { querystring: ListLeadsQuery },
+    schema: { querystring: ListLeadsQuery, tags: ['Leads'], summary: 'List leads' } as object,
   }, async (req, reply) => {
     const query = req.query as {
       location_id?: string;
@@ -292,7 +298,7 @@ export async function leadsRoutes(
 
   // GET /leads/:id
   app.get('/leads/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Leads'], summary: 'Get lead by ID' } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
@@ -311,7 +317,7 @@ export async function leadsRoutes(
 
   // PATCH /leads/:id
   app.patch('/leads/:id', {
-    schema: { params: IdParams, body: PatchLeadBody },
+    schema: { params: IdParams, body: PatchLeadBody, tags: ['Leads'], summary: 'Update lead' } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as {
@@ -352,7 +358,7 @@ export async function leadsRoutes(
 
   // DELETE /leads/:id
   app.delete('/leads/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Leads'], summary: 'Delete lead' } as object,
     preHandler: [managerOnly],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

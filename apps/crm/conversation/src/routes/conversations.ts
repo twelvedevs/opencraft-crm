@@ -32,7 +32,7 @@ export async function conversationsRoute(
   const { db } = opts;
 
   // GET /conversations
-  app.get('/', { schema: { querystring: ListQuery } }, async (req, reply) => {
+  app.get('/', { schema: { tags: ['Conversations'], summary: 'List conversations', querystring: ListQuery } as object }, async (req, reply) => {
     const query = req.query as {
       location_id: string;
       lead_id?: string;
@@ -64,7 +64,7 @@ export async function conversationsRoute(
   });
 
   // GET /conversations/:id
-  app.get('/:id', { schema: { params: IdParams } }, async (req, reply) => {
+  app.get('/:id', { schema: { tags: ['Conversations'], summary: 'Get conversation by ID', params: IdParams } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     if (!req.user) {
@@ -89,7 +89,7 @@ export async function conversationsRoute(
   });
 
   // PATCH /conversations/:id
-  app.patch('/:id', { schema: { params: IdParams, body: PatchBody } }, async (req, reply) => {
+  app.patch('/:id', { schema: { tags: ['Conversations'], summary: 'Update conversation', params: IdParams, body: PatchBody } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = req.body as {
       assigned_to?: string | null;
@@ -132,7 +132,7 @@ export async function conversationsRoute(
   });
 
   // POST /conversations/:id/read
-  app.post('/:id/read', { schema: { params: IdParams } }, async (req, reply) => {
+  app.post('/:id/read', { schema: { tags: ['Conversations'], summary: 'Mark conversation as read', params: IdParams } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     if (!req.user) {

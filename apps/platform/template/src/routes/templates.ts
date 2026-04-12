@@ -11,11 +11,13 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
     '/templates',
     {
       schema: {
+        tags: ['Templates'],
+        summary: 'Create template',
         body: Type.Object({
           name: Type.String(),
           channel: Type.Union([Type.Literal('sms'), Type.Literal('email')]),
         }),
-      },
+      } as object,
     },
     async (request, reply) => {
       const { name, channel } = request.body as { name: string; channel: 'sms' | 'email' };
@@ -45,6 +47,8 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
     '/templates',
     {
       schema: {
+        tags: ['Templates'],
+        summary: 'List templates',
         querystring: Type.Object({
           channel: Type.Optional(Type.Union([Type.Literal('sms'), Type.Literal('email')])),
           status: Type.Optional(
@@ -55,7 +59,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
           limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 })),
           offset: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
         }),
-      },
+      } as object,
     },
     async (request, reply) => {
       const q = request.query as {
@@ -91,7 +95,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
 
   app.get(
     '/templates/:id',
-    {},
+    { schema: { tags: ['Templates'], summary: 'Get template by ID' } as object },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const repo = new TemplatesRepo(app.db);
@@ -143,7 +147,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
 
   app.post(
     '/templates/:id/enable',
-    { preHandler: app.requireRole('marketing_manager') },
+    { schema: { tags: ['Templates'], summary: 'Enable template' } as object, preHandler: app.requireRole('marketing_manager') },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const repo = new TemplatesRepo(app.db);
@@ -168,7 +172,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
 
   app.post(
     '/templates/:id/disable',
-    { preHandler: app.requireRole('marketing_manager') },
+    { schema: { tags: ['Templates'], summary: 'Disable template' } as object, preHandler: app.requireRole('marketing_manager') },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const repo = new TemplatesRepo(app.db);
@@ -195,7 +199,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
 
   app.post(
     '/templates/:id/activate',
-    { preHandler: app.requireRole('marketing_manager') },
+    { schema: { tags: ['Templates'], summary: 'Activate template version' } as object, preHandler: app.requireRole('marketing_manager') },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const repo = new TemplatesRepo(app.db);
@@ -215,6 +219,8 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
     '/templates/:id',
     {
       schema: {
+        tags: ['Templates'],
+        summary: 'Update template',
         body: Type.Object({
           name: Type.Optional(Type.String()),
           body_text: Type.Optional(Type.String()),
@@ -222,7 +228,7 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
           body_html: Type.Optional(Type.String()),
           body_unlayer: Type.Optional(Type.Object({}, { additionalProperties: true })),
         }),
-      },
+      } as object,
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };

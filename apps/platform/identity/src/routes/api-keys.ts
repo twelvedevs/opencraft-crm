@@ -43,7 +43,7 @@ export async function apiKeysRoutes(
 
   // POST /identity/api-keys/validate — internal-only, no JWT required
   app.post('/identity/api-keys/validate', {
-    schema: { body: ValidateApiKeyBody },
+    schema: { body: ValidateApiKeyBody, tags: ['API Keys'], summary: 'Validate API key' } as object,
     preHandler: [internalSecretGuard],
   }, async (req, reply) => {
     const body = req.body as { key: string };
@@ -60,7 +60,7 @@ export async function apiKeysRoutes(
 
   // POST /identity/api-keys — create API key
   app.post('/identity/api-keys', {
-    schema: { body: CreateApiKeyBody },
+    schema: { body: CreateApiKeyBody, tags: ['API Keys'], summary: 'Create API key' } as object,
     preHandler: [adminOnly],
   }, async (req, reply) => {
     const body = req.body as { name: string; permissions: string[] };
@@ -81,6 +81,7 @@ export async function apiKeysRoutes(
 
   // GET /identity/api-keys — list API keys
   app.get('/identity/api-keys', {
+    schema: { tags: ['API Keys'], summary: 'List API keys' } as object,
     preHandler: [adminOnly],
   }, async (_req, reply) => {
     const keys = await apiKeyService.listApiKeys(pool);
@@ -97,7 +98,7 @@ export async function apiKeysRoutes(
 
   // DELETE /identity/api-keys/:id — revoke API key
   app.delete('/identity/api-keys/:id', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['API Keys'], summary: 'Revoke API key' } as object,
     preHandler: [adminOnly],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

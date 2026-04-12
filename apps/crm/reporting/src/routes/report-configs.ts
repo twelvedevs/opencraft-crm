@@ -68,7 +68,7 @@ export async function reportConfigRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     '/reporting/report-configs',
     {
-      schema: { querystring: GetQuerySchema },
+      schema: { querystring: GetQuerySchema, tags: ['Report Configs'], summary: 'List report configurations' },
       preHandler: [readPerm],
     },
     async (req, reply) => {
@@ -92,7 +92,7 @@ export async function reportConfigRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/reporting/report-configs',
     {
-      schema: { body: ReportConfigBody },
+      schema: { body: ReportConfigBody, tags: ['Report Configs'], summary: 'Create report configuration' },
       preHandler: [readPerm],
     },
     async (req, reply) => {
@@ -121,7 +121,7 @@ export async function reportConfigRoutes(app: FastifyInstance): Promise<void> {
   app.put(
     '/reporting/report-configs/:id',
     {
-      schema: { params: ReportConfigParams, body: ReportConfigBody },
+      schema: { params: ReportConfigParams, body: ReportConfigBody, tags: ['Report Configs'], summary: 'Update report configuration' },
       preHandler: [readPerm],
     },
     async (req, reply) => {
@@ -159,7 +159,7 @@ export async function reportConfigRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     '/reporting/report-configs/:id',
     {
-      schema: { params: ReportConfigParams },
+      schema: { params: ReportConfigParams, tags: ['Report Configs'], summary: 'Delete report configuration' } as object,
       preHandler: [readPerm],
     },
     async (req, reply) => {
@@ -191,6 +191,8 @@ export async function reportConfigRoutes(app: FastifyInstance): Promise<void> {
       schema: {
         params: ReportConfigParams,
         querystring: GenerateQuerySchema,
+        tags: ['Report Configs'],
+        summary: 'Generate report from configuration',
       },
       preHandler: [readPerm],
     },

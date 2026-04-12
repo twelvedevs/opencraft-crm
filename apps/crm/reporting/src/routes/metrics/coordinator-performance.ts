@@ -33,7 +33,7 @@ export async function coordinatorPerformanceRoutes(app: FastifyInstance): Promis
   app.get(
     '/reporting/metrics/coordinator-performance',
     {
-      schema: { querystring: CoordinatorQueryParams },
+      schema: { querystring: CoordinatorQueryParams, tags: ['Metrics'], summary: 'Get coordinator performance metrics' },
       preHandler: [readPerm],
     },
     async (req, reply) => {

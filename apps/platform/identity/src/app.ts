@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import cors from '@fastify/cors';
 import { authPlugin } from '@ortho/auth-middleware';
+import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
 import type { Pool } from 'pg';
 import type { AuthProvider } from './providers/auth-provider.interface.js';
@@ -22,6 +23,17 @@ export async function buildApp(
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
 
   await app.register(sensible);
+  await app.register(openapiPlugin, {
+    title: 'Identity Service',
+    description: 'Authentication, RBAC, and multi-location scoping',
+    tags: [
+      { name: 'Session', description: 'Login, logout, token refresh' },
+      { name: 'Me', description: 'Current user profile' },
+      { name: 'Users', description: 'User management' },
+      { name: 'API Keys', description: 'Service API key management' },
+      { name: 'JWKS', description: 'Public key set for JWT verification' },
+    ],
+  });
   await app.register(cors, { origin: env.CORS_ORIGIN });
 
   await app.register(authPlugin, {

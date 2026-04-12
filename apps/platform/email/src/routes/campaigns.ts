@@ -40,7 +40,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /emails/campaigns/send
   app.post('/campaigns/send', {
-    schema: { body: CampaignSendBodySchema },
+    schema: { tags: ['Bulk Campaigns'], summary: 'Send bulk email campaign', body: CampaignSendBodySchema } as object,
   }, async (request, reply) => {
     const body = request.body as {
       job_ref: string;
@@ -194,7 +194,9 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /emails/campaigns/:jobId
-  app.get('/campaigns/:jobId', async (request, reply) => {
+  app.get('/campaigns/:jobId', {
+    schema: { tags: ['Bulk Campaigns'], summary: 'Get campaign send status' } as object,
+  }, async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
     const found = await jobsRepo.findById(jobId);
     if (!found) {
@@ -210,7 +212,9 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /emails/campaigns/:jobId/recipients
-  app.get('/campaigns/:jobId/recipients', async (request, reply) => {
+  app.get('/campaigns/:jobId/recipients', {
+    schema: { tags: ['Bulk Campaigns'], summary: 'List campaign recipients' } as object,
+  }, async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
     const query = request.query as { status?: string; page?: string };
 
@@ -235,7 +239,9 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // DELETE /emails/campaigns/:jobId
-  app.delete('/campaigns/:jobId', async (request, reply) => {
+  app.delete('/campaigns/:jobId', {
+    schema: { tags: ['Bulk Campaigns'], summary: 'Cancel campaign job' } as object,
+  }, async (request, reply) => {
     const { jobId } = request.params as { jobId: string };
     const found = await jobsRepo.findById(jobId);
     if (!found) {

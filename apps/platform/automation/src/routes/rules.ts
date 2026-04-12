@@ -26,6 +26,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'List automation rules',
         querystring: Type.Object({
           status: Type.Optional(
             Type.Union([
@@ -51,6 +53,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules/:id',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'Get rule by ID',
         params: Type.Object({
           id: Type.String(),
         }),
@@ -82,6 +86,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'Create automation rule',
         body: PostRuleBodySchema,
         response: {
           201: RuleSchema,
@@ -129,6 +135,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules/:id',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'Update automation rule',
         params: Type.Object({ id: Type.String() }),
         body: PutRuleBodySchema,
         response: {
@@ -161,6 +169,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules/:id/versions/:v/activate',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'Activate rule version',
         params: Type.Object({ id: Type.String(), v: Type.String() }),
         response: {
           200: RuleSchema,
@@ -199,6 +209,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules/:id/status',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'Update rule status',
         params: Type.Object({ id: Type.String() }),
         body: PatchStatusBodySchema,
         response: {
@@ -231,6 +243,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules/:id',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'Delete automation rule',
         params: Type.Object({
           id: Type.String(),
         }),
@@ -262,6 +276,8 @@ const rulesRoutes: FastifyPluginAsync<{ db: Knex; jobCanceller?: JobCanceller }>
     '/rules/:id/test',
     {
       schema: {
+        tags: ['Rules'],
+        summary: 'Test rule with event',
         params: Type.Object({ id: Type.String() }),
         body: TestRuleBodySchema,
         response: {

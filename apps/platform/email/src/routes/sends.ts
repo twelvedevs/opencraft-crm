@@ -25,8 +25,10 @@ export async function sendRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/send', {
     schema: {
+      tags: ['Sends'],
+      summary: 'Send transactional email',
       body: SendEmailBodySchema,
-    },
+    } as object,
   }, async (request, reply) => {
     const body = request.body as {
       dedup_key: string;

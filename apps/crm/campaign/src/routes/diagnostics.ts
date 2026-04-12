@@ -34,7 +34,7 @@ export async function diagnosticsRoutes(
 
   // GET /campaigns/:id/sends
   app.get('/:id/sends', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Diagnostics'], summary: 'List campaign send records' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -63,7 +63,7 @@ export async function diagnosticsRoutes(
 
   // GET /campaigns/:id/conversions
   app.get('/:id/conversions', {
-    schema: { params: IdParams, querystring: PaginationQuery },
+    schema: { params: IdParams, querystring: PaginationQuery, tags: ['Diagnostics'], summary: 'List campaign conversions' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -84,7 +84,7 @@ export async function diagnosticsRoutes(
 
   // GET /campaigns/:id/events
   app.get('/:id/events', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Diagnostics'], summary: 'List campaign status events' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -109,7 +109,7 @@ export async function diagnosticsRoutes(
 
   // POST /campaigns/:id/test-send
   app.post('/:id/test-send', {
-    schema: { params: IdParams, body: TestSendBody },
+    schema: { params: IdParams, body: TestSendBody, tags: ['Diagnostics'], summary: 'Send test email' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -162,7 +162,7 @@ export async function diagnosticsRoutes(
 
   // POST /campaigns/:id/spam-check
   app.post('/:id/spam-check', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Diagnostics'], summary: 'Check campaign spam score' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

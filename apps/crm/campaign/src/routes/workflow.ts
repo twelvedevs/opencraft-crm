@@ -47,7 +47,7 @@ export async function workflowRoutes(
 
   // POST /campaigns/:id/submit
   app.post('/:id/submit', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Workflow'], summary: 'Submit campaign for approval' },
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -80,7 +80,7 @@ export async function workflowRoutes(
 
   // POST /campaigns/:id/approve
   app.post('/:id/approve', {
-    schema: { params: IdParams, body: ApproveBody },
+    schema: { params: IdParams, body: ApproveBody, tags: ['Workflow'], summary: 'Approve campaign' },
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -126,7 +126,7 @@ export async function workflowRoutes(
 
   // POST /campaigns/:id/reject
   app.post('/:id/reject', {
-    schema: { params: IdParams, body: RejectBody },
+    schema: { params: IdParams, body: RejectBody, tags: ['Workflow'], summary: 'Reject campaign' },
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -171,7 +171,7 @@ export async function workflowRoutes(
 
   // POST /campaigns/:id/cancel
   app.post('/:id/cancel', {
-    schema: { params: IdParams, body: CancelBody },
+    schema: { params: IdParams, body: CancelBody, tags: ['Workflow'], summary: 'Cancel campaign' },
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -215,7 +215,7 @@ export async function workflowRoutes(
 
   // POST /campaigns/:id/schedule
   app.post('/:id/schedule', {
-    schema: { params: IdParams, body: ScheduleBody },
+    schema: { params: IdParams, body: ScheduleBody, tags: ['Workflow'], summary: 'Schedule campaign send' },
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -266,7 +266,7 @@ export async function workflowRoutes(
 
   // DELETE /campaigns/:id/schedule (unschedule)
   app.delete('/:id/schedule', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Workflow'], summary: 'Unschedule campaign' } as object,
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -310,7 +310,7 @@ export async function workflowRoutes(
 
   // POST /campaigns/:id/send-now
   app.post('/:id/send-now', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Workflow'], summary: 'Send campaign immediately' } as object,
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

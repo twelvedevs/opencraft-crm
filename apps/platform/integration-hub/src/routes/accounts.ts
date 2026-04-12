@@ -31,7 +31,7 @@ export async function accountsRoutes(
   const { pool, encryptionKey, googleAdsDeveloperToken } = opts;
 
   // GET /integrations/accounts
-  fastify.get('/integrations/accounts', async (_request, _reply) => {
+  fastify.get('/integrations/accounts', { schema: { tags: ['Accounts'], summary: 'List integration accounts' } as object }, async (_request, _reply) => {
     const client = await pool.connect();
     try {
       const accounts = await accountsRepo.findAll(client);
@@ -52,6 +52,7 @@ export async function accountsRoutes(
   // GET /integrations/accounts/:id/campaigns
   fastify.get<{ Params: { id: string } }>(
     '/integrations/accounts/:id/campaigns',
+    { schema: { tags: ['Accounts'], summary: 'List campaigns for account' } as object },
     async (request, reply) => {
       const { id } = request.params;
       const client = await pool.connect();
@@ -99,6 +100,7 @@ export async function accountsRoutes(
   // PUT /integrations/accounts/:id/mappings
   fastify.put<{ Params: { id: string }; Body: unknown }>(
     '/integrations/accounts/:id/mappings',
+    { schema: { tags: ['Accounts'], summary: 'Update account campaign mappings' } as object },
     async (request, reply) => {
       const { id } = request.params;
 

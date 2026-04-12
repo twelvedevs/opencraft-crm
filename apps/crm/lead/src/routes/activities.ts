@@ -25,7 +25,7 @@ export async function activityRoutes(
 
   // GET /leads/:id/activities
   app.get('/leads/:id/activities', {
-    schema: { params: LeadIdParams, querystring: ActivitiesQuery },
+    schema: { params: LeadIdParams, querystring: ActivitiesQuery, tags: ['Activities'], summary: 'List lead activity timeline' } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const query = req.query as {
@@ -50,7 +50,7 @@ export async function activityRoutes(
 
   // GET /leads/:id/score-commentary
   app.get('/leads/:id/score-commentary', {
-    schema: { params: LeadIdParams },
+    schema: { params: LeadIdParams, tags: ['Activities'], summary: 'Get AI score commentary' } as object,
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
 

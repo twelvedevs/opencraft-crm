@@ -20,7 +20,7 @@ const AdSpendQuerySchema = Type.Intersect([
 export async function adSpendRoutes(app: FastifyInstance, options: { pool: Pool }): Promise<void> {
   // GET /analytics/metrics/ad-spend — ad spend aggregated by platform/campaign
   app.get('/analytics/metrics/ad-spend', {
-    schema: { querystring: AdSpendQuerySchema },
+    schema: { querystring: AdSpendQuerySchema, tags: ['Metrics'], summary: 'Get ad spend metrics' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;
@@ -95,7 +95,7 @@ export async function adSpendRoutes(app: FastifyInstance, options: { pool: Pool 
   // GET /analytics/metrics/ad-spend/campaigns — always GROUP BY campaign_id
   // (enforces the constraint that campaign_name is a display hint only — never group by it)
   app.get('/analytics/metrics/ad-spend/campaigns', {
-    schema: { querystring: AdSpendQuerySchema },
+    schema: { querystring: AdSpendQuerySchema, tags: ['Metrics'], summary: 'Get ad spend by campaign' } as object,
   }, async (request, reply) => {
     const query = request.query as {
       period: string;

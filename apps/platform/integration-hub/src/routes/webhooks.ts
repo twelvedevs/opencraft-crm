@@ -29,6 +29,7 @@ export async function webhookRoutes(
   // POST /integrations/webhooks/:platform
   fastify.post<{ Params: { platform: string } }>(
     '/integrations/webhooks/:platform',
+    { schema: { tags: ['Webhooks'], summary: 'Receive ad platform webhook' } as object },
     async (request, reply) => {
       const { platform } = request.params;
 
@@ -84,6 +85,7 @@ export async function webhookRoutes(
   // GET /integrations/webhooks/:platform/verify
   fastify.get<{ Params: { platform: string }; Querystring: Record<string, string> }>(
     '/integrations/webhooks/:platform/verify',
+    { schema: { tags: ['Webhooks'], summary: 'Verify ad platform webhook' } as object },
     async (request, reply) => {
       const { platform } = request.params;
 

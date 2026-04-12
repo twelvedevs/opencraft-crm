@@ -10,7 +10,7 @@ export async function historyRoutes(
 ): Promise<void> {
   const { db } = opts;
 
-  app.get('/memberships/:id/history', async (req, reply) => {
+  app.get('/memberships/:id/history', { schema: { tags: ['History'], summary: 'Get membership stage history' } as object }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     const membership = await findById(db, id);

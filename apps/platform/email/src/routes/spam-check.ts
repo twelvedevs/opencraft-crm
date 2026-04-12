@@ -16,7 +16,7 @@ const SpamCheckBodySchema = Type.Object({
 
 export async function spamCheckRoutes(app: FastifyInstance): Promise<void> {
   app.post('/spam-check', {
-    schema: { body: SpamCheckBodySchema },
+    schema: { tags: ['Spam Check'], summary: 'Check email spam score', body: SpamCheckBodySchema } as object,
   }, async (request, reply) => {
     const body = request.body as {
       location_id?: string;

@@ -16,7 +16,7 @@ export async function campaignAnalyticsRoutes(app: FastifyInstance): Promise<voi
   app.get(
     '/reporting/metrics/campaign-analytics',
     {
-      schema: { querystring: MetricsQueryParams },
+      schema: { querystring: MetricsQueryParams, tags: ['Metrics'], summary: 'Get campaign analytics metrics' },
       preHandler: [readPerm],
     },
     async (req, reply) => {

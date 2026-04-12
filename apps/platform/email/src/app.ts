@@ -4,6 +4,7 @@ import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import type { Knex } from './db.js';
 import type { EventBus } from '@ortho/event-bus';
+import { openapiPlugin } from '@ortho/openapi';
 import { healthRoutes } from './routes/health.js';
 import { domainRoutes } from './routes/domains.js';
 import { sendRoutes } from './routes/sends.js';
@@ -20,6 +21,18 @@ export async function buildApp(
   const app = Fastify({ logger: true });
 
   await app.register(sensible);
+
+  await app.register(openapiPlugin, {
+    title: 'Email Service',
+    description: 'Email delivery via SendGrid',
+    tags: [
+      { name: 'Sends', description: 'Transactional email sending' },
+      { name: 'Bulk Campaigns', description: 'Bulk email campaign delivery' },
+      { name: 'Domains', description: 'Dedicated sending domain management' },
+      { name: 'Spam Check', description: 'Email spam score checking' },
+      { name: 'Webhooks', description: 'SendGrid event webhooks' },
+    ],
+  });
 
   app.decorate('db', db);
   app.decorate('eventBus', eventBus);

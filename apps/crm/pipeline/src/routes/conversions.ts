@@ -33,7 +33,7 @@ export async function conversionRoutes(
 
   app.post(
     '/memberships/:id/convert',
-    { schema: { body: ConvertBodySchema } },
+    { schema: { body: ConvertBodySchema, tags: ['Conversions'], summary: 'Convert lead to new pipeline' } as object },
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = req.body as {

@@ -58,6 +58,8 @@ const enrollmentsRoutes: FastifyPluginAsync<EnrollmentsRouteOptions> = async (fa
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Enrollments'],
+        summary: 'List enrollments for sequence',
         params: EnrollmentParamsSchema,
         querystring: EnrollmentsQuerySchema,
       },
@@ -92,6 +94,8 @@ const enrollmentsRoutes: FastifyPluginAsync<EnrollmentsRouteOptions> = async (fa
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Enrollments'],
+        summary: 'Get enrollment by ID',
         params: EnrollmentDetailParamsSchema,
       },
     },
@@ -135,6 +139,8 @@ const enrollmentsRoutes: FastifyPluginAsync<EnrollmentsRouteOptions> = async (fa
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Enrollments'],
+        summary: 'Get enrollment step',
         params: StepParamsSchema,
       },
     },
@@ -161,6 +167,8 @@ const enrollmentsRoutes: FastifyPluginAsync<EnrollmentsRouteOptions> = async (fa
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Enrollments'],
+        summary: 'Enroll entity in sequence',
         body: EnrollBodySchema,
       },
     },
@@ -201,6 +209,8 @@ const enrollmentsRoutes: FastifyPluginAsync<EnrollmentsRouteOptions> = async (fa
     {
       preHandler: [fastify.authenticate],
       schema: {
+        tags: ['Enrollments'],
+        summary: 'Unenroll entity from sequence',
         body: UnenrollBodySchema,
       },
     },

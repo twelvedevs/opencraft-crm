@@ -15,7 +15,11 @@ const CompleteBodySchema = Type.Object({
 
 export async function completeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/ai/complete', {
-    schema: { body: CompleteBodySchema },
+    schema: {
+      tags: ['Completions'],
+      summary: 'Request Claude completion',
+      body: CompleteBodySchema,
+    } as object,
   }, async (req, reply) => {
     const { prompt_id, context, model: requestModel } = req.body as {
       prompt_id: string;

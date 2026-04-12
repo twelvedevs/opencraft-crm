@@ -32,7 +32,7 @@ export async function scheduleRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     '/reporting/schedules',
-    { preHandler: [readPerm] },
+    { schema: { tags: ['Schedules'], summary: 'List report schedules' } as object, preHandler: [readPerm] },
     async (req, reply) => {
       const userConfigs = await configsRepo.findByCreatedBy(db, req.user!.sub);
       const nested = await Promise.all(
@@ -49,7 +49,7 @@ export async function scheduleRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post(
     '/reporting/schedules',
-    { schema: { body: ScheduleBody }, preHandler: [writePerm] },
+    { schema: { body: ScheduleBody, tags: ['Schedules'], summary: 'Create report schedule' }, preHandler: [writePerm] },
     async (req, reply) => {
       const body = req.body as typeof ScheduleBody._type;
 
@@ -103,7 +103,7 @@ export async function scheduleRoutes(app: FastifyInstance): Promise<void> {
   app.put(
     '/reporting/schedules/:id',
     {
-      schema: { params: ScheduleParams, body: ScheduleBody },
+      schema: { params: ScheduleParams, body: ScheduleBody, tags: ['Schedules'], summary: 'Update report schedule' },
       preHandler: [writePerm],
     },
     async (req, reply) => {
@@ -151,7 +151,7 @@ export async function scheduleRoutes(app: FastifyInstance): Promise<void> {
    */
   app.delete(
     '/reporting/schedules/:id',
-    { schema: { params: ScheduleParams }, preHandler: [writePerm] },
+    { schema: { params: ScheduleParams, tags: ['Schedules'], summary: 'Delete report schedule' }, preHandler: [writePerm] },
     async (req, reply) => {
       const { id } = req.params as { id: string };
 

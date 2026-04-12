@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import sensible from '@fastify/sensible';
+import { openapiPlugin } from '@ortho/openapi';
 import type { Redis } from 'ioredis';
 import type { Queue } from 'bullmq';
 import type { Knex } from './db.js';
@@ -22,6 +23,16 @@ export async function buildApp(
   const app = Fastify({ logger: true });
 
   await app.register(sensible);
+
+  await app.register(openapiPlugin, {
+    title: 'Audience Engine',
+    description: 'Schema-agnostic segment filter evaluation',
+    tags: [
+      { name: 'Segments', description: 'Audience segment definition' },
+      { name: 'Evaluation', description: 'Segment membership evaluation' },
+      { name: 'Snapshots', description: 'Audience snapshot retrieval' },
+    ],
+  });
 
   const snapshotsRepository = new SnapshotsRepository(db);
   const filterEvaluator = new FilterEvaluator();
