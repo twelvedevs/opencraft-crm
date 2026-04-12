@@ -159,7 +159,7 @@ export async function reportConfigRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     '/reporting/report-configs/:id',
     {
-      schema: { params: ReportConfigParams },
+      schema: { params: ReportConfigParams, tags: ['Report Configs'], summary: 'Delete report configuration' } as object,
       preHandler: [readPerm],
     },
     async (req, reply) => {

@@ -160,7 +160,7 @@ export async function referrersRoutes(
 
   // POST /referrers/:id/portal-token — generate/replace portal token
   app.post('/:id/portal-token', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Referrers'], summary: 'Generate portal token for referrer' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

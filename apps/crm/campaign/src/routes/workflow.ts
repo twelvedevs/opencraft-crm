@@ -266,7 +266,7 @@ export async function workflowRoutes(
 
   // DELETE /campaigns/:id/schedule (unschedule)
   app.delete('/:id/schedule', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Workflow'], summary: 'Unschedule campaign' } as object,
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -310,7 +310,7 @@ export async function workflowRoutes(
 
   // POST /campaigns/:id/send-now
   app.post('/:id/send-now', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Workflow'], summary: 'Send campaign immediately' } as object,
     preHandler: [writePerm, managePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };

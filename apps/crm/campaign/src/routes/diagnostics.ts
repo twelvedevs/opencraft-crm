@@ -84,7 +84,7 @@ export async function diagnosticsRoutes(
 
   // GET /campaigns/:id/events
   app.get('/:id/events', {
-    schema: { params: IdParams },
+    schema: { params: IdParams, tags: ['Diagnostics'], summary: 'List campaign status events' } as object,
     preHandler: [writePerm],
   }, async (req, reply) => {
     const { id } = req.params as { id: string };
