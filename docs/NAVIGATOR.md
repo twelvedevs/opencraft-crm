@@ -17,6 +17,7 @@
 | [arch/adr-filter-engine.md](arch/adr-filter-engine.md) | ADR: `@platform/filter-engine` — shared filter evaluation package |
 | [arch/adr-auth-middleware.md](arch/adr-auth-middleware.md) | ADR: `@ortho/auth-middleware` — JWT verification and RBAC Fastify plugin |
 | [arch/adr-openapi.md](arch/adr-openapi.md) | ADR: `@ortho/openapi` — shared OpenAPI/Swagger plugin (19 services) |
+| [arch/adr-docker-compose-conventions.md](arch/adr-docker-compose-conventions.md) | ADR: Docker Compose local dev conventions — env var naming and migration services |
 
 ## Component Design Specs (`docs/superpowers/specs/`)
 
