@@ -4,7 +4,61 @@
 
 https://code.claude.com/docs/en/devcontainer
 
-#### Prompts
+### Prompts
+
+#### start
+
+```
+please load superpowers:brainstorming skill. We should start planning architecture for proposed product Ortho CRM. First, come up with comprehensive list of services / modules / products / sub-products / whatever we should build. Don't fall down to microservices level, but rather let's stay on SOA level. (Perhaps DDD).
+I'd like to have architecture composed off reusable units / modules.
+I'm thinking about separate Automation Engine (flexible workflows per lead, with events, triggers and actions), separate emailing engine, separate module for templates management (UI), separate module for audience segmentation, separate module for nurturing mechanism management.  By reusability i mean it could be applied for other projects (same / other domains, potentially even not CRM).
+It sounds like a two-layer separation - platform layer and product layer. Platform stays domain-agnostic, with separately deployable services.
+
+
+
+
+How I envision services communicating with each other: Hybrid — synchronous for request/response (e.g., "get patient record"), async events for domain state changes (e.g., "lead stage changed", "exam scheduled")
+
+Frontend architecture -- micro-frontends, each domain team owns their UI slice and deploys independently
+```
+
+```
+❯ please load superpowers:brainstorming skill. We should start planning architecture for proposed product Ortho CRM. First, come up with comprehensive list of services / modules / products / sub-products / whatever we should build. Don't fall down to microservices level, but rather let's stay on SOA level. (Perhaps DDD)
+
+```
+
+
+
+```
+❯ question. I'd like to have archiecture composed off reusable units / modules. In particular you mentioned Automation Engine, which looks really great. I was also thinking about separate emailing engine, separate moule for templates management, separate module for audience segmentation, separate module for nurturing mechanism management. Do any of your approaches reflect my vision? By reusability i mean it could be applied for other projects
+
+⏺ None of the three approaches reflect this vision fully — and your instinct is pointing at something architecturally more significant than a service split.
+
+  What you're describing is a two-layer architecture:
+
+  - Platform layer — generic, reusable engines with no knowledge of orthodontics or CRM: Automation Engine, Email Engine, Template Engine, Audience Segmentation, Nurture Engine, AI Gateway
+  - Product layer — Ortho CRM-specific services that use the platform: Lead & Pipeline, Attribution Analytics, Referral, Data Ingestion
+
+  This is how companies like Customer.io, HubSpot, and Klaviyo are structured internally — they built generic engines first, then product surfaces on top.
+
+  None of my three approaches make this distinction. Approach 2 gets closest in that it separates concerns, but it treats everything as peers at the same layer rather than separating reusable infrastructure from product logic.
+
+  Before I redraw this with a platform/product split, one question that will shape the boundaries:
+
+  When you say "reusable for other projects" — how broad is "other projects"?
+
+  A — Other clients in the same space (e.g., another specialty medical practice CRM — same domain assumptions are fine)
+
+  B — Completely different industries (the platform engines must be 100% domain-agnostic — no orthodontic or even CRM concepts in the platform layer)
+
+  C — Both, but incrementally — start with enough abstraction to reuse within healthcare/CRM, design seams to go fully generic later
+
+❯ C
+
+```
+
+
+#### snippets
 
 `claude -p 'Load the prd-questions skill and generate questions for tasks explained in @docs/00-intro.md & @docs/01-architecture.md ' --dangerously-skip-permissions`
 
