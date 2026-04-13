@@ -18,8 +18,8 @@ export async function meRoutes(
 
   // GET /identity/me — current user profile
   app.get('/identity/me', { schema: { tags: ['Me'], summary: 'Get current user profile' } as object }, async (req, reply) => {
-    const log = req.log.child({ userId: req.user.sub });
-    const user = await userService.getUser(pool, req.user.sub);
+    const log = req.log.child({ userId: req.user!.sub });
+    const user = await userService.getUser(pool, req.user!.sub);
     log.info('profile fetched');
     return reply.status(200).send({
       id: user.id,
@@ -42,9 +42,9 @@ export async function meRoutes(
       await userService.changeOwnPassword(
         pool,
         provider,
-        req.user.sub,
+        req.user!.sub,
         { currentPassword: body.current_password, newPassword: body.new_password },
-        req.user.must_change_password,
+        req.user!.must_change_password,
       );
       return reply.status(200).send({});
     } catch (err: unknown) {

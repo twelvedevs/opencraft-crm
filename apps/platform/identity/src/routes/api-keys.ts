@@ -69,7 +69,7 @@ export async function apiKeysRoutes(
       const result = await apiKeyService.generateApiKey(pool, {
         name: body.name,
         permissions: body.permissions,
-        createdBy: req.user.sub,
+        createdBy: req.user!.sub,
       });
       return reply.status(201).send(result);
     } catch (err: unknown) {
