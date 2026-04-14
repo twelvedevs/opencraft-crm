@@ -46,7 +46,7 @@ export function createBackfillAdSpendWorker(
   log: Logger,
 ): Worker<BackfillAdSpendJobData> {
   const worker = new Worker<BackfillAdSpendJobData>(
-    'integration-hub:backfill-ad-spend',
+    'integration-hub-backfill-ad-spend',
     async (job) => {
       const { account_id, backfill_job_id } = job.data;
       const client = await pool.connect();

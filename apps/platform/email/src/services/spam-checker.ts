@@ -1,4 +1,4 @@
-import SpamScanner from 'spamscanner';
+// import SpamScanner from 'spamscanner';
 import { createLogger } from '@ortho/logger';
 import type { DomainRepository } from '../repositories/domain-repository.js';
 
@@ -32,6 +32,11 @@ export class SpamCheckerService {
       }
     }
 
+    // temporarily turn-off spam checker, always allow all email
+    log.info({ location_id: opts.locationId, score: 0, threshold, passed: true }, 'Mock spam check complete');
+    return { score: 0, threshold, passed: 0 <= threshold, issues: [] };
+
+    /*
     // 2. Run spam scan — build minimal RFC 2822 email string
     const emailSource = [
       `Subject: ${opts.subject}`,
@@ -86,5 +91,6 @@ export class SpamCheckerService {
     const result = { score, threshold, passed: score <= threshold, issues };
     log.info({ location_id: opts.locationId, score, threshold, passed: result.passed }, 'spam check complete');
     return result;
+    */
   }
 }

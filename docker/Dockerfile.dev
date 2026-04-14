@@ -20,17 +20,20 @@ RUN npm ci
 WORKDIR /repo
 COPY ${SERVICE_PATH}/ ./${SERVICE_PATH}/
 WORKDIR /repo/${SERVICE_PATH}
-RUN pwd && ls -la . && find /repo/apps/platform/identity/
 RUN npm run build
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 FROM node:24-alpine
 ARG SERVICE_PATH
 
-WORKDIR /app
+# Preserve /repo structure so file: dependency symlinks in node_modules resolve.
+# npm symlinks @ortho/* packages relative to /repo/packages/, so both trees
+# must exist at the same paths as in the builder stage.
+WORKDIR /repo
 
-# Copy the entire service dir: dist/ (compiled), node_modules/ (deps + tsx),
-# migrations/ (*.ts files for knex migrate), knexfile.ts (if at service root)
-COPY --from=builder /repo/${SERVICE_PATH} ./
+COPY --from=builder /repo/packages ./packages
+COPY --from=builder /repo/${SERVICE_PATH} ./${SERVICE_PATH}
+
+WORKDIR /repo/${SERVICE_PATH}
 
 CMD ["node", "dist/index.js"]

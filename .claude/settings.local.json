@@ -53,7 +53,20 @@
       "Bash(chmod +x:*)",
       "Bash(rm -rf ~/.claude/cache/*)",
       "Bash(rm -rf ~/.claude/plugins/cache/*)",
-      "Bash(ls /Users/andrey/dev/pre-sale/ortho/*.yml /Users/andrey/dev/pre-sale/ortho/*.yaml)"
+      "Bash(ls /Users/andrey/dev/pre-sale/ortho/*.yml /Users/andrey/dev/pre-sale/ortho/*.yaml)",
+      "Bash(docker network:*)",
+      "Bash(docker rm ortho-identity-1:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(sed -n '353,377p' docker-compose.yml)",
+      "Bash(sed -n '435,468p' docker-compose.yml)",
+      "Bash(sed -n '484,520p' docker-compose.yml)",
+      "Bash(sed -n '310,337p' docker-compose.yml)",
+      "Bash(sed -n '683,704p' docker-compose.yml)",
+      "Bash(sed -n '776,815p' docker-compose.yml)",
+      "Bash(sed -n '831,862p' docker-compose.yml)",
+      "Bash(sed -n '204,221p' docker-compose.yml)",
+      "Bash(sed -n '435,450p' docker-compose.yml)",
+      "Bash(sed -n '484,522p' docker-compose.yml)"
     ]
   }
 }

@@ -18,7 +18,7 @@ export function createRefreshTokenWorker(
   log: Logger,
 ): Worker<RefreshTokenJobData> {
   const worker = new Worker<RefreshTokenJobData>(
-    'integration-hub:refresh-token',
+    'integration-hub-refresh-token',
     async (job) => {
       const { account_id } = job.data;
       const client = await pool.connect();

@@ -77,6 +77,7 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
   const verifierCache = new Map<string, Verifier>();
 
   let lastRefetchAt = 0;
+  let initialLoadDone = false;
   const REFETCH_INTERVAL_MS = 60_000;
 
   async function loadKeys(): Promise<void> {
@@ -100,9 +101,13 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
         );
       }
     }
+    initialLoadDone = true;
   }
 
-  await loadKeys();
+  // Keys are loaded lazily on the first authenticated request rather than
+  // eagerly at registration time. This avoids a circular startup dependency
+  // when a service (e.g. identity) points IDENTITY_JWKS_URL at itself and
+  // the JWKS endpoint is not yet reachable during app construction.
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     const reqPath = req.url.split('?')[0];
@@ -135,7 +140,7 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
     let verifier = verifierCache.get(kid);
     if (!verifier) {
       const now = Date.now();
-      if (now - lastRefetchAt > REFETCH_INTERVAL_MS) {
+      if (!initialLoadDone || now - lastRefetchAt > REFETCH_INTERVAL_MS) {
         lastRefetchAt = now;
         try {
           await loadKeys();

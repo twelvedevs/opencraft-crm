@@ -15,8 +15,8 @@ const queueConnection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
 });
-const maintenanceQueue = new Queue('analytics:maintenance', { connection: queueConnection });
-const recomputeQueue = new Queue('analytics:recompute', { connection: queueConnection });
+const maintenanceQueue = new Queue('analytics-maintenance', { connection: queueConnection });
+const recomputeQueue = new Queue('analytics-recompute', { connection: queueConnection });
 
 registerPartitionMaintenanceJob(maintenanceQueue, pool);
 createRecomputeRollupsWorker(recomputeQueue, pool);

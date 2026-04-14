@@ -15,7 +15,7 @@ export async function up(knex: Knex): Promise<void> {
       properties  jsonb       NOT NULL DEFAULT '{}',
       occurred_at timestamptz NOT NULL,
       ingested_at timestamptz NOT NULL DEFAULT now(),
-      UNIQUE (event_id),
+      UNIQUE (event_id, occurred_at),
       PRIMARY KEY (id, occurred_at)
     ) PARTITION BY RANGE (occurred_at)
   `);

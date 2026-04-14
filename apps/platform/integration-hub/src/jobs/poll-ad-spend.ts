@@ -29,7 +29,7 @@ export function createPollAdSpendWorker(
   log: Logger,
 ): Worker<PollAdSpendJobData> {
   const worker = new Worker<PollAdSpendJobData>(
-    'integration-hub:poll-ad-spend',
+    'integration-hub-poll-ad-spend',
     async (job) => {
       const { account_id } = job.data;
       const client = await pool.connect();

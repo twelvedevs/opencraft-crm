@@ -19,7 +19,7 @@ export function createProcessLeadWebhookWorker(
   log: Logger,
 ): Worker<ProcessLeadWebhookJobData> {
   const worker = new Worker<ProcessLeadWebhookJobData>(
-    'integration-hub:process-lead-webhook',
+    'integration-hub-process-lead-webhook',
     async (job) => {
       const { platform, leadEvent } = job.data;
       const client = await pool.connect();

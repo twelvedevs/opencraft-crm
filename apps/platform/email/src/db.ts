@@ -5,5 +5,6 @@ export function createDb(databaseUrl: string): ReturnType<typeof knex> {
   return knex({
     client: 'pg',
     connection: databaseUrl,
+    searchPath: ['platform_email', 'public'],
   });
 }

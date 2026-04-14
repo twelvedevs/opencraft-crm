@@ -39,10 +39,10 @@ const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 const redisConnection = { host: redis.options.host ?? 'localhost', port: redis.options.port ?? 6379 };
 
 // --- BullMQ Queues ---
-const pollQueue = new Queue('integration-hub:poll-ad-spend', { connection: redisConnection });
-const refreshQueue = new Queue('integration-hub:refresh-token', { connection: redisConnection });
-const leadWebhookQueue = new Queue('integration-hub:process-lead-webhook', { connection: redisConnection });
-const backfillQueue = new Queue('integration-hub:backfill-ad-spend', { connection: redisConnection });
+const pollQueue = new Queue('integration-hub-poll-ad-spend', { connection: redisConnection });
+const refreshQueue = new Queue('integration-hub-refresh-token', { connection: redisConnection });
+const leadWebhookQueue = new Queue('integration-hub-process-lead-webhook', { connection: redisConnection });
+const backfillQueue = new Queue('integration-hub-backfill-ad-spend', { connection: redisConnection });
 
 // --- Event bus (publish-only) ---
 const bus = createBus();

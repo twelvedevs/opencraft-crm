@@ -5,7 +5,7 @@ const config: Knex.Config = {
   connection: process.env['DATABASE_URL'],
   searchPath: ['platform_email', 'public'],
   migrations: {
-    directory: '.',
+    directory: './migrations',
     schemaName: 'platform_email',
     tableName: 'knex_migrations',
     loadExtensions: ['.ts'],

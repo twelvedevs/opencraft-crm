@@ -1,4 +1,4 @@
-import { generateKeyPairSync, createPublicKey, createHmac } from 'node:crypto';
+import { generateKeyPairSync, createPublicKey, createHmac, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,11 +40,15 @@ const payload = Buffer.from(
 const sig = createHmac('sha256', gotrueSecret).update(`${header}.${payload}`).digest('base64url');
 const serviceRoleKey = `${header}.${payload}.${sig}`;
 
+// ── Integration Hub AES-256 encryption key ──────────────────────────────────
+const integrationHubEncryptionKey = randomBytes(32).toString('base64');
+
 // ── Merge into .env ─────────────────────────────────────────────────────────
 const newVars: Record<string, string> = {
   'Identity__Private_Key': privateKey,
   'Identity__JWKS_Keys': JSON.stringify([jwk]),
   'GoTrue__Service_Role_Key': serviceRoleKey,
+  'Integration_Hub__Encryption_Key': integrationHubEncryptionKey,
 };
 
 let existingLines: string[] = [];
@@ -75,4 +79,5 @@ console.log('Keys written to .env:');
 console.log('  Identity__Private_Key: RSA-2048 PKCS#1 PEM');
 console.log('  Identity__JWKS_Keys: JWK array with kid=dev-1');
 console.log('  GoTrue__Service_Role_Key: HS256 JWT, 10-year expiry');
+console.log('  Integration_Hub__Encryption_Key: AES-256 random key (base64)');
 console.log(`  Path: ${envPath}`);

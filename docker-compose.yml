@@ -44,7 +44,7 @@ services:
 
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://${GoTrue__DB_User}:${Postgres__Password}@${Postgres__Host}:${Postgres__Port}/${Postgres__DB}?search_path=auth&sslmode=disable
-      GOTRUE_SITE_URL: http://localhost:3000
+      GOTRUE_SITE_URL: http://127.0.0.1:3000
       GOTRUE_JWT_SECRET: ${GoTrue__JWT_Secret}
       GOTRUE_JWT_EXP: "3600"
       GOTRUE_MAILER_AUTOCONFIRM: "true"
@@ -57,14 +57,14 @@ services:
 
 
       # Адрес вашего фронтенда (куда редиректить после логина/подтверждения почты)
-      SITE_URL: http://localhost:3000
+      SITE_URL: http://127.0.0.1:3000
 
       # Главный внешний адрес Supabase (обычно это адрес шлюза Kong)
       # Именно это значение используется в API_EXTERNAL_URL
-      SUPABASE_PUBLIC_URL: http://localhost:8000
+      SUPABASE_PUBLIC_URL: http://127.0.0.1:8000
 
       # ВАЖНО: Это должен быть публичный URL, а не внутренний docker-адрес
-      API_EXTERNAL_URL: http://localhost:8000
+      API_EXTERNAL_URL: http://127.0.0.1:8000
 
       # # База данных (убедитесь, что пароли совпадают с сервисом db)
       # POSTGRES_PASSWORD: your-super-secret-password
@@ -80,7 +80,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9999/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:9999/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -95,7 +95,7 @@ services:
       supabase_auth:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/auth/v1/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:8000/nginx-health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -129,7 +129,7 @@ services:
     ports:
       - "${Identity_Service__Port}:3100"
     environment:
-      PORT: "3100"
+      PORT: ${Identity_Service__Port}
       DATABASE_URL: ${Identity_Service__DB_URL}
       REDIS_URL: ${Redis__URL}
       AUTH_PROVIDER: supabase
@@ -139,7 +139,7 @@ services:
       IDENTITY_JWKS_KEYS: ${Identity__JWKS_Keys}
       INTERNAL_API_SECRET: ${Identity__Internal_API_Secret}
       CORS_ORIGIN: ${Identity__CORS_Origin}
-      LOG_LEVEL: info
+      LOG_LEVEL: debug
     depends_on:
       identity_migrations:
         condition: service_completed_successfully
@@ -148,7 +148,7 @@ services:
       supabase_proxy:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3100/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -161,7 +161,7 @@ services:
         SERVICE_PATH: apps/platform/ai
     image: ortho-ai
     command: npm run migrate
-    profiles: [services]
+    profiles: [services, ai]
     environment:
       DATABASE_URL: ${Ai_Service__DB_URL}
     depends_on:
@@ -170,7 +170,7 @@ services:
 
   ai:
     image: ortho-ai
-    profiles: [services]
+    profiles: [services, ai]
     ports:
       - "${Ai_Service__Port}:3101"
     environment:
@@ -181,7 +181,7 @@ services:
       ai_migrations:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3101/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3101/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -214,7 +214,7 @@ services:
       template_migrations:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3102/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3102/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -252,7 +252,7 @@ services:
       identity:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3103/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3103/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -287,7 +287,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3104/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3104/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -330,7 +330,7 @@ services:
       identity:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3105/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3105/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -370,7 +370,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3106/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3106/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -412,7 +412,7 @@ services:
       template:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3107/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3107/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -461,7 +461,7 @@ services:
       ai:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3108/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3108/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -513,7 +513,7 @@ services:
       nurturing:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3109/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3109/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -546,6 +546,7 @@ services:
       EVENT_BUS_DRIVER: redis
       EVENT_BUS_CONSUMER_GROUP: ${Integration_Hub__Consumer_Group}
       SECRETS_PROVIDER: env
+      INTEGRATION_HUB_ENCRYPTION_KEY: ${Integration_Hub__Encryption_Key}
       JWT_MODE: jwks
       IDENTITY_SERVICE_JWKS_URL: ${Identity_Service__URL}/identity/.well-known/jwks.json
       OAUTH_STATE_SECRET: ${Integration_Hub__OAuth_State_Secret}
@@ -567,7 +568,7 @@ services:
       identity:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3110/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3110/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -609,7 +610,7 @@ services:
       identity:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3111/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3111/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -659,7 +660,7 @@ services:
       ai:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3200/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -687,14 +688,17 @@ services:
     environment:
       PORT: "3201"
       DATABASE_URL: ${Pipeline_Service__DB_URL}
+      REDIS_URL: ${Redis__URL}
+      BULLMQ_REDIS_URL: ${Redis__URL}
       INTERNAL_API_KEY: ${Pipeline_Service__Internal_API_Key}
       EVENT_BUS_DRIVER: redis
+      EVENT_BUS_CONSUMER_GROUP: ${Pipeline_Service__Consumer_Group}
       LOG_LEVEL: info
     depends_on:
       pipeline_migrations:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3201/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3201/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -750,7 +754,7 @@ services:
       notification:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3202/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3202/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -781,6 +785,7 @@ services:
       REDIS_URL: ${Redis__URL}
       BULLMQ_REDIS_URL: ${Redis__URL}
       EVENT_BUS_DRIVER: redis
+      EVENT_BUS_CONSUMER_GROUP: ${Campaign_Service__Consumer_Group}
       SQS_QUEUE_URL: UNUSED-IN-DEV
       EVENTBRIDGE_BUS_NAME: ortho-events
       AUDIENCE_ENGINE_URL: ${Audience_Service__URL}
@@ -805,7 +810,7 @@ services:
       template:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3203/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3203/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -838,8 +843,10 @@ services:
       LEAD_SERVICE_API_KEY: ${Lead_Service__API_Key}
       MESSAGING_SERVICE_URL: ${Messaging_Service__URL}
       DEFAULT_REFERRAL_LANDING_URL: ${Referral_Service__Landing_URL}
+      REDIS_URL: ${Redis__URL}
       REFERRAL_BASE_URL: ${Referral_Service__Base_URL}
       EVENT_BUS_DRIVER: redis
+      EVENT_BUS_CONSUMER_GROUP: ${Referral_Service__Consumer_Group}
       SQS_QUEUE_URL: UNUSED-IN-DEV
       LOG_LEVEL: info
     depends_on:
@@ -852,7 +859,7 @@ services:
       messaging:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3204/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3204/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -906,7 +913,7 @@ services:
       notification:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3205/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3205/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -953,7 +960,7 @@ services:
       pipeline:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3206/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3206/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -1001,7 +1008,7 @@ services:
       notification:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3207/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3207/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

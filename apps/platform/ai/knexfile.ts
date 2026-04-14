@@ -8,6 +8,7 @@ const config: Knex.Config = {
     directory: './migrations',
     schemaName: 'platform_ai',
     tableName: 'knex_migrations',
+    loadExtensions: ['.ts'],
   },
 };
 
