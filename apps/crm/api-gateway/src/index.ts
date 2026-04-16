@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import replyFrom from '@fastify/reply-from';
 import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import { config } from './config.js';
 import requestIdPlugin from './plugins/request-id.js';
 import authPlugin from './plugins/auth.js';
@@ -28,7 +29,7 @@ const app = Fastify({
   loggerInstance: log,
   bodyLimit: config.MAX_BODY_SIZE_BYTES,
   requestIdHeader: 'x-request-id',
-  disableRequestLogging: false,
+  disableRequestLogging: true,
 });
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,8 @@ await app.register(replyFrom, {
     maxRedirections: 0,
   },
 });
+
+await app.register(requestLoggingPlugin, { logger: log });
 
 // ---------------------------------------------------------------------------
 // Global plugins (registered in order: request-id → auth → rate-limit → error-handler)
