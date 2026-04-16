@@ -90,7 +90,7 @@ export async function createApp(opts?: {
     await fastify.register(safetyNetPollerPlugin, { stepExecutionsRepo, stepQueue: queue, redis, logger: fastify.log as Logger });
   }
 
-  fastify.get('/healthz', { schema: { hide: true } as object }, async () => {
+  fastify.get('/health', { schema: { hide: true } as object }, async () => {
     return { ok: true };
   });
 
