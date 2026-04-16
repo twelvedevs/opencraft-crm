@@ -89,7 +89,7 @@ function jwkToPem(jwk: JwkKey): string {
 // Plugin
 // ---------------------------------------------------------------------------
 async function authPluginImpl(app: FastifyInstance): Promise<void> {
-  const jwksUrl = `${config.IDENTITY_SERVICE_URL}/.well-known/jwks.json`;
+  const jwksUrl = `${config.IDENTITY_SERVICE_URL}/identity/.well-known/jwks.json`;
 
   // Per-kid verifier cache (kept warm from last JWKS fetch)
   const keyCache = new Map<string, string>();
