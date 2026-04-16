@@ -447,6 +447,7 @@ services:
       AI_SERVICE_URL: ${Ai_Service__URL}
       EVENT_BUS_DRIVER: redis
       EVENT_BUS_CONSUMER_GROUP: ${Nurturing_Service__Consumer_Group}
+      JWT_SECRET: ${Nurturing_Service__JWT_Secret}
     depends_on:
       nurturing_migrations:
         condition: service_completed_successfully
