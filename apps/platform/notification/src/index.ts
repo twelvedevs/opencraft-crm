@@ -1,7 +1,10 @@
 import Fastify from 'fastify';
+import type { FastifyBaseLogger } from 'fastify';
 import knex from 'knex';
 import { Redis } from 'ioredis';
 import { openapiPlugin } from '@ortho/openapi';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import { config } from './config.js';
 import { NotificationsRepo } from './repositories/notifications.repo.js';
 import { Publisher } from './services/publisher.js';
@@ -13,7 +16,9 @@ import { notificationsRoute } from './routes/notifications.js';
 import { createPublishRetryWorker } from './queue/publish-retry.worker.js';
 import { createCleanupWorker } from './queue/cleanup.worker.js';
 
-export const app = Fastify({ logger: true });
+const log = createLogger('platform-notification');
+
+export const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
 await app.register(openapiPlugin, {
   title: 'Notification Service',
@@ -24,6 +29,8 @@ await app.register(openapiPlugin, {
     { name: 'Stream', description: 'Real-time SSE stream' },
   ],
 });
+
+await app.register(requestLoggingPlugin, { logger: log });
 
 // Shared DB + Redis clients (not created during test imports)
 let publisher: Publisher | undefined;
@@ -54,7 +61,7 @@ if (process.env['NODE_ENV'] !== 'test') {
   createCleanupWorker(config.REDIS_URL, repo);
 }
 
-app.get('/health', { schema: { hide: true } as object }, async () => {
+app.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async () => {
   return { status: 'ok' };
 });
 
