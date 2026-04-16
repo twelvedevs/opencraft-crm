@@ -49,7 +49,7 @@ export async function runPoll(db: Knex, eventBus: EventBus): Promise<void> {
     // individual transactions using FOR UPDATE SKIP LOCKED, which is the correct
     // pattern for multi-instance safety: the lock must be held through the write.
     const result = await db.raw(
-      `SELECT id FROM pipeline_memberships WHERE status = $1 AND timeout_at IS NOT NULL AND timeout_at < NOW() ORDER BY timeout_at ASC LIMIT 100`,
+      `SELECT id FROM pipeline_memberships WHERE status = ? AND timeout_at IS NOT NULL AND timeout_at < NOW() ORDER BY timeout_at ASC LIMIT 100`,
       ['active'],
     );
     const candidateIds: string[] = (result.rows ?? []).map((r: { id: string }) => r.id);
@@ -68,7 +68,7 @@ export async function runPoll(db: Knex, eventBus: EventBus): Promise<void> {
           // throughout the UPDATE + INSERT, preventing double-processing by concurrent
           // instances that may have also selected this candidate ID.
           const lockResult = await trx.raw(
-            `SELECT * FROM pipeline_memberships WHERE id = $1 FOR UPDATE SKIP LOCKED`,
+            `SELECT * FROM pipeline_memberships WHERE id = ? FOR UPDATE SKIP LOCKED`,
             [candidateId],
           );
           const row = lockResult.rows[0];
