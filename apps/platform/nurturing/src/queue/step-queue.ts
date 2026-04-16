@@ -13,5 +13,5 @@ export function createStepQueue(redisUrl: string): Queue<StepJobData> {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   });
-  return new Queue<StepJobData>('nurturing:step-execution', { connection });
+  return new Queue<StepJobData>('nurturing-step-execution', { connection });
 }

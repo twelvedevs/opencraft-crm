@@ -155,7 +155,7 @@ export function createStepWorker(redisUrl: string, deps: StepWorkerDeps): Worker
   });
 
   const worker = new Worker<StepJobData>(
-    'nurturing:step-execution',
+    'nurturing-step-execution',
     createStepProcessor(deps),
     { connection },
   );
