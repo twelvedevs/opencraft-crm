@@ -13,7 +13,7 @@ import { createBulkSendWorker } from './workers/bulk-send.worker.js';
 const eventBus = createEventBus();
 
 // BullMQ queues
-const aiAgentQueue = new Queue('conversation:ai-agent-reply', {
+const aiAgentQueue = new Queue('conversation-ai-agent-reply', {
   connection: { url: env.BULLMQ_REDIS_URL },
 });
 
@@ -26,10 +26,10 @@ eventBus.subscribe('message.failed', (event) => handleMessageFailed(db, event));
 
 await eventBus.start();
 
-const scheduledSendQueue = new Queue('conversation:scheduled-send', {
+const scheduledSendQueue = new Queue('conversation-scheduled-send', {
   connection: { url: env.BULLMQ_REDIS_URL },
 });
-const bulkSendQueue = new Queue('conversation:bulk-send', {
+const bulkSendQueue = new Queue('conversation-bulk-send', {
   connection: { url: env.BULLMQ_REDIS_URL },
 });
 

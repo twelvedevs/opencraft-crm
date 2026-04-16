@@ -11,7 +11,7 @@ const logger = createLogger('crm-conversation');
 
 export function createScheduledSendWorker(db: Knex): Worker {
   return new Worker(
-    'conversation:scheduled-send',
+    'conversation-scheduled-send',
     async (job) => {
       const { scheduled_message_id } = job.data as { scheduled_message_id: string };
       const log = logger.child({ jobId: job.id, scheduledMessageId: scheduled_message_id });

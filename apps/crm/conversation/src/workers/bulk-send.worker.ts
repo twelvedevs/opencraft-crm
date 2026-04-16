@@ -8,7 +8,7 @@ const logger = createLogger('crm-conversation');
 
 export function createBulkSendWorker(db: Knex): Worker {
   return new Worker(
-    'conversation:bulk-send',
+    'conversation-bulk-send',
     async (job) => {
       const { job_id, location_id, segment, body } = job.data as {
         job_id: string;

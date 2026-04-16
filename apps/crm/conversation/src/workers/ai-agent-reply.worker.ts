@@ -12,7 +12,7 @@ const logger = createLogger('crm-conversation');
 
 export function createAiAgentReplyWorker(db: Knex): Worker {
   return new Worker(
-    'conversation:ai-agent-reply',
+    'conversation-ai-agent-reply',
     async (job) => {
       const { conversation_id, trigger_message_id } = job.data as {
         conversation_id: string;

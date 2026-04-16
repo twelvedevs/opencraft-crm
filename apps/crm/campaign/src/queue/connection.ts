@@ -5,5 +5,5 @@ export const bullmqRedis = new Redis(env.BULLMQ_REDIS_URL, {
   maxRetriesPerRequest: null,
 });
 
-export const ORCHESTRATE_QUEUE = 'campaign:orchestrate';
-export const AB_WINNER_QUEUE = 'campaign:ab-winner-select';
+export const ORCHESTRATE_QUEUE = 'campaign-orchestrate';
+export const AB_WINNER_QUEUE = 'campaign-ab-winner-select';
