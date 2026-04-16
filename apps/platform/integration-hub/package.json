@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
-    "@fastify/rate-limit": "^9.0.0",
+    "@fastify/rate-limit": "^10.0.0",
     "@fastify/sensible": "^6.0.0",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
     "@ortho/openapi": "file:../../../packages/@ortho/openapi",
