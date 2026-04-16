@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@fastify/sensible": "^6.0.0",
+    "@ortho/fastify-logger": "file:../../../packages/@ortho/fastify-logger",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@platform/filter-engine": "file:../../../packages/@platform/filter-engine",

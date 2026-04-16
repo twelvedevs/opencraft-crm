@@ -1,6 +1,8 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { openapiPlugin } from '@ortho/openapi';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import type { Redis } from 'ioredis';
 import type { Queue } from 'bullmq';
 import type { Knex } from './db.js';
@@ -20,9 +22,11 @@ export async function buildApp(
   redis: Redis,
   cleanupQueue: Queue,
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const log = createLogger('platform-audience');
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
 
   await app.register(openapiPlugin, {
     title: 'Audience Engine',

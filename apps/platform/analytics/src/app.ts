@@ -1,6 +1,8 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import type { Pool } from 'pg';
 import type { Queue } from 'bullmq';
 import { openapiPlugin } from '@ortho/openapi';
@@ -18,9 +20,11 @@ import { queryRoutes } from './routes/query.js';
 import { adminRoutes } from './routes/admin.js';
 
 export async function buildApp(pool: Pool, queue: Queue): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const log = createLogger('platform-analytics');
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
   await app.register(openapiPlugin, {
     title: 'Analytics Service',
     description: 'Event ingestion pipeline and metric aggregation',

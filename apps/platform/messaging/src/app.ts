@@ -1,7 +1,9 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import formbody from '@fastify/formbody';
 import { openapiPlugin } from '@ortho/openapi';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import type { Redis } from 'ioredis';
 import type { Knex } from './db.js';
 import type { EventBus } from '@ortho/event-bus';
@@ -20,9 +22,11 @@ export async function buildApp(
   twilioClient: TwilioClient,
   statusCallbackUrl: string,
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const log = createLogger('platform-messaging');
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
   await app.register(openapiPlugin, {
     title: 'Messaging Service',
     description: 'SMS/MMS/Voice via Twilio',
