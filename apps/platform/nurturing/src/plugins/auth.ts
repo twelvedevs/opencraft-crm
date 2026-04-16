@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, preHandlerAsyncHookHandler } from 'fastify';
 import jwt from '@fastify/jwt';
+import fp from 'fastify-plugin';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -8,7 +9,7 @@ declare module 'fastify' {
   }
 }
 
-const authPlugin: FastifyPluginAsync = async (fastify) => {
+const authPlugin: FastifyPluginAsync = fp(async (fastify) => {
   const JWT_SECRET = process.env['JWT_SECRET'];
   if (!JWT_SECRET) {
     throw new Error('JWT_SECRET is required');
@@ -32,6 +33,6 @@ const authPlugin: FastifyPluginAsync = async (fastify) => {
       }
     };
   });
-};
+});
 
 export default authPlugin;
