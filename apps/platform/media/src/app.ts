@@ -44,7 +44,7 @@ export async function buildApp(pool: Pool, knex: Knex): Promise<FastifyInstance>
 
   await uploadRoutes(app, { knex });
   await fileRoutes(app, { knex });
-  await internalRoutes(app, { knex });
+  await app.register(internalRoutes, { knex });
 
   return app;
 }
