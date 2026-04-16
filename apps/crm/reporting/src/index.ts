@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
 import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
 import { reconcile } from './services/schedule-manager.js';
@@ -22,9 +23,10 @@ import { configRoutes } from './routes/config.js';
 import './jobs/generate-report.js';
 
 const log = createLogger('crm-reporting');
-const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
+const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
 await app.register(sensible);
+await app.register(requestLoggingPlugin, { logger: log });
 
 await app.register(openapiPlugin, {
   title: 'Reporting Service',

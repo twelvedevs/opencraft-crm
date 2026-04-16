@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import { authPlugin } from '@ortho/auth-middleware';
 import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import type { Pool } from 'pg';
 import type { AuthProvider } from './providers/auth-provider.interface.js';
 import { env } from './env.js';
@@ -20,9 +21,10 @@ export async function buildApp(
 ): Promise<FastifyInstance> {
   const log = createLogger('identity');
   // Cast needed: pino Logger has extra fields (msgPrefix) not in FastifyBaseLogger
-  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
   await app.register(openapiPlugin, {
     title: 'Identity Service',
     description: 'Authentication, RBAC, and multi-location scoping',

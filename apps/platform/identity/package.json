@@ -19,6 +19,7 @@
     "@fastify/cors": "^11.0.0",
     "@fastify/sensible": "^6.0.0",
     "@ortho/auth-middleware": "file:../../../packages/@ortho/auth-middleware",
+    "@ortho/fastify-logger": "file:../../../packages/@ortho/fastify-logger",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@sinclair/typebox": "^0.34.0",

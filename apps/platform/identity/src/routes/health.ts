@@ -5,11 +5,11 @@ export async function healthRoutes(
   app: FastifyInstance,
   opts: { pool: Pool },
 ): Promise<void> {
-  app.get('/health', { schema: { hide: true } as object }, async (_req, reply) => {
+  app.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async (_req, reply) => {
     return reply.status(200).send({ status: 'ok' });
   });
 
-  app.get('/ready', { schema: { hide: true } as object }, async (_req, reply) => {
+  app.get('/ready', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async (_req, reply) => {
     try {
       await opts.pool.query('SELECT 1');
       return reply.status(200).send({ status: 'ready' });
