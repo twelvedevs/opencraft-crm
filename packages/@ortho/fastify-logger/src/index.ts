@@ -13,6 +13,8 @@ declare module 'fastify' {
   interface FastifyContextConfig {
     /** Set to true on a route to suppress onRequest/onResponse logging for that route */
     disableRequestLogging?: boolean;
+    /** Set to true on a route to bypass auth middleware (used by @ortho/auth-middleware) */
+    skipAuth?: boolean;
   }
   interface FastifyRequest {
     _loggingStartTime?: number;
