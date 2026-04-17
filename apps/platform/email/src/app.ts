@@ -1,6 +1,8 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import type { Queue } from 'bullmq';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import type { Redis } from 'ioredis';
 import type { Knex } from './db.js';
 import type { EventBus } from '@ortho/event-bus';
@@ -18,9 +20,11 @@ export async function buildApp(
   queues: { transactionalSend: Queue; campaignRecipient: Queue },
   redis: Redis,
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const log = createLogger('platform-email');
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
 
   await app.register(openapiPlugin, {
     title: 'Email Service',

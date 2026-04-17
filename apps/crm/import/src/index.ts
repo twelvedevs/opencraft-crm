@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import multipart from '@fastify/multipart';
 import { authPlugin } from '@ortho/auth-middleware';
 import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import { openapiPlugin } from '@ortho/openapi';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Queue } from 'bullmq';
@@ -61,9 +62,10 @@ const importService = new ImportService(importRepo, importRowRepo, columnMapping
 // ---------------------------------------------------------------------------
 // Fastify app
 // ---------------------------------------------------------------------------
-const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
+const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
 await app.register(sensible);
+await app.register(requestLoggingPlugin, { logger: log });
 await app.register(multipart);
 
 await app.register(openapiPlugin, {
@@ -78,7 +80,7 @@ await app.register(openapiPlugin, {
 });
 
 // Health check (unauthenticated)
-app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
+app.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async () => ({ ok: true }));
 
 // ---------------------------------------------------------------------------
 // Authenticated scope — all routes

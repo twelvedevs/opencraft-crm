@@ -20,6 +20,7 @@
     "@arizeai/openinference-instrumentation-anthropic": "^0.1.0",
     "@fastify/sensible": "^6.0.0",
     "@opentelemetry/instrumentation": "^0.57.0",
+    "@ortho/fastify-logger": "file:../../../packages/@ortho/fastify-logger",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@sinclair/typebox": "^0.34.0",

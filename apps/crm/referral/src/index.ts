@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
 import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import db, { destroy } from './db.js';
 import { env } from './env.js';
 
@@ -18,9 +19,10 @@ import { rewardsRoutes } from './routes/rewards.js';
 import { leaderboardRoutes } from './routes/leaderboard.js';
 
 const log = createLogger('crm-referral');
-const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
+const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
 await app.register(sensible);
+await app.register(requestLoggingPlugin, { logger: log });
 
 await app.register(openapiPlugin, {
   title: 'Referral Service',
@@ -35,7 +37,7 @@ await app.register(openapiPlugin, {
   ],
 });
 
-app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
+app.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async () => ({ ok: true }));
 
 // Public routes — encapsulated scope, no auth
 await app.register(async (scope) => {

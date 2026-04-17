@@ -14,6 +14,10 @@ declare module 'fastify' {
   interface FastifyRequest {
     user?: JwtPayload;
   }
+  interface FastifyContextConfig {
+    /** Set to true on a route to bypass JWT auth (e.g. internal service-to-service endpoints). */
+    skipAuth?: boolean;
+  }
 }
 
 export interface AuthPluginOptions {
@@ -115,7 +119,7 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
       return;
     }
 
-    if ((req.routeOptions?.config as unknown as Record<string, unknown>)?.skipAuth === true) {
+    if (req.routeOptions?.config?.skipAuth === true) {
       return;
     }
 

@@ -1,13 +1,17 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import type { Knex } from 'knex';
 import { requireAuth, requireRole } from './plugins/auth.js';
 import { openapiPlugin } from '@ortho/openapi';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 
 export async function buildApp(db: Knex, jwtSecret: string): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const log = createLogger('platform-template');
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
 
   await app.register(openapiPlugin, {
     title: 'Template Service',
@@ -26,7 +30,7 @@ export async function buildApp(db: Knex, jwtSecret: string): Promise<FastifyInst
   app.decorate('requireAuth', () => requireAuth(jwtSecret));
   app.decorate('requireRole', (role: string) => requireRole(role, jwtSecret));
 
-  app.get('/health', { schema: { hide: true } as object }, async (_request, reply) => {
+  app.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async (_request, reply) => {
     return reply.status(200).send({ status: 'ok' });
   });
 

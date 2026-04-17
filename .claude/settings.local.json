@@ -66,7 +66,11 @@
       "Bash(sed -n '831,862p' docker-compose.yml)",
       "Bash(sed -n '204,221p' docker-compose.yml)",
       "Bash(sed -n '435,450p' docker-compose.yml)",
-      "Bash(sed -n '484,522p' docker-compose.yml)"
+      "Bash(sed -n '484,522p' docker-compose.yml)",
+      "Bash(cat /Users/andrey/dev/pre-sale/ortho/packages/@ortho/logger/src/*.ts)"
     ]
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
   }
 }

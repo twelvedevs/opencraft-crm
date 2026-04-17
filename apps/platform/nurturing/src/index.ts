@@ -5,6 +5,10 @@ import { Redis } from 'ioredis';
 import type { FastifyInstance } from 'fastify';
 import type { Queue } from 'bullmq';
 import { openapiPlugin } from '@ortho/openapi';
+import { createLogger } from '@ortho/logger';
+import type { Logger } from '@ortho/logger';
+import type { FastifyBaseLogger } from 'fastify';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import authPlugin from './plugins/auth.js';
 import { createDb } from './db.js';
 import { SequenceDefinitionsRepository } from './repositories/sequence-definitions.repo.js';
@@ -19,7 +23,6 @@ import sequencesRoutes from './routes/sequences.js';
 import enrollmentsRoutes from './routes/enrollments.js';
 import statsRoutes from './routes/stats.js';
 import { createStepQueue, type StepJobData } from './queue/step-queue.js';
-import type { Logger } from 'pino';
 import { createPublisher, type NurturingPublisher } from './events/publisher.js';
 
 export interface CreateAppResult {
@@ -33,7 +36,8 @@ export async function createApp(opts?: {
   publisher?: NurturingPublisher | null;
   redis?: Redis | null;
 }): Promise<CreateAppResult> {
-  const fastify = Fastify({ logger: true });
+  const log = createLogger('platform-nurturing');
+  const fastify = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
   const db = createDb();
   const definitionsRepo = new SequenceDefinitionsRepository(db);
   const versionsRepo = new SequenceVersionsRepository(db);
@@ -72,6 +76,7 @@ export async function createApp(opts?: {
   );
 
   await fastify.register(sensible);
+  await fastify.register(requestLoggingPlugin, { logger: log });
   await fastify.register(openapiPlugin, {
     title: 'Nurturing Engine',
     description: 'Generic drip/lifecycle sequence runtime',
@@ -90,7 +95,7 @@ export async function createApp(opts?: {
     await fastify.register(safetyNetPollerPlugin, { stepExecutionsRepo, stepQueue: queue, redis, logger: fastify.log as Logger });
   }
 
-  fastify.get('/health', { schema: { hide: true } as object }, async () => {
+  fastify.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async () => {
     return { ok: true };
   });
 

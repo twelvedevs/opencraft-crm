@@ -23,6 +23,7 @@
     "@ortho/auth-middleware": "file:../../../packages/@ortho/auth-middleware",
     "@ortho/openapi": "file:../../../packages/@ortho/openapi",
     "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
+    "@ortho/fastify-logger": "file:../../../packages/@ortho/fastify-logger",
     "@ortho/logger": "file:../../../packages/@ortho/logger",
     "@ortho/types": "file:../../../packages/@ortho/types",
     "@sinclair/typebox": "^0.34.0",

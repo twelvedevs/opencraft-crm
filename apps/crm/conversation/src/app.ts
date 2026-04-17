@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import { openapiPlugin } from '@ortho/openapi';
 import type { EventBus } from '@ortho/event-bus';
 import type { Knex } from 'knex';
@@ -23,9 +24,10 @@ export interface AppQueues {
 
 export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues): Promise<FastifyInstance> {
   const log = createLogger('crm-conversation');
-  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
 
   await app.register(openapiPlugin, {
     title: 'Conversation Service',
@@ -68,7 +70,7 @@ export async function buildApp(db: Knex, eventBus: EventBus, queues?: AppQueues)
     }
   });
 
-  app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
+  app.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async () => ({ ok: true }));
 
   // Route plugins — bulk-sends and settings registered before /:id to avoid param conflicts
   if (queues?.bulkSendQueue) {

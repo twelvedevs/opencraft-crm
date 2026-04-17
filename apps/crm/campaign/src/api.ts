@@ -3,6 +3,7 @@ import sensible from '@fastify/sensible';
 import { authPlugin } from '@ortho/auth-middleware';
 import { openapiPlugin } from '@ortho/openapi';
 import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import type { Knex } from 'knex';
 import { env } from './env.js';
 import { campaignsRoutes } from './routes/campaigns.js';
@@ -12,9 +13,10 @@ import { diagnosticsRoutes } from './routes/diagnostics.js';
 
 export async function buildApp(db: Knex): Promise<FastifyInstance> {
   const log = createLogger('crm-campaign');
-  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger });
+  const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
   await app.register(sensible);
+  await app.register(requestLoggingPlugin, { logger: log });
 
   await app.register(openapiPlugin, {
     title: 'Campaign Service',
@@ -32,7 +34,7 @@ export async function buildApp(db: Knex): Promise<FastifyInstance> {
     allowedPaths: ['/health'],
   });
 
-  app.get('/health', { schema: { hide: true } as object }, async () => ({ ok: true }));
+  app.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async () => ({ ok: true }));
 
   await app.register(campaignsRoutes, { prefix: '/campaigns', db });
   await app.register(workflowRoutes, { prefix: '/campaigns', db });

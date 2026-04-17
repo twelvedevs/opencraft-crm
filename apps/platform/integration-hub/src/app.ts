@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
 import rateLimit from '@fastify/rate-limit';
 import { openapiPlugin } from '@ortho/openapi';
@@ -7,6 +7,8 @@ import { oauthRoutes, type OAuthRoutesOpts } from './routes/oauth.js';
 import { accountsRoutes, type AccountsRoutesOpts } from './routes/accounts.js';
 import { backfillRoutes, type BackfillRoutesOpts } from './routes/backfill.js';
 import { webhookRoutes, type WebhookRoutesOpts } from './routes/webhooks.js';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 
 export interface BuildAppOptions {
   jwt: JwtAuthOptions;
@@ -18,11 +20,14 @@ export interface BuildAppOptions {
 }
 
 export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> {
+  const log = createLogger('platform-integration-hub');
   const fastify = Fastify({
-    logger: { level: opts.logLevel ?? 'info' },
+    loggerInstance: log as unknown as FastifyBaseLogger,
+    disableRequestLogging: true,
   });
 
   await fastify.register(sensible);
+  await fastify.register(requestLoggingPlugin, { logger: log });
   await fastify.register(openapiPlugin, {
     title: 'Integration Hub',
     description: 'External API connectors — Google Ads and Meta Marketing APIs',
@@ -36,7 +41,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   await fastify.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
   // Health check (no auth)
-  fastify.get('/health', { schema: { hide: true } as object }, async () => ({ status: 'ok' }));
+  fastify.get('/health', { schema: { hide: true } as object, config: { disableRequestLogging: true } }, async () => ({ status: 'ok' }));
 
   // Webhook routes — NO JWT auth (must be registered before the JWT-scoped routes)
   await fastify.register(
