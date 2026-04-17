@@ -5,6 +5,7 @@ import { registerConfigCommands }       from './commands/config.js';
 import { registerLeadsCommands }        from './commands/leads.js';
 import { registerPipelineCommands }     from './commands/pipeline.js';
 import { registerConversationsCommands } from './commands/conversations.js';
+import { registerLocationsCommands }    from './commands/locations.js';
 
 const program = new Command();
 
@@ -18,5 +19,6 @@ registerConfigCommands(program);
 registerLeadsCommands(program);
 registerPipelineCommands(program);
 registerConversationsCommands(program);
+registerLocationsCommands(program);
 
 program.parse();

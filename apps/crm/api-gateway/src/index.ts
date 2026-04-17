@@ -21,6 +21,7 @@ import pipelineRoutes from './routes/pipeline.js';
 import referralsRoutes from './routes/referrals.js';
 import importsRoutes from './routes/imports.js';
 import notificationsRoutes from './routes/notifications.js';
+import locationsRoutes from './routes/locations.js';
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -81,6 +82,7 @@ const SERVICE_BY_PREFIX: Record<string, string> = {
   reports: 'reporting-service',
   imports: 'import-service',
   notifications: 'notification-service',
+  locations: 'identity-service',
 };
 
 function resolveUpstreamService(rawUrl: string): string {
@@ -138,6 +140,7 @@ await app.register(pipelineRoutes, { prefix: '/v1/pipeline' });
 await app.register(referralsRoutes, { prefix: '/v1/referrals' });
 await app.register(importsRoutes, { prefix: '/v1/imports' });
 await app.register(notificationsRoutes, { prefix: '/v1/notifications' });
+await app.register(locationsRoutes, { prefix: '/v1/locations' });
 
 // ---------------------------------------------------------------------------
 // Start server

@@ -30,7 +30,7 @@ const CreateLeadBody = Type.Object({
   email: Type.Optional(Type.String()),
   treatment_interest: Type.Optional(Type.String()),
   date_of_birth: Type.Optional(Type.String()),
-  location_id: Type.Optional(Type.String()),
+  location_id: Type.String(),
   first_touch_source: Type.Optional(Type.String()),
   first_touch_medium: Type.Optional(Type.String()),
   first_touch_campaign: Type.Optional(Type.String()),
@@ -103,7 +103,7 @@ export async function leadsRoutes(
       email?: string;
       treatment_interest?: string;
       date_of_birth?: string;
-      location_id?: string;
+      location_id: string;
       first_touch_source?: string;
       first_touch_medium?: string;
       first_touch_campaign?: string;
