@@ -87,11 +87,11 @@ const workers = [
   createActionWorker(QUEUE_NAME, connection, createCallWebhookProcessor(execRepo, queue, secretsResolver), fastify.log as Pick<Console, 'error'>),
 ];
 
-const queueUrl = process.env['SQS_QUEUE_URL'] ?? '';
+const queueUrl = process.env['AUTOMATION_SQS_QUEUE_URL'] ?? '';
 let sqsConsumer: SqsConsumer | undefined;
 
 if (!queueUrl) {
-  fastify.log.warn('SQS_QUEUE_URL is not set — SQS consumer will not start');
+  fastify.log.warn('AUTOMATION_SQS_QUEUE_URL is not set — SQS consumer will not start');
 } else {
   sqsConsumer = new SqsConsumer({
     queueUrl,

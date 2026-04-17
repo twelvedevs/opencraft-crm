@@ -496,6 +496,7 @@ services:
       MESSAGING_SERVICE_URL: ${Messaging_Service__URL}
       AI_SERVICE_URL: ${Ai_Service__URL}
       NURTURING_ENGINE_URL: ${Nurturing_Service__URL}
+      AUTOMATION_SQS_QUEUE_URL: ${Automation_Service__SQS_Queue_URL}
       # SQS_QUEUE_URL intentionally omitted — automation won't receive events in
       # local dev (no SQS fallback in its consumer). Trigger rules via API manually.
     depends_on:
