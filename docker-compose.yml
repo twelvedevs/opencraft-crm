@@ -50,8 +50,8 @@ services:
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_DISABLE_SIGNUP: "false"
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
-      GOTRUE_SMTP_HOST: ${MailHog__Host}
-      GOTRUE_SMTP_PORT: ${MailHog__SMTP_Port}
+      GOTRUE_SMTP_HOST: ${Mailpit__Host}
+      GOTRUE_SMTP_PORT: ${Mailpit__SMTP_Port}
       GOTRUE_SMTP_ADMIN_EMAIL: admin@example.com
       GOTRUE_SMTP_MAX_FREQUENCY: 1s
 
@@ -100,10 +100,10 @@ services:
       timeout: 5s
       retries: 10
 
-  mailhog:
-    image: mailhog/mailhog:latest
+  mailpit:
+    image: axllent/mailpit:latest
     ports:
-      - "${MailHog__SMTP_Port}:1025"
+      - "${Mailpit__SMTP_Port}:1025"
       - "8025:8025"
 
   # ── Platform Services (profile: services) ───────────────────────────────────
