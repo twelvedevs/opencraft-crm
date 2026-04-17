@@ -18,8 +18,8 @@ export function registerLoginCommand(program: Command): void {
       try {
         const res = await fetch(`${config.gotrue_url}/token?grant_type=password`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ email, password: pass }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: pass }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({})) as { error_description?: string };
