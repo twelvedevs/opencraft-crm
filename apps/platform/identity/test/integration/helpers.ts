@@ -90,9 +90,22 @@ export async function createSchema(pool: Pool): Promise<void> {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS platform_identity.locations (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      name varchar NOT NULL,
+      phone varchar NOT NULL,
+      address varchar NOT NULL,
+      timezone varchar NOT NULL,
+      status varchar NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS platform_identity.user_locations (
       user_id uuid REFERENCES platform_identity.users(id) ON DELETE CASCADE,
-      location_id uuid NOT NULL,
+      location_id uuid NOT NULL REFERENCES platform_identity.locations(id) ON DELETE RESTRICT,
       PRIMARY KEY (user_id, location_id)
     )
   `);
@@ -128,6 +141,7 @@ export async function truncateTables(pool: Pool): Promise<void> {
   await pool.query('TRUNCATE platform_identity.refresh_tokens CASCADE');
   await pool.query('TRUNCATE platform_identity.user_locations CASCADE');
   await pool.query('TRUNCATE platform_identity.users CASCADE');
+  await pool.query('TRUNCATE platform_identity.locations CASCADE');
 }
 
 /** Create a mock AuthProvider for integration tests */
@@ -175,6 +189,31 @@ export async function insertTestUser(
       overrides.role ?? 'super_admin',
       overrides.status ?? 'active',
       overrides.force_password_reset ?? false,
+    ],
+  );
+  return result.rows[0];
+}
+
+export async function insertTestLocation(
+  pool: Pool,
+  overrides: Partial<{
+    name: string;
+    phone: string;
+    address: string;
+    timezone: string;
+    status: string;
+  }> = {},
+): Promise<{ id: string; name: string; phone: string; address: string; timezone: string; status: string }> {
+  const result = await pool.query(
+    `INSERT INTO platform_identity.locations (name, phone, address, timezone, status)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [
+      overrides.name ?? 'Test Location',
+      overrides.phone ?? '+15550000000',
+      overrides.address ?? '1 Test St, New York, NY 10001',
+      overrides.timezone ?? 'America/New_York',
+      overrides.status ?? 'active',
     ],
   );
   return result.rows[0];
