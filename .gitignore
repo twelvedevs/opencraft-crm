@@ -8,3 +8,7 @@ dist/
 
 # OS
 .DS_Store
+
+# QA runtime output
+qa/results/
+qa/bugs/
