@@ -14,6 +14,7 @@ import { jwksRoutes } from './routes/jwks.js';
 import { meRoutes } from './routes/me.js';
 import { usersRoutes } from './routes/users.js';
 import { apiKeysRoutes } from './routes/api-keys.js';
+import { locationsRoutes } from './routes/locations.js';
 
 export async function buildApp(
   pool: Pool,
@@ -33,6 +34,7 @@ export async function buildApp(
       { name: 'Me', description: 'Current user profile' },
       { name: 'Users', description: 'User management' },
       { name: 'API Keys', description: 'Service API key management' },
+      { name: 'Locations', description: 'Practice location management' },
       { name: 'JWKS', description: 'Public key set for JWT verification' },
     ],
   });
@@ -59,6 +61,7 @@ export async function buildApp(
   await app.register(meRoutes, { pool, provider });
   await app.register(usersRoutes, { pool, provider });
   await app.register(apiKeysRoutes, { pool });
+  await app.register(locationsRoutes, { pool });
 
   return app;
 }
