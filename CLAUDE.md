@@ -135,6 +135,15 @@ Ralph picks the highest-priority story where `passes: false`, implements it, run
 
 The `run.sh` in the project root shows the pattern used for phased implementations (multiple `claude -p` invocations per phase).
 
+## Developer Tools
+
+Standalone utilities live under `tools/` (not part of the service monorepo — each has its own `package.json`):
+
+| Tool | Purpose |
+|------|---------|
+| [tools/crm-cli](tools/crm-cli/README.md) | `crm` CLI for debugging leads, pipeline, conversations via the API Gateway |
+| [tools/qa](tools/qa/README.md) | Scenario-based QA runner + health checker; paired with the `/qa` Claude skill for a fix-retest loop against the running stack |
+
 ## Technology Stack
 
 | Layer | Technology |

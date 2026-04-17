@@ -1,0 +1,25 @@
+base_url: http://localhost
+
+# supabase-auth is the GoTrue nginx proxy (rewrites /auth/v1/* → /*)
+services:
+  supabase-auth:   { port: 8000,  health: /health }
+  identity:        { port: 3100,  health: /health }
+  ai:              { port: 3101,  health: /health }
+  template:        { port: 3102,  health: /health }
+  notification:    { port: 3103,  health: /health }
+  audience:        { port: 3104,  health: /health }
+  analytics:       { port: 3105,  health: /health }
+  messaging:       { port: 3106,  health: /health }
+  email:           { port: 3107,  health: /health }
+  nurturing:       { port: 3108,  health: /health }
+  automation:      { port: 3109,  health: /health }
+  integration-hub: { port: 3110,  health: /health }
+  media:           { port: 3111,  health: /health }
+  lead:            { port: 3200,  health: /health }
+  pipeline:        { port: 3201,  health: /health }
+  conversation:    { port: 3202,  health: /health }
+  campaign:        { port: 3203,  health: /health }
+  referral:        { port: 3204,  health: /health }
+  reporting:       { port: 3205,  health: /health }
+  import:          { port: 3206,  health: /health }
+  crm-api-gateway: { port: 3207,  health: /health }

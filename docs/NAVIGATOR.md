@@ -83,6 +83,13 @@ All specs are **Approved** unless noted otherwise.
 |-------|-------------|
 | [local-dev.md](development/local-dev.md) | Local development setup with docker-compose |
 
+## Developer Tools (`tools/`)
+
+| Tool | Description |
+|------|-------------|
+| [tools/crm-cli/README.md](../tools/crm-cli/README.md) | CRM CLI — developer debug tool for leads, pipeline, conversations via API Gateway |
+| [tools/qa/README.md](../tools/qa/README.md) | QA Pipeline — scenario-based test runner + Claude `/qa` orchestrator for the running stack |
+
 ## Implementation Plans (`docs/superpowers/plans/`)
 
 | Plan | Description |
@@ -91,6 +98,7 @@ All specs are **Approved** unless noted otherwise.
 | [2026-04-03-docker-compose.md](superpowers/plans/2026-04-03-docker-compose.md) | Local docker-compose — implementation plan |
 | [2026-04-12-openapi-swagger.md](superpowers/plans/2026-04-12-openapi-swagger.md) | OpenAPI/Swagger — 20-task plan (package + 19 services) |
 | [2026-04-12-crm-cli.md](superpowers/plans/2026-04-12-crm-cli.md) | CRM CLI — 14-task plan (leads, pipeline, conversations) |
+| [2026-04-17-automated-qa-pipeline.md](superpowers/plans/2026-04-17-automated-qa-pipeline.md) | Automated QA Pipeline — 11-task plan (scenario runner, health checker, `/qa` orchestrator) |
 
 ## Phase / Rollout Specs (`docs/superpowers/specs/`)
 
