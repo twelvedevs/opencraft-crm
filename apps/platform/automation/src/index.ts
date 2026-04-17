@@ -90,7 +90,7 @@ const workers = [
 const queueUrl = process.env['AUTOMATION_SQS_QUEUE_URL'] ?? '';
 let sqsConsumer: SqsConsumer | undefined;
 
-if (!queueUrl) {
+if (!queueUrl || !queueUrl.startsWith('http')) {
   fastify.log.warn('AUTOMATION_SQS_QUEUE_URL is not set — SQS consumer will not start');
 } else {
   sqsConsumer = new SqsConsumer({

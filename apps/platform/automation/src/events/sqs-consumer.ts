@@ -24,7 +24,7 @@ export class SqsConsumer {
     this.waitSeconds = options.waitSeconds ?? 20;
     this.onMessage = options.onMessage;
     this.logger = options.logger ?? console;
-    this.client = new SQSClient({});
+    this.client = new SQSClient({ region: process.env['AWS_REGION'] ?? 'us-east-1' });
   }
 
   start(): void {
