@@ -1,8 +1,13 @@
 import Fastify from 'fastify';
 import replyFrom from '@fastify/reply-from';
 import { createLogger } from '@ortho/logger';
-import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import { config } from './config.js';
+
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    disableRequestLogging?: boolean;
+  }
+}
 import requestIdPlugin from './plugins/request-id.js';
 import authPlugin from './plugins/auth.js';
 import rateLimitPlugin from './plugins/rate-limit.js';
@@ -54,8 +59,6 @@ await app.register(replyFrom, {
   },
 });
 
-await app.register(requestLoggingPlugin, { logger: log });
-
 // ---------------------------------------------------------------------------
 // Global plugins (registered in order: request-id → auth → rate-limit → error-handler)
 // ---------------------------------------------------------------------------
@@ -88,6 +91,7 @@ function resolveUpstreamService(rawUrl: string): string {
 }
 
 app.addHook('onResponse', (request, reply, done) => {
+  if (request.routeOptions.config?.disableRequestLogging) { done(); return; }
   const fields: Record<string, unknown> = {
     request_id: request.requestId,
     method: request.method,
@@ -96,13 +100,26 @@ app.addHook('onResponse', (request, reply, done) => {
     duration_ms: Math.round(reply.elapsedTime),
     upstream_service: resolveUpstreamService(request.url),
   };
-  if (request.jwtClaims?.sub) {
-    fields['user_id'] = request.jwtClaims.sub;
-  }
-  if (request.apiKeyContext?.keyHash) {
-    fields['key_hash'] = request.apiKeyContext.keyHash;
-  }
+  if (request.jwtClaims?.sub) fields['user_id'] = request.jwtClaims.sub;
+  if (request.apiKeyContext?.keyHash) fields['key_hash'] = request.apiKeyContext.keyHash;
   request.log.info(fields, 'request completed');
+  done();
+});
+
+app.addHook('onError', (request, reply, error, done) => {
+  if (request.routeOptions.config?.disableRequestLogging) { done(); return; }
+  const fields: Record<string, unknown> = {
+    request_id: request.requestId,
+    method: request.method,
+    path: request.url.split('?')[0],
+    status_code: reply.statusCode,
+    duration_ms: Math.round(reply.elapsedTime),
+    upstream_service: resolveUpstreamService(request.url),
+    error: { name: error.name, message: error.message },
+  };
+  if (request.jwtClaims?.sub) fields['user_id'] = request.jwtClaims.sub;
+  if (request.apiKeyContext?.keyHash) fields['key_hash'] = request.apiKeyContext.keyHash;
+  request.log.error(fields, 'request error');
   done();
 });
 

@@ -94,20 +94,19 @@ async function pipelineRoutes(app: FastifyInstance): Promise<void> {
   // ---------------------------------------------------------------------------
   // All other /pipeline/* routes — simple pass-through
   // ---------------------------------------------------------------------------
-  app.route({
-    method: HTTP_METHODS,
-    url: '/*',
-    handler: async (request, reply) => {
-      const upstreamPath = request.url.replace(/^\/v1/, '');
-      return reply.from(`${config.PIPELINE_SERVICE_URL}${upstreamPath}`, {
-        rewriteRequestHeaders: (_req, headers) => ({
-          ...headers,
-          ...request.authHeaders,
-          'x-request-id': request.requestId,
-        }),
-      });
-    },
-  });
+  const passthroughHandler: Parameters<typeof app.route>[0]['handler'] = async (request, reply) => {
+    const upstreamPath = request.url.replace(/^\/v1/, '');
+    return reply.from(`${config.PIPELINE_SERVICE_URL}${upstreamPath}`, {
+      rewriteRequestHeaders: (_req, headers) => ({
+        ...headers,
+        ...request.authHeaders,
+        'x-request-id': request.requestId,
+      }),
+    });
+  };
+  for (const url of ['/', '/*']) {
+    app.route({ method: HTTP_METHODS, url, handler: passthroughHandler });
+  }
 }
 
 export default pipelineRoutes;
