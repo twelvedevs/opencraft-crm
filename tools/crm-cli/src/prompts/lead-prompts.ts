@@ -5,9 +5,9 @@ export interface CreateLeadAnswers {
   last_name: string;
   phone: string;
   channel: string;
+  location_id: string;
   email?: string;
   treatment_interest?: string;
-  location_id?: string;
   first_touch_source?: string;
   first_touch_medium?: string;
   first_touch_campaign?: string;
@@ -32,13 +32,13 @@ export async function promptCreateLead(): Promise<CreateLeadAnswers> {
   const first_name = await input({ message: 'First name:', validate: required });
   const last_name  = await input({ message: 'Last name:',  validate: required });
   const phone      = await input({ message: 'Phone:',      validate: required });
-  const channel    = await select({ message: 'Channel:', choices: CHANNEL_CHOICES });
+  const channel     = await select({ message: 'Channel:', choices: CHANNEL_CHOICES });
+  const location_id = await input({ message: 'Location ID (UUID):', validate: required });
 
   const addOptional = await confirm({ message: 'Add optional fields?', default: false });
 
   let email: string | undefined;
   let treatment_interest: string | undefined;
-  let location_id: string | undefined;
   let first_touch_source: string | undefined;
   let first_touch_medium: string | undefined;
   let first_touch_campaign: string | undefined;
@@ -46,15 +46,14 @@ export async function promptCreateLead(): Promise<CreateLeadAnswers> {
   if (addOptional) {
     email               = empty(await input({ message: 'Email:' }));
     treatment_interest  = empty(await input({ message: 'Treatment interest (e.g. braces, invisalign):' }));
-    location_id         = empty(await input({ message: 'Location ID (UUID):' }));
     first_touch_source  = empty(await input({ message: 'UTM source:' }));
     first_touch_medium  = empty(await input({ message: 'UTM medium:' }));
     first_touch_campaign = empty(await input({ message: 'UTM campaign:' }));
   }
 
   return {
-    first_name, last_name, phone, channel,
-    email, treatment_interest, location_id,
+    first_name, last_name, phone, channel, location_id,
+    email, treatment_interest,
     first_touch_source, first_touch_medium, first_touch_campaign,
   };
 }
