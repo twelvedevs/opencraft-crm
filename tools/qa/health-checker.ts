@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   const serviceFlag = serviceIdx !== -1 ? args[serviceIdx + 1] : undefined
 
   if (!allFlag && !serviceFlag) {
-    console.error('Usage: npx tsx qa/health-checker.ts --service <name> | --all')
+    console.error('Usage: npx tsx tools/qa/health-checker.ts --service <name> | --all')
     process.exit(1)
   }
 
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     targets = Object.entries(services)
   } else {
     if (!services[serviceFlag!]) {
-      console.error(`Unknown service: '${serviceFlag}'. Check qa/services.yaml.`)
+      console.error(`Unknown service: '${serviceFlag}'. Check tools/qa/services.yaml.`)
       process.exit(1)
     }
     targets = [[serviceFlag!, services[serviceFlag!]]]

@@ -13,7 +13,7 @@ import type {
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const PROJECT_ROOT = resolve(__dirname, '..')
+const PROJECT_ROOT = resolve(__dirname, '..', '..')
 
 function loadYaml<T>(path: string): T {
   return yaml.load(readFileSync(path, 'utf-8')) as T

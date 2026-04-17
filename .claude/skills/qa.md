@@ -6,14 +6,14 @@ Run the QA scenario pipeline and orchestrate the fix-retest loop.
 
 1. Run the scenario runner:
    ```bash
-   cd qa && npx tsx runner.ts
+   cd tools/qa && npx tsx runner.ts
    ```
    Or to run a single scenario:
    ```bash
-   cd qa && npx tsx runner.ts --scenario <scenario-id>
+   cd tools/qa && npx tsx runner.ts --scenario <scenario-id>
    ```
 
-2. Read the results from `qa/results/latest.json`.
+2. Read the results from `tools/qa/results/latest.json`.
 
 ## When all scenarios pass
 
@@ -30,10 +30,10 @@ Test conventions:
 
 ## When a scenario fails
 
-1. Read `qa/results/latest.json` — find the failed scenario and its `docker_logs`.
+1. Read `tools/qa/results/latest.json` — find the failed scenario and its `docker_logs`.
 2. Read the source code of the failing service (check the `service` field in the scenario).
 3. Identify the root cause from the logs + code.
-4. Write a bug report to `qa/bugs/bug-NNN.md` with this structure:
+4. Write a bug report to `tools/qa/bugs/bug-NNN.md` with this structure:
    ```
    # Bug NNN: <scenario-name> — <short description>
    **Scenario:** <id>
@@ -44,7 +44,7 @@ Test conventions:
    **Root cause:** (explanation)
    **Proposed fix:** (prose + code diff)
    ```
-5. Send a push notification: "Bug found in [scenario-name]. Fix ready in qa/bugs/bug-NNN.md"
+5. Send a push notification: "Bug found in [scenario-name]. Fix ready in tools/qa/bugs/bug-NNN.md"
 6. Wait for the user to say "apply fix" / "skip" / "stop".
 
 ## When the user says "apply fix"
@@ -53,18 +53,18 @@ Test conventions:
 2. Tell the user: "Done. Rebuild with: `docker compose up --build <service-name> -d`"
 3. Run health checker and wait for the service to recover:
    ```bash
-   cd qa && npx tsx health-checker.ts --service <service-name>
+   cd tools/qa && npx tsx health-checker.ts --service <service-name>
    ```
 4. When health checker exits 0, rerun the failed scenario:
    ```bash
-   cd qa && npx tsx runner.ts --scenario <scenario-id>
+   cd tools/qa && npx tsx runner.ts --scenario <scenario-id>
    ```
 5. If it passes — generate the Vitest test and move to the next failed scenario.
 6. If it still fails — go back to step 1 (re-analyze with updated logs).
 
 ## When the user says "skip"
 
-Mark the scenario as known-failing (add a comment to `qa/scenarios.yaml`) and continue with the next failing scenario.
+Mark the scenario as known-failing (add a comment to `tools/qa/scenarios.yaml`) and continue with the next failing scenario.
 
 ## When the user says "stop"
 

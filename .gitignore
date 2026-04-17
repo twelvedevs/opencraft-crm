@@ -10,5 +10,5 @@ dist/
 .DS_Store
 
 # QA runtime output
-qa/results/
-qa/bugs/
+tools/qa/results/
+tools/qa/bugs/
