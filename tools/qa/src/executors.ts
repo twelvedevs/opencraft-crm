@@ -14,7 +14,7 @@ export async function executeHttpStep(
   const path = interpolate(step.path, context)
   const url = `${baseUrl}${path}`
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = {}
   if (context['token']) {
     headers['Authorization'] = `Bearer ${context['token']}`
   }
@@ -22,6 +22,10 @@ export async function executeHttpStep(
   const body = step.body
     ? JSON.stringify(interpolateObject(step.body, context))
     : undefined
+
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
 
   const res = await fetch(url, { method: step.method, headers, body })
   const responseBody = await res.json().catch(() => null)
