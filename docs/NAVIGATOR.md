@@ -31,6 +31,7 @@ All specs are **Approved** unless noted otherwise.
 | [automation-engine-design.md](superpowers/specs/2026-03-24-automation-engine-design.md) | [memories/automation](memories/) |
 | [nurturing-engine-design.md](superpowers/specs/2026-03-25-nurturing-engine-design.md) _(superseded)_ | — |
 | [nurturing-engine-updated-design.md](superpowers/specs/2026-03-30-nurturing-engine-updated-design.md) _(supersedes above)_ | — |
+| [sequence-ui-design.md](superpowers/specs/2026-04-19-sequence-ui-design.md) | — |
 | [messaging-service-design.md](superpowers/specs/2026-03-25-messaging-service-design.md) _(superseded)_ | [memories/messaging-service.md](memories/messaging-service.md) |
 | [messaging-service-updated-design.md](superpowers/specs/2026-03-30-messaging-service-updated-design.md) _(supersedes above)_ | [memories/messaging-service.md](memories/messaging-service.md) |
 | [email-service-design.md](superpowers/specs/2026-03-25-email-service-design.md) _(superseded)_ | — |
