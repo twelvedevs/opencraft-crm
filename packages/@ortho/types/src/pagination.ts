@@ -1,3 +1,5 @@
+import { Type, type TSchema } from '@sinclair/typebox';
+
 export interface PaginatedResponse<T> {
   data: T[];
   nextCursor?: string | null;
@@ -9,3 +11,14 @@ export interface RowPaginatedResponse<T> {
   data: T[];
   nextCursor: number | null;
 }
+
+/**
+ * TypeBox schema helper for paginated responses.
+ * Use with Fastify route validation: `reply: PaginatedResponseSchema(itemSchema)`
+ */
+export const PaginatedResponseSchema = <T extends TSchema>(itemSchema: T) =>
+  Type.Object({
+    data: Type.Array(itemSchema),
+    nextCursor: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    total: Type.Optional(Type.Number()),
+  });

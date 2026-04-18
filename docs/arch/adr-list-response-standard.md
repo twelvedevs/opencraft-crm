@@ -67,7 +67,7 @@ All collection endpoints return a single standard envelope:
 - Single response shape across all list endpoints — frontend can write one generic hook
 - Shared `PaginatedResponse<T>` type in `@ortho/types` — type safety across services
 - New services default to the standard — no decision to make
-- QA scenarios can use `body_contains: ["data"]` universally
+- QA scenarios for migrated endpoints assert on `["data"]` + the expected pagination key (`nextCursor` or `total`)
 
 ### Negative
 - 17 endpoints require response shape changes (rename key in route handler + update TypeBox schema + update tests)
@@ -77,3 +77,26 @@ All collection endpoints return a single standard envelope:
 ### Neutral
 - Import and Import rows endpoints already use `data` key — no change needed
 - Internal pagination mechanisms (cursor encoding, offset logic) are unchanged
+
+## Rollout
+
+**This is a breaking API change.** Services that call each other's list endpoints must be coordinated:
+
+- Lead Service `GET /leads` is consumed by: `apps/crm/conversation/src/services/bulk-sender.ts`, `apps/crm/campaign/src/services/audience-resolver.ts`, `tools/crm-cli`
+- Conversation `GET /conversations` is consumed by: `tools/crm-cli`
+- Pipeline `GET /pipeline/memberships` is consumed by: `tools/crm-cli`
+
+**Deploy order:** Consumers are updated in the same PR as producers (this branch). All services and tools ship together — no staged rollout is needed because there is no production traffic yet (pre-sale / pre-launch repo).
+
+If this migration were done post-launch, the required order would be: deploy updated consumers first (parsing both old and new shapes with a shim), then deploy producers, then remove the shim.
+
+## Out of scope (pending follow-up)
+
+The following collection endpoints remain on per-service shapes and are **not** covered by this ADR. They will be migrated in a follow-up initiative:
+
+- `GET /rules` and `GET /executions` — Automation Engine (both have TypeBox `Type.Array(...)` response schemas that also need updating)
+- `GET /sequences`, `GET /sequences/:id/enrollments` — Nurturing Engine
+- `GET /conversations/:id/messages` — Conversation Service (uses `{ messages, hasMore }`, message-pagination is distinct from conversation-list pagination)
+- `GET /conversations/:id/scheduled-messages` — Conversation Service
+
+These endpoints work correctly against their current clients. Adoption of the standard is incremental.
