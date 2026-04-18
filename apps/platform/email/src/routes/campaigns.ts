@@ -231,10 +231,8 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     });
 
     return reply.status(200).send({
-      recipients,
+      data: recipients,
       total,
-      page,
-      page_size: 100,
     });
   });
 
