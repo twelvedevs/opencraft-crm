@@ -53,6 +53,14 @@ describe('interpolateValue', () => {
     expect(interpolateValue('haiku', { haiku: 'resolved' })).toBe('haiku');
   });
 
+  it('trailing dot is treated as literal (not a path)', () => {
+    expect(interpolateValue('a.', { a: 'val' })).toBe('a.');
+  });
+
+  it('double dot is treated as literal (not a path)', () => {
+    expect(interpolateValue('a..b', { a: { b: 'val' } })).toBe('a..b');
+  });
+
   it('template string: single token', () => {
     expect(interpolateValue('{{enrollment_id}}-step-1', { enrollment_id: 'abc123' })).toBe(
       'abc123-step-1',
@@ -121,6 +129,14 @@ describe('interpolateFields', () => {
       { context: { name: 'Alice' } },
     );
     expect(result).toEqual({ level1: { level2: { val: 'Alice' } } });
+  });
+
+  it('array of objects: recursively resolves each object item', () => {
+    const result = interpolateFields(
+      { items: [{ id: 'context.id', label: 'static' }, { id: 'context.other' }] },
+      { context: { id: 'x1', other: 'y2' } },
+    );
+    expect(result).toEqual({ items: [{ id: 'x1', label: 'static' }, { id: 'y2' }] });
   });
 });
 
@@ -287,5 +303,25 @@ describe('resolveParams (dual-context)', () => {
       model: 'haiku',
       context: 'payload',
     });
+  });
+
+  it('array of objects: recursively resolves each object item', () => {
+    const params = {
+      recipients: [
+        { to: 'payload.phone', key: '{{event_id}}-a' },
+        { to: 'payload.lead.first_name', key: '{{rule_id}}-b' },
+      ],
+    };
+    expect(resolveParams(params, dataCtx, templateCtx)).toEqual({
+      recipients: [
+        { to: '+15551234567', key: 'evt-123-a' },
+        { to: 'Alice', key: 'rule-789-b' },
+      ],
+    });
+  });
+
+  it('malformed dot paths (trailing dot, double dot) are treated as literals', () => {
+    expect(resolveParams({ a: 'payload.' }, dataCtx, templateCtx)).toEqual({ a: 'payload.' });
+    expect(resolveParams({ a: 'payload..phone' }, dataCtx, templateCtx)).toEqual({ a: 'payload..phone' });
   });
 });

@@ -2,13 +2,10 @@
 // Regex patterns
 // ---------------------------------------------------------------------------
 
-// Requires at least one dot — "context.phone" and "payload.lead.name" match,
-// but "haiku" or "assign_coordinator" do not (treated as literals). This
-// prevents single-word literal values from being accidentally resolved as
-// path lookups that return undefined.
-const DOT_PATH_RE = /^[a-zA-Z_][\w]*\.[\w.]*$/;
-
-const TEMPLATE_TOKEN_RE = /\{\{(\w+)\}\}/g;
+// Requires one or more dotted segments — "context.phone" and "payload.lead.name"
+// match, but "haiku", "payload", "a.", and "a..b" do not (treated as literals).
+// Prevents accidental resolution of short literal strings or malformed paths.
+const DOT_PATH_RE = /^[a-zA-Z_]\w*(\.\w+)+$/;
 
 // ---------------------------------------------------------------------------
 // Path resolution
@@ -43,15 +40,9 @@ export function interpolateValue(value: unknown, context: Record<string, unknown
     return getByPath(context, value);
   }
 
-  // Use a fresh regex to avoid stale lastIndex bugs with global regex
-  const tokenRe = new RegExp(TEMPLATE_TOKEN_RE.source, 'g');
-  if (tokenRe.test(value)) {
-    return value.replace(new RegExp(TEMPLATE_TOKEN_RE.source, 'g'), (match, key: string) => {
-      return key in context ? String(context[key]) : match;
-    });
-  }
-
-  return value;
+  return value.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
+    return key in context ? String(context[key]) : match;
+  });
 }
 
 export function interpolateFields(
@@ -79,8 +70,9 @@ export function interpolateFields(
 // Dual-context API  (used by Automation Engine)
 //
 // Separate contexts: dataCtx for dot-notation paths, templateCtx for
-// {{token}} replacement. Single-segment paths (no dot) ARE resolved against
-// dataCtx — this is safe because template tokens live in a separate object.
+// {{token}} replacement. Single-segment strings (no dot) are treated as
+// literals — the dot requirement prevents accidental resolution of short
+// strings like "haiku" or "payload".
 // ---------------------------------------------------------------------------
 
 export function resolveValue(
@@ -96,15 +88,10 @@ export function resolveValue(
     return getByPath(dataCtx, value);
   }
 
-  const tokenRe = new RegExp(TEMPLATE_TOKEN_RE.source, 'g');
-  if (tokenRe.test(value)) {
-    return value.replace(new RegExp(TEMPLATE_TOKEN_RE.source, 'g'), (_match, key: string) => {
-      const resolved = (templateCtx as Record<string, unknown>)[key];
-      return resolved !== undefined ? String(resolved) : `{{${key}}}`;
-    });
-  }
-
-  return value;
+  return value.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
+    const resolved = templateCtx[key];
+    return resolved !== undefined ? String(resolved) : `{{${key}}}`;
+  });
 }
 
 function resolveAny(

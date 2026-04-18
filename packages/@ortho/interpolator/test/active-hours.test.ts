@@ -77,4 +77,23 @@ describe('computeNextActiveWindowMs', () => {
       expect(result).toBeLessThan(DAY_MS);
     }
   });
+
+  it('invariant: delay is always >= 0 and < 24h across all window types and every hour UTC', () => {
+    const windows = [
+      { start: '08:00', end: '20:00' }, // typical day window
+      { start: '22:00', end: '06:00' }, // midnight-crossing
+      { start: '00:00', end: '23:59' }, // nearly all day
+      { start: '23:59', end: '00:01' }, // narrow midnight-crossing
+      { start: '00:00', end: '00:00' }, // always-open (start === end)
+    ];
+    for (let h = 0; h < 24; h++) {
+      const hh = String(h).padStart(2, '0');
+      const now = new Date(`2026-01-15T${hh}:00:00Z`);
+      for (const config of windows) {
+        const result = computeNextActiveWindowMs(config, 'UTC', now);
+        expect(result).toBeGreaterThanOrEqual(0);
+        expect(result).toBeLessThan(DAY_MS);
+      }
+    }
+  });
 });
