@@ -220,8 +220,8 @@ describe.skipIf(!DB_URL)('segments integration', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.items).toHaveLength(1);
-    expect(body.items[0].status).toBe('active');
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].status).toBe('active');
   });
 
   // (j) GET /audiences/segments?status=active,draft → both
@@ -248,7 +248,7 @@ describe.skipIf(!DB_URL)('segments integration', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.items).toHaveLength(2);
+    expect(body.data).toHaveLength(2);
     expect(body.total).toBe(2);
   });
 
@@ -266,14 +266,14 @@ describe.skipIf(!DB_URL)('segments integration', () => {
       method: 'GET',
       url: '/audiences/segments?limit=2&offset=0',
     });
-    expect(page1.json().items).toHaveLength(2);
+    expect(page1.json().data).toHaveLength(2);
     expect(page1.json().total).toBe(5);
 
     const page2 = await ctx.app.inject({
       method: 'GET',
       url: '/audiences/segments?limit=2&offset=2',
     });
-    expect(page2.json().items).toHaveLength(2);
+    expect(page2.json().data).toHaveLength(2);
     expect(page2.json().total).toBe(5);
   });
 });
