@@ -317,9 +317,9 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body).toHaveProperty('leads');
+      expect(body).toHaveProperty('data');
       expect(body).toHaveProperty('nextCursor');
-      expect(body.leads).toHaveLength(1);
+      expect(body.data).toHaveLength(1);
     });
 
     it('location_id filter returns only matching leads', async () => {
@@ -346,8 +346,8 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.leads).toHaveLength(1);
-      expect(body.leads[0].location_id).toBe(LOCATION_ID);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].location_id).toBe(LOCATION_ID);
     });
 
     it('sort=created_at returns leads in created_at DESC order', async () => {
@@ -376,9 +376,9 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.leads).toHaveLength(2);
-      expect(body.leads[0].first_name).toBe('Beta');
-      expect(body.leads[1].first_name).toBe('Alpha');
+      expect(body.data).toHaveLength(2);
+      expect(body.data[0].first_name).toBe('Beta');
+      expect(body.data[1].first_name).toBe('Alpha');
     });
 
     it('cursor pagination returns next page', async () => {
@@ -402,7 +402,7 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(page1.statusCode).toBe(200);
       const body1 = page1.json();
-      expect(body1.leads).toHaveLength(2);
+      expect(body1.data).toHaveLength(2);
       expect(body1.nextCursor).not.toBeNull();
 
       const page2 = await app.inject({
@@ -413,7 +413,7 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(page2.statusCode).toBe(200);
       const body2 = page2.json();
-      expect(body2.leads).toHaveLength(1);
+      expect(body2.data).toHaveLength(1);
       expect(body2.nextCursor).toBeNull();
     });
 
@@ -441,8 +441,8 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.leads.length).toBeGreaterThanOrEqual(1);
-      expect(body.leads.some((l: { first_name: string }) => l.first_name === 'Zachary')).toBe(true);
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      expect(body.data.some((l: { first_name: string }) => l.first_name === 'Zachary')).toBe(true);
     });
 
     it('phones[] bulk lookup returns matching leads', async () => {
@@ -463,7 +463,7 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.leads).toHaveLength(1);
+      expect(body.data).toHaveLength(1);
     });
 
     it('emails[] bulk lookup returns matching leads', async () => {
@@ -484,7 +484,7 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.leads).toHaveLength(1);
+      expect(body.data).toHaveLength(1);
     });
 
     it('ids[] bulk lookup returns matching leads', async () => {
@@ -506,8 +506,8 @@ describe.skipIf(!HAS_DB)('leads routes (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.leads).toHaveLength(1);
-      expect(body.leads[0].id).toBe(leadId);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].id).toBe(leadId);
     });
 
     it('phones[] with 101 items returns 400', async () => {

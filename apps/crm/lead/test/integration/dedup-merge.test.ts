@@ -120,8 +120,8 @@ describe.skipIf(!HAS_DB)('dedup, merge & duplicate-status (integration)', () => 
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.leads.length).toBeGreaterThanOrEqual(1);
-      expect(body.leads.some((l: { id: string }) => l.id === dupId)).toBe(true);
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      expect(body.data.some((l: { id: string }) => l.id === dupId)).toBe(true);
 
       // Resolve the duplicate
       await app.inject({
@@ -138,7 +138,7 @@ describe.skipIf(!HAS_DB)('dedup, merge & duplicate-status (integration)', () => 
         headers: { authorization: `Bearer ${agentToken}` },
       });
       expect(res2.statusCode).toBe(200);
-      expect(res2.json().leads.some((l: { id: string }) => l.id === dupId)).toBe(false);
+      expect(res2.json().data.some((l: { id: string }) => l.id === dupId)).toBe(false);
     });
 
     it('pagination cursor works across pages', async () => {
@@ -159,7 +159,7 @@ describe.skipIf(!HAS_DB)('dedup, merge & duplicate-status (integration)', () => 
       });
       expect(page1.statusCode).toBe(200);
       const body1 = page1.json();
-      expect(body1.leads).toHaveLength(2);
+      expect(body1.data).toHaveLength(2);
       expect(body1.nextCursor).not.toBeNull();
 
       const page2 = await app.inject({
@@ -169,7 +169,7 @@ describe.skipIf(!HAS_DB)('dedup, merge & duplicate-status (integration)', () => 
       });
       expect(page2.statusCode).toBe(200);
       const body2 = page2.json();
-      expect(body2.leads).toHaveLength(1);
+      expect(body2.data).toHaveLength(1);
     });
   });
 

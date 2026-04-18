@@ -75,7 +75,7 @@ describe.skipIf(!HAS_DB)('activity routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.activities).toEqual([]);
+    expect(body.data).toEqual([]);
     expect(body.nextCursor).toBeNull();
   });
 
@@ -93,10 +93,10 @@ describe.skipIf(!HAS_DB)('activity routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.activities).toHaveLength(2);
+    expect(body.data).toHaveLength(2);
     // Most recent first
-    expect(body.activities[0].event_type).toBe('stage_changed');
-    expect(body.activities[1].event_type).toBe('lead_created');
+    expect(body.data[0].event_type).toBe('stage_changed');
+    expect(body.data[1].event_type).toBe('lead_created');
   });
 
   it('event_type filter returns only matching events', async () => {
@@ -114,8 +114,8 @@ describe.skipIf(!HAS_DB)('activity routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.activities).toHaveLength(1);
-    expect(body.activities[0].event_type).toBe('stage_changed');
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].event_type).toBe('stage_changed');
   });
 
   it('cursor pagination returns second page correctly', async () => {
@@ -135,7 +135,7 @@ describe.skipIf(!HAS_DB)('activity routes (integration)', () => {
 
     expect(page1.statusCode).toBe(200);
     const body1 = page1.json();
-    expect(body1.activities).toHaveLength(2);
+    expect(body1.data).toHaveLength(2);
     expect(body1.nextCursor).not.toBeNull();
 
     // Page 2
@@ -147,7 +147,7 @@ describe.skipIf(!HAS_DB)('activity routes (integration)', () => {
 
     expect(page2.statusCode).toBe(200);
     const body2 = page2.json();
-    expect(body2.activities).toHaveLength(1);
+    expect(body2.data).toHaveLength(1);
     expect(body2.nextCursor).toBeNull();
   });
 

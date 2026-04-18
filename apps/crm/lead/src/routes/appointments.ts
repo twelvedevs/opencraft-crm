@@ -72,7 +72,7 @@ export async function appointmentRoutes(
       return reply.status(404).send({ error: 'not found' });
     }
     const appointments = await appointmentService.listAppointments(db, id);
-    return reply.status(200).send(appointments);
+    return reply.status(200).send({ data: appointments });
   });
 
   // PATCH /leads/:id/appointments/:appt_id
