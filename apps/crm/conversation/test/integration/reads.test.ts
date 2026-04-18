@@ -128,8 +128,8 @@ describe.skipIf(!HAS_DB)('read tracking (integration)', () => {
     });
 
     expect(listRes.statusCode).toBe(200);
-    const { rows } = listRes.json();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].unread_count).toBe(0);
+    const { data } = listRes.json();
+    expect(data).toHaveLength(1);
+    expect(data[0].unread_count).toBe(0);
   });
 });

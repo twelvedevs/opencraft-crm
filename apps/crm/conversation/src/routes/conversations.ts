@@ -60,7 +60,7 @@ export async function conversationsRoute(
       user_id: req.user.sub,
     });
 
-    return reply.send(result);
+    return reply.send({ data: result.rows, total: result.total });
   });
 
   // GET /conversations/:id
