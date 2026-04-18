@@ -56,3 +56,36 @@ export async function request(path: string, options: RequestOptions = {}): Promi
 
   return data;
 }
+
+export async function uploadFile(path: string, form: FormData, options: Pick<RequestOptions, 'token' | 'gatewayUrl'> = {}): Promise<unknown> {
+  const config  = readConfig();
+  const baseUrl = options.gatewayUrl ?? config.gateway_url;
+  const token   = resolveToken(options.token);
+  const url     = `${baseUrl}/v1${path}`;
+
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  // No Content-Type — fetch sets multipart boundary automatically
+
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'POST', headers, body: form });
+  } catch {
+    throw new NetworkError(baseUrl);
+  }
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const body = data as { error?: string };
+    if (response.status === 401) {
+      throw new ApiError(401, `${body.error ?? 'unauthorized'} — Token may be expired. Run 'crm login'`);
+    }
+    if (response.status >= 500) {
+      throw new ApiError(response.status, `Server error (${response.status}). Check service logs.`);
+    }
+    throw new ApiError(response.status, body.error ?? response.statusText);
+  }
+
+  return data;
+}
