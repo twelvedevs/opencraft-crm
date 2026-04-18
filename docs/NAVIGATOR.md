@@ -18,6 +18,7 @@
 | [arch/adr-auth-middleware.md](arch/adr-auth-middleware.md) | ADR: `@ortho/auth-middleware` — JWT verification and RBAC Fastify plugin |
 | [arch/adr-openapi.md](arch/adr-openapi.md) | ADR: `@ortho/openapi` — shared OpenAPI/Swagger plugin (19 services) |
 | [arch/adr-docker-compose-conventions.md](arch/adr-docker-compose-conventions.md) | ADR: Docker Compose local dev conventions — env var naming and migration services |
+| [arch/adr-list-response-standard.md](arch/adr-list-response-standard.md) | ADR: Unified list response standard — `{ data, nextCursor?, total? }` across all 19 collection endpoints |
 
 ## Component Design Specs (`docs/superpowers/specs/`)
 
@@ -75,6 +76,7 @@ All specs are **Approved** unless noted otherwise.
 | [event-bus-adapter-design.md](superpowers/specs/2026-03-29-event-bus-adapter-design.md) | EventBridge adapter design |
 | [docker-compose-design.md](superpowers/specs/2026-04-03-docker-compose-design.md) | Local development docker-compose setup |
 | [openapi-swagger-design.md](superpowers/specs/2026-04-11-openapi-swagger-design.md) | OpenAPI/Swagger support via shared `@ortho/openapi` plugin (19 services) |
+| [list-response-standard-design.md](superpowers/specs/2026-04-18-list-response-standard-design.md) | Unified list response standard — `{ data, nextCursor?, total? }` across all services |
 | [crm-cli-design.md](superpowers/specs/2026-04-12-crm-cli-design.md) | CRM CLI — developer debug tool for leads, pipeline, and conversations via API Gateway |
 
 ## Development Guides (`docs/development/`)
@@ -99,6 +101,7 @@ All specs are **Approved** unless noted otherwise.
 | [2026-04-12-openapi-swagger.md](superpowers/plans/2026-04-12-openapi-swagger.md) | OpenAPI/Swagger — 20-task plan (package + 19 services) |
 | [2026-04-12-crm-cli.md](superpowers/plans/2026-04-12-crm-cli.md) | CRM CLI — 14-task plan (leads, pipeline, conversations) |
 | [2026-04-17-automated-qa-pipeline.md](superpowers/plans/2026-04-17-automated-qa-pipeline.md) | Automated QA Pipeline — 11-task plan (scenario runner, health checker, `/qa` orchestrator) |
+| [2026-04-18-list-response-standard.md](superpowers/plans/2026-04-18-list-response-standard.md) | List Response Standard — 13-task plan (shared types + 11 services + QA scenarios) |
 
 ## Phase / Rollout Specs (`docs/superpowers/specs/`)
 

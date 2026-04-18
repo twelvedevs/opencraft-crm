@@ -47,17 +47,18 @@ export function registerPipelineCommands(program: Command): void {
     .description('List pipeline memberships for a lead')
     .action(async (leadId: string, opts: GlobalOpts) => {
       try {
-        const data = await request(`/pipeline/memberships?lead_id=${leadId}`, {
+        const body = await request(`/pipeline/memberships?lead_id=${leadId}`, {
           token: opts.token, gatewayUrl: opts.url,
-        }) as { memberships: Membership[] };
+        }) as { data: Membership[]; nextCursor: string | null };
 
-        if (opts.json) { printJson(data); return; }
+        if (opts.json) { printJson(body); return; }
 
-        if (!data.memberships.length) { console.log('No memberships found.'); return; }
+        const memberships = body.data;
+        if (!memberships.length) { console.log('No memberships found.'); return; }
 
         printTable(
           ['Membership ID', 'Pipeline', 'Stage', 'Status', 'Entered At'],
-          data.memberships.map(m => [
+          memberships.map(m => [
             m.id.slice(0, 8) + '…',
             m.pipeline,
             m.stage,

@@ -463,9 +463,7 @@ describe('GET /emails/campaigns/:jobId', () => {
     expect(response.statusCode).toBe(200);
     const json = response.json();
     expect(json.total).toBe(2);
-    expect(json.page).toBe(1);
-    expect(json.page_size).toBe(100);
-    expect(json.recipients).toHaveLength(2);
+    expect(json.data).toHaveLength(2);
     expect(mockRecipientsRepo.findByJobIdPaginated).toHaveBeenCalledWith('job-id-1', {
       status: undefined,
       page: 1,
@@ -485,7 +483,6 @@ describe('GET /emails/campaigns/:jobId', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().page).toBe(2);
     expect(mockRecipientsRepo.findByJobIdPaginated).toHaveBeenCalledWith('job-id-1', {
       status: 'sent',
       page: 2,

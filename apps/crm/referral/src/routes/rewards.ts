@@ -46,7 +46,7 @@ export async function rewardsRoutes(
     };
 
     const result = await rewardService.list(db, query);
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.items, nextCursor: result.nextCursor });
   });
 
   // PATCH /rewards/:id — issue reward

@@ -17,7 +17,7 @@ interface Lead {
 
 interface LeadListResponse {
   data: Lead[];
-  next_cursor: string | null;
+  nextCursor: string | null;
 }
 
 interface AudienceEvaluateResponse {
@@ -55,8 +55,8 @@ export async function executeBulkSend(
         leadMap.set(lead.id, lead);
       }
 
-      if (!response.next_cursor) break;
-      cursor = response.next_cursor;
+      if (!response.nextCursor) break;
+      cursor = response.nextCursor;
     }
 
     // Evaluate audience segment

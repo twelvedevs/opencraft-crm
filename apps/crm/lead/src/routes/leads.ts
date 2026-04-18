@@ -155,7 +155,7 @@ export async function leadsRoutes(
       query.cursor,
       query.limit,
     );
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.leads, nextCursor: result.nextCursor });
   });
 
   // PATCH /leads/:id/duplicate-status
@@ -263,15 +263,15 @@ export async function leadsRoutes(
         }
       }
       const leads = await leadRepository.findByPhones(db, normalizedPhones, userLocations);
-      return reply.status(200).send({ leads });
+      return reply.status(200).send({ data: leads });
     }
     if (query.emails) {
       const leads = await leadRepository.findByEmails(db, query.emails, userLocations);
-      return reply.status(200).send({ leads });
+      return reply.status(200).send({ data: leads });
     }
     if (query.ids) {
       const leads = await leadRepository.findByIds(db, query.ids, userLocations);
-      return reply.status(200).send({ leads });
+      return reply.status(200).send({ data: leads });
     }
 
     // Normal list mode
@@ -293,7 +293,7 @@ export async function leadsRoutes(
       query.location_id ? [query.location_id] : userLocations,
     );
 
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.leads, nextCursor: result.nextCursor });
   });
 
   // GET /leads/:id

@@ -88,6 +88,6 @@ export async function leaderboardRoutes(
     q = q.limit(effectiveLimit);
 
     const rows = await q;
-    return reply.status(200).send(rows);
+    return reply.status(200).send({ data: rows });
   });
 }

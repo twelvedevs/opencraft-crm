@@ -94,8 +94,8 @@ export async function usersRoutes(
       limit: query.limit ?? 50,
     });
     return reply.status(200).send({
-      users: result.rows,
-      next_cursor: result.nextCursor,
+      data: result.rows,
+      nextCursor: result.nextCursor,
     });
   });
 

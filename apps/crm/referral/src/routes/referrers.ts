@@ -91,7 +91,7 @@ export async function referrersRoutes(
     };
 
     const result = await referrerService.list(db, query);
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.items, nextCursor: result.nextCursor });
   });
 
   // GET /referrers/:id — full record with active link + summary counts

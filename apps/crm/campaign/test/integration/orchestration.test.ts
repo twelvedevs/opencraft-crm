@@ -64,13 +64,16 @@ function createServiceFetchMock(
       return savedFetch(input, init);
     }
 
-    // Lead Service — paginated list
+    // Lead Service — paginated list (cursor-based)
     if (url.includes('/leads') && url.includes('contact_status')) {
       const u = new URL(url);
-      const offset = parseInt(u.searchParams.get('offset') ?? '0', 10);
-      const limit = parseInt(u.searchParams.get('limit') ?? '500', 10);
+      const cursor = u.searchParams.get('cursor');
+      const limit = parseInt(u.searchParams.get('limit') ?? '200', 10);
+      const offset = cursor ? parseInt(cursor, 10) : 0;
       const page = opts.leads.slice(offset, offset + limit);
-      return new Response(JSON.stringify({ items: page }), {
+      const nextOffset = offset + limit;
+      const nextCursor = nextOffset < opts.leads.length ? String(nextOffset) : null;
+      return new Response(JSON.stringify({ data: page, nextCursor }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -81,7 +84,7 @@ function createServiceFetchMock(
       const u = new URL(url);
       const ids = u.searchParams.get('ids')!.split(',');
       const matched = opts.leads.filter((l) => ids.includes(l.id));
-      return new Response(JSON.stringify({ items: matched }), {
+      return new Response(JSON.stringify({ data: matched }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });

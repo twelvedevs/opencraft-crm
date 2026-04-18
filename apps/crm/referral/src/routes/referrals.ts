@@ -48,7 +48,7 @@ export async function referralsRoutes(
     };
 
     const result = await referralService.list(db, query);
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.items, nextCursor: result.nextCursor });
   });
 
   // GET /:id — full referral record including reward_event if exists

@@ -62,12 +62,12 @@ describe('GET /notifications history', () => {
     expect(res.statusCode).toBe(200);
 
     const body = res.json<{
-      notifications: Array<{ notification_id: string; read: boolean }>;
-      next_cursor: string | null;
+      data: Array<{ notification_id: string; read: boolean }>;
+      nextCursor: string | null;
     }>();
 
-    const n1 = body.notifications.find((n) => n.notification_id === id1);
-    const n2 = body.notifications.find((n) => n.notification_id === id2);
+    const n1 = body.data.find((n) => n.notification_id === id1);
+    const n2 = body.data.find((n) => n.notification_id === id2);
     expect(n1?.read).toBe(true);
     expect(n2?.read).toBe(false);
   });
@@ -91,8 +91,8 @@ describe('GET /notifications history', () => {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ notifications: Array<{ notification_id: string }> }>();
-    const ids = body.notifications.map((n) => n.notification_id);
+    const body = res.json<{ data: Array<{ notification_id: string }> }>();
+    const ids = body.data.map((n) => n.notification_id);
     expect(ids).not.toContain(id1);
     expect(ids).toContain(id2);
   });
@@ -113,8 +113,8 @@ describe('GET /notifications history', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-total-count']).toBe('5');
-    const body = res.json<{ notifications: unknown[] }>();
-    expect(body.notifications).toHaveLength(2);
+    const body = res.json<{ data: unknown[] }>();
+    expect(body.data).toHaveLength(2);
   });
 
   it('pagination cursor advances correctly', async () => {
@@ -133,29 +133,29 @@ describe('GET /notifications history', () => {
     });
     expect(page1.statusCode).toBe(200);
     const body1 = page1.json<{
-      notifications: Array<{ notification_id: string }>;
-      next_cursor: string | null;
+      data: Array<{ notification_id: string }>;
+      nextCursor: string | null;
     }>();
-    expect(body1.notifications).toHaveLength(2);
-    expect(body1.next_cursor).toBeTruthy();
+    expect(body1.data).toHaveLength(2);
+    expect(body1.nextCursor).toBeTruthy();
 
     // Fetch second page using cursor
     const page2 = await ctx.app.inject({
       method: 'GET',
-      url: `/notifications?channels=${channel}&limit=2&before=${body1.next_cursor}`,
+      url: `/notifications?channels=${channel}&limit=2&before=${body1.nextCursor}`,
       headers: { Authorization: `Bearer ${userToken}` },
     });
     expect(page2.statusCode).toBe(200);
     const body2 = page2.json<{
-      notifications: Array<{ notification_id: string }>;
-      next_cursor: string | null;
+      data: Array<{ notification_id: string }>;
+      nextCursor: string | null;
     }>();
-    expect(body2.notifications).toHaveLength(2);
-    expect(body2.next_cursor).toBeNull();
+    expect(body2.data).toHaveLength(2);
+    expect(body2.nextCursor).toBeNull();
 
     // No overlap between pages
-    const ids1 = body1.notifications.map((n) => n.notification_id);
-    const ids2 = body2.notifications.map((n) => n.notification_id);
+    const ids1 = body1.data.map((n) => n.notification_id);
+    const ids2 = body2.data.map((n) => n.notification_id);
     const overlap = ids1.filter((id) => ids2.includes(id));
     expect(overlap).toHaveLength(0);
 
@@ -181,8 +181,8 @@ describe('GET /notifications history', () => {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json<{ notifications: Array<{ notification_id: string }> }>();
-    const ids = body.notifications.map((n) => n.notification_id);
+    const body = res.json<{ data: Array<{ notification_id: string }> }>();
+    const ids = body.data.map((n) => n.notification_id);
     expect(ids).not.toContain(expiredId);
   });
 });

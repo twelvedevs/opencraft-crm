@@ -116,22 +116,22 @@ describe.skipIf(!process.env['DATABASE_URL'])('users routes integration', () => 
 
     expect(page1Res.statusCode).toBe(200);
     const page1 = page1Res.json();
-    expect(page1.users).toHaveLength(2);
-    expect(page1.next_cursor).toBeTruthy();
+    expect(page1.data).toHaveLength(2);
+    expect(page1.nextCursor).toBeTruthy();
 
     // Second page using cursor
     const page2Res = await app.inject({
       method: 'GET',
-      url: `/identity/users?limit=2&cursor=${encodeURIComponent(page1.next_cursor)}`,
+      url: `/identity/users?limit=2&cursor=${encodeURIComponent(page1.nextCursor)}`,
       headers: { authorization: `Bearer ${token}` },
     });
 
     expect(page2Res.statusCode).toBe(200);
     const page2 = page2Res.json();
-    expect(page2.users).toHaveLength(2);
+    expect(page2.data).toHaveLength(2);
 
     // All 4 IDs should be unique
-    const allIds = [...page1.users.map((u: { id: string }) => u.id), ...page2.users.map((u: { id: string }) => u.id)];
+    const allIds = [...page1.data.map((u: { id: string }) => u.id), ...page2.data.map((u: { id: string }) => u.id)];
     expect(new Set(allIds).size).toBe(4);
   });
 

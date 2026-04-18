@@ -45,7 +45,7 @@ export async function activityRoutes(
       limit: query.limit,
     });
 
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.activities, nextCursor: result.nextCursor });
   });
 
   // GET /leads/:id/score-commentary

@@ -153,13 +153,16 @@ describe('resolveAudience', () => {
     const matchedIds = leads.map((l) => l.id);
 
     mockFetch((url) => {
-      // Lead Service — paginated fetch
+      // Lead Service — paginated fetch (cursor-based)
       if (url.includes('/leads') && url.includes('contact_status')) {
         const parsed = new URL(url);
-        const offset = parseInt(parsed.searchParams.get('offset') ?? '0', 10);
-        const limit = parseInt(parsed.searchParams.get('limit') ?? '500', 10);
+        const cursor = parsed.searchParams.get('cursor');
+        const limit = parseInt(parsed.searchParams.get('limit') ?? '200', 10);
+        const offset = cursor ? parseInt(cursor, 10) : 0;
         const page = leads.slice(offset, offset + limit);
-        return jsonResponse({ items: page });
+        const nextOffset = offset + limit;
+        const nextCursor = nextOffset < leads.length ? String(nextOffset) : null;
+        return jsonResponse({ data: page, nextCursor });
       }
 
       // Audience Engine — evaluate
@@ -181,7 +184,7 @@ describe('resolveAudience', () => {
         const parsed = new URL(url);
         const ids = parsed.searchParams.get('ids')!.split(',');
         const result = leads.filter((l) => ids.includes(l.id));
-        return jsonResponse({ items: result });
+        return jsonResponse({ data: result });
       }
 
       return jsonResponse({ error: 'unexpected' }, 500);
@@ -190,11 +193,11 @@ describe('resolveAudience', () => {
     const campaign = makeCampaign();
     const result = await resolveAudience(null, campaign, ENV);
 
-    // Lead Service paginated calls: 500 + 500 + 50 = 3 pages
+    // Lead Service paginated calls: 5x200 + 50 = 6 pages
     const leadFetchCalls = fetchCalls.filter(
       (c) => c.url.includes('/leads') && c.url.includes('contact_status'),
     );
-    expect(leadFetchCalls).toHaveLength(3);
+    expect(leadFetchCalls).toHaveLength(6);
 
     expect(result.groupedByLocation.get('loc-1')?.length).toBe(1050);
   });
@@ -204,7 +207,7 @@ describe('resolveAudience', () => {
 
     mockFetch((url) => {
       if (url.includes('/leads') && url.includes('contact_status')) {
-        return jsonResponse({ items: leads });
+        return jsonResponse({ data: leads, nextCursor: null });
       }
       if (url.includes('/audiences/evaluate')) {
         return jsonResponse({ ok: true });
@@ -213,7 +216,7 @@ describe('resolveAudience', () => {
         return jsonResponse({ entity_ids: ['lead-1', 'lead-2'] });
       }
       if (url.includes('/leads') && url.includes('ids=')) {
-        return jsonResponse({ items: leads });
+        return jsonResponse({ data: leads });
       }
       return jsonResponse({ error: 'unexpected' }, 500);
     });
@@ -221,7 +224,7 @@ describe('resolveAudience', () => {
     const campaign = makeCampaign();
     await resolveAudience(null, campaign, ENV);
 
-    // Only one batch (2 leads < 500), so it should have done=true
+    // Only one batch (2 leads < LEAD_PAGE_LIMIT), so it should have done=true
     const evaluateCalls = fetchCalls.filter((c) => c.url.includes('/audiences/evaluate'));
     expect(evaluateCalls).toHaveLength(1);
     expect((evaluateCalls[0]!.body as Record<string, unknown>).done).toBe(true);
@@ -232,7 +235,7 @@ describe('resolveAudience', () => {
 
     mockFetch((url) => {
       if (url.includes('/leads') && url.includes('contact_status')) {
-        return jsonResponse({ items: leads });
+        return jsonResponse({ data: leads, nextCursor: null });
       }
       if (url.includes('/audiences/evaluate')) {
         return jsonResponse({ ok: true });
@@ -241,7 +244,7 @@ describe('resolveAudience', () => {
         return jsonResponse({ entity_ids: ['lead-1'] });
       }
       if (url.includes('/leads') && url.includes('ids=')) {
-        return jsonResponse({ items: leads });
+        return jsonResponse({ data: leads });
       }
       return jsonResponse({ error: 'unexpected' }, 500);
     });
@@ -267,7 +270,7 @@ describe('resolveAudience', () => {
 
     mockFetch((url) => {
       if (url.includes('/leads') && url.includes('contact_status')) {
-        return jsonResponse({ items: leads });
+        return jsonResponse({ data: leads, nextCursor: null });
       }
       if (url.includes('/audiences/evaluate')) {
         return jsonResponse({ error: 'bad_filter' }, 422);
@@ -287,7 +290,7 @@ describe('resolveAudience', () => {
 
     mockFetch((url) => {
       if (url.includes('/leads') && url.includes('contact_status')) {
-        return jsonResponse({ items: leads });
+        return jsonResponse({ data: leads, nextCursor: null });
       }
       if (url.includes('/audiences/segments/seg-1/evaluate')) {
         return jsonResponse({ ok: true });
@@ -296,7 +299,7 @@ describe('resolveAudience', () => {
         return jsonResponse({ entity_ids: ['lead-1'] });
       }
       if (url.includes('/leads') && url.includes('ids=')) {
-        return jsonResponse({ items: leads });
+        return jsonResponse({ data: leads });
       }
       return jsonResponse({ error: 'unexpected' }, 500);
     });

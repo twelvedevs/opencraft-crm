@@ -184,8 +184,8 @@ describe.skipIf(!HAS_DB)('appointment routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(Array.isArray(body)).toBe(true);
-    expect(body).toHaveLength(1);
-    expect(body[0].appointment_type).toBe('exam');
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].appointment_type).toBe('exam');
   });
 });

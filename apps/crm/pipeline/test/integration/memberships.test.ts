@@ -180,8 +180,8 @@ describe.skipIf(!HAS_DB)('Membership endpoints (integration)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.rows).toHaveLength(1);
-    expect(body.rows[0].lead_id).toBe(LEAD_ID_1);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].lead_id).toBe(LEAD_ID_1);
   });
 
   it('GET /pipeline/memberships?status=active filters correctly', async () => {
@@ -198,14 +198,14 @@ describe.skipIf(!HAS_DB)('Membership endpoints (integration)', () => {
       headers: { 'x-internal-api-key': API_KEY },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().rows).toHaveLength(1);
+    expect(res.json().data).toHaveLength(1);
 
     const resInactive = await app.inject({
       method: 'GET',
       url: '/pipeline/memberships?status=closed',
       headers: { 'x-internal-api-key': API_KEY },
     });
-    expect(resInactive.json().rows).toHaveLength(0);
+    expect(resInactive.json().data).toHaveLength(0);
   });
 
   it('GET /pipeline/memberships?pipeline=new_patient filters correctly', async () => {
@@ -222,14 +222,14 @@ describe.skipIf(!HAS_DB)('Membership endpoints (integration)', () => {
       headers: { 'x-internal-api-key': API_KEY },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().rows).toHaveLength(1);
+    expect(res.json().data).toHaveLength(1);
 
     const resOther = await app.inject({
       method: 'GET',
       url: '/pipeline/memberships?pipeline=in_treatment',
       headers: { 'x-internal-api-key': API_KEY },
     });
-    expect(resOther.json().rows).toHaveLength(0);
+    expect(resOther.json().data).toHaveLength(0);
   });
 
   // ── Query: by ID ──────────────────────────────────────────
@@ -283,7 +283,7 @@ describe.skipIf(!HAS_DB)('Membership endpoints (integration)', () => {
     });
     expect(page1.statusCode).toBe(200);
     const body1 = page1.json();
-    expect(body1.rows).toHaveLength(2);
+    expect(body1.data).toHaveLength(2);
     expect(body1.nextCursor).toBeTruthy();
 
     // Second page: use cursor
@@ -294,7 +294,7 @@ describe.skipIf(!HAS_DB)('Membership endpoints (integration)', () => {
     });
     expect(page2.statusCode).toBe(200);
     const body2 = page2.json();
-    expect(body2.rows).toHaveLength(1);
+    expect(body2.data).toHaveLength(1);
     expect(body2.nextCursor).toBeNull();
   });
 });

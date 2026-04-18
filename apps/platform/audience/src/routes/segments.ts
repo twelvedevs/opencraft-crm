@@ -126,7 +126,7 @@ export async function segmentRoutes(app: FastifyInstance): Promise<void> {
     );
 
     return reply.status(200).send({
-      items: result.items.map((s) => ({
+      data: result.items.map((s) => ({
         segment_id: s.id,
         name: s.name,
         status: s.status,

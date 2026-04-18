@@ -95,11 +95,9 @@ describe('GET /templates', () => {
     await createTemplate('Template C');
     const res = await fetch(`${ctx.serverUrl}/templates`, { headers: await svcHeaders() });
     expect(res.status).toBe(200);
-    const body = await res.json() as { data: unknown[]; total: number; limit: number; offset: number };
+    const body = await res.json() as { data: unknown[]; total: number };
     expect(body.total).toBe(3);
     expect(body.data.length).toBe(3);
-    expect(body.limit).toBe(20);
-    expect(body.offset).toBe(0);
   });
 
   it('filters by channel=sms', async () => {

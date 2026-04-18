@@ -62,17 +62,18 @@ export function registerConversationsCommands(program: Command): void {
         if (opts.lead)   params.set('lead_id', opts.lead);
         if (opts.status) params.set('status', opts.status);
 
-        const data = await request(`/conversations?${params}`, {
+        const body = await request(`/conversations?${params}`, {
           token: opts.token, gatewayUrl: opts.url,
-        }) as { conversations: Conversation[]; total: number };
+        }) as { data: Conversation[]; total: number };
 
-        if (opts.json) { printJson(data); return; }
+        if (opts.json) { printJson(body); return; }
 
-        if (!data.conversations.length) { console.log('No conversations found.'); return; }
+        const conversations = body.data;
+        if (!conversations.length) { console.log('No conversations found.'); return; }
 
         printTable(
           ['ID', 'Lead ID', 'Status', 'Assigned To', 'Last Message'],
-          data.conversations.map(c => [
+          conversations.map(c => [
             c.id.slice(0, 8) + '…',
             c.lead_id.slice(0, 8) + '…',
             colorizeStatus(c.status),

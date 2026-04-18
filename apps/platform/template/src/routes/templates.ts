@@ -87,8 +87,6 @@ export default async function templateRoutes(app: FastifyInstance): Promise<void
       return reply.status(200).send({
         data: rows,
         total,
-        limit: resolvedLimit,
-        offset: resolvedOffset,
       });
     },
   );

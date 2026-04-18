@@ -23,7 +23,7 @@ interface FilterCondition {
   value: unknown;
 }
 
-const LEAD_PAGE_LIMIT = 500;
+const LEAD_PAGE_LIMIT = 200;
 const PRE_FILTER_FIELDS = new Set(['location_id', 'pipeline', 'stage']);
 
 /**
@@ -62,13 +62,15 @@ async function fetchAllLeads(
   preFilterParams: Record<string, string>,
 ): Promise<LeadContact[]> {
   const allLeads: LeadContact[] = [];
-  let offset = 0;
+  let cursor: string | null = null;
 
   while (true) {
     const url = new URL('/leads', env.LEAD_SERVICE_URL);
     url.searchParams.set('contact_status', 'active');
     url.searchParams.set('limit', String(LEAD_PAGE_LIMIT));
-    url.searchParams.set('offset', String(offset));
+    if (cursor !== null) {
+      url.searchParams.set('cursor', cursor);
+    }
     for (const [key, value] of Object.entries(preFilterParams)) {
       url.searchParams.set(key, value);
     }
@@ -78,13 +80,14 @@ async function fetchAllLeads(
       throw new Error(`Lead Service returned ${res.status}: ${await res.text()}`);
     }
 
-    const body = (await res.json()) as { items: LeadContact[] };
-    const leads = body.items;
+    const body = (await res.json()) as {
+      data: LeadContact[];
+      nextCursor: string | null;
+    };
+    allLeads.push(...body.data);
 
-    allLeads.push(...leads);
-
-    if (leads.length < LEAD_PAGE_LIMIT) break;
-    offset += LEAD_PAGE_LIMIT;
+    if (body.nextCursor === null || body.nextCursor === undefined) break;
+    cursor = body.nextCursor;
   }
 
   return allLeads;
@@ -191,8 +194,8 @@ async function fetchLeadsByIds(
       throw new Error(`Lead Service (by ids) returned ${res.status}: ${await res.text()}`);
     }
 
-    const body = (await res.json()) as { items: LeadContact[] };
-    leads.push(...body.items);
+    const body = (await res.json()) as { data: LeadContact[] };
+    leads.push(...body.data);
   }
 
   return leads;

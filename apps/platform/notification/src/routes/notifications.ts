@@ -112,8 +112,8 @@ export async function notificationsRoute(
     void reply.header('X-Total-Count', String(totalUnread));
 
     return reply.status(200).send({
-      notifications: rows.map(rowToResponse),
-      next_cursor: nextCursor,
+      data: rows.map(rowToResponse),
+      nextCursor,
     });
   });
 

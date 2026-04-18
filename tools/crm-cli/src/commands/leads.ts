@@ -50,15 +50,16 @@ export function registerLeadsCommands(program: Command): void {
         params.set('limit', opts.limit ?? '20');
 
         const qs   = params.toString();
-        const data = await request(`/leads${qs ? `?${qs}` : ''}`, { token: opts.token, gatewayUrl: opts.url }) as { leads: Lead[] };
+        const body = await request(`/leads${qs ? `?${qs}` : ''}`, { token: opts.token, gatewayUrl: opts.url }) as { data: Lead[]; nextCursor: string | null };
 
-        if (opts.json) { printJson(data); return; }
+        if (opts.json) { printJson(body); return; }
 
-        if (!data.leads.length) { console.log('No leads found.'); return; }
+        const leads = body.data;
+        if (!leads.length) { console.log('No leads found.'); return; }
 
         printTable(
           ['ID', 'Name', 'Phone', 'Channel', 'Pipeline', 'Stage', 'Score'],
-          data.leads.map(l => [
+          leads.map(l => [
             l.id.slice(0, 8) + '…',
             `${l.first_name} ${l.last_name}`,
             l.phone,
