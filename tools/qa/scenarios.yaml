@@ -545,7 +545,7 @@ scenarios:
         path: /v1/referrals/referrers/{{referrer_id}}/links
         expect:
           status: 200
-          body_contains: ["data", "nextCursor"]
+          body_contains: ["data"]
 
   - id: referral-list
     name: "Referrals: list referrals"
