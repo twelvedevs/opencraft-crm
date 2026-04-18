@@ -137,7 +137,7 @@ export async function membershipRoutes(
       limit: query.limit,
     });
 
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.rows, nextCursor: result.nextCursor });
   });
 
   app.get('/memberships/:id', { schema: { tags: ['Memberships'], summary: 'Get membership by ID' } as object }, async (req, reply) => {
