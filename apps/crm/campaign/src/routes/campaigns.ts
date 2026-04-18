@@ -147,7 +147,7 @@ export async function campaignsRoutes(
       offset: query.offset ?? 0,
     });
 
-    return reply.status(200).send(result);
+    return reply.status(200).send({ data: result.items, total: result.total });
   });
 
   // GET /campaigns/:id — get by ID

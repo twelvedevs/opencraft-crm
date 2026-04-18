@@ -114,7 +114,7 @@ describe.skipIf(!HAS_DB)('approval workflow (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.items).toHaveLength(2);
+      expect(body.data).toHaveLength(2);
       expect(body.total).toBe(2);
     });
 
@@ -131,8 +131,8 @@ describe.skipIf(!HAS_DB)('approval workflow (integration)', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.items).toHaveLength(1);
-      expect(body.items[0].name).toBe('Draft');
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].name).toBe('Draft');
       expect(body.total).toBe(1);
     });
   });
