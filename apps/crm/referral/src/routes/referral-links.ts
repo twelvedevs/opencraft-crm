@@ -67,7 +67,7 @@ export async function referralLinksRoutes(
     }
 
     const links = await referralLinkRepo.findAllByReferrerId(db, id);
-    return reply.status(200).send(links);
+    return reply.status(200).send({ data: links });
   });
 
   // PATCH /links/:id/status — activating deactivates other active links for same referrer

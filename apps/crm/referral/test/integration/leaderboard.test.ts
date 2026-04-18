@@ -76,11 +76,11 @@ describe.skipIf(!HAS_DB)('Leaderboard Routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body).toHaveLength(2);
-    expect(body[0].referrer_id).toBe(alice.id);
-    expect(body[0].cases_started).toBe(2);
-    expect(body[1].referrer_id).toBe(bob.id);
-    expect(body[1].cases_started).toBe(1);
+    expect(body.data).toHaveLength(2);
+    expect(body.data[0].referrer_id).toBe(alice.id);
+    expect(body.data[0].cases_started).toBe(2);
+    expect(body.data[1].referrer_id).toBe(bob.id);
+    expect(body.data[1].cases_started).toBe(1);
   });
 
   it('referrer_type filter applied', async () => {
@@ -113,8 +113,8 @@ describe.skipIf(!HAS_DB)('Leaderboard Routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body).toHaveLength(1);
-    expect(body[0].referrer_type).toBe('doctor');
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].referrer_type).toBe('doctor');
   });
 
   it('period_start/period_end uses correct date columns per metric', async () => {
@@ -154,10 +154,10 @@ describe.skipIf(!HAS_DB)('Leaderboard Routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body).toHaveLength(1);
-    expect(body[0].total_referrals).toBe(0); // created_at is April, not in Feb
-    expect(body[0].exams_scheduled).toBe(2); // both exam_scheduled_at in Feb
-    expect(body[0].cases_started).toBe(0); // converted_at is March, not in Feb
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].total_referrals).toBe(0); // created_at is April, not in Feb
+    expect(body.data[0].exams_scheduled).toBe(2); // both exam_scheduled_at in Feb
+    expect(body.data[0].cases_started).toBe(0); // converted_at is March, not in Feb
   });
 
   it('location scoping excludes other locations', async () => {
@@ -190,7 +190,7 @@ describe.skipIf(!HAS_DB)('Leaderboard Routes (integration)', () => {
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body).toHaveLength(1);
-    expect(body[0].name).toBe('Local Ref');
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].name).toBe('Local Ref');
   });
 });
