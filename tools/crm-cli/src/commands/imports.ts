@@ -76,8 +76,8 @@ async function pollUntil(
   for (;;) {
     await new Promise(r => setTimeout(r, intervalMs));
     const imp = await request(`/imports/${id}`, { token: opts.token, gatewayUrl: opts.url }) as ImportRecord;
-    if (done(imp.status)) { process.stdout.write(' done\n'); return imp; }
     if (imp.status === 'failed') { process.stdout.write('\n'); throw new Error(imp.error_message ?? 'Import failed'); }
+    if (done(imp.status)) { process.stdout.write(' done\n'); return imp; }
     process.stdout.write('.');
   }
 }
@@ -243,7 +243,7 @@ export function registerImportsCommands(program: Command): void {
       printSuccess(`Executing  id: ${result.id}  status: ${formatImportStatus(result.status)}`);
 
       if (opts.wait) {
-        const done = await pollUntil(id, s => s === 'completed' || s === 'undone', opts);
+        const done = await pollUntil(id, s => s === 'completed', opts);
         printKeyValue({
           status:   formatImportStatus(done.status),
           executed: formatCount(done.executed_count),
