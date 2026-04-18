@@ -121,6 +121,6 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       limit,
     );
 
-    return reply.send(result);
+    return reply.send({ data: result.data, nextCursor: result.next_cursor });
   });
 }
