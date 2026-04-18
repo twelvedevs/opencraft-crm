@@ -990,6 +990,7 @@ services:
       NOTIFICATION_SERVICE_URL: ${Notification_Service__URL}
       IDENTITY_SERVICE_URL: ${Identity_Service__URL}
       LEAD_SERVICE_API_KEY: ${Lead_Service__API_Key}
+      CONVERSATION_SERVICE_API_KEY: ${CRM_Gateway__Conversation_API_Key}
       INTERNAL_API_SECRET: ${CRM_Gateway__Internal_API_Secret}
     depends_on:
       identity:

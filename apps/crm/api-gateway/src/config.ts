@@ -35,6 +35,7 @@ export const config = {
 
   // Auth secrets
   LEAD_SERVICE_API_KEY: requireEnv('LEAD_SERVICE_API_KEY'),
+  CONVERSATION_SERVICE_API_KEY: requireEnv('CONVERSATION_SERVICE_API_KEY'),
   INTERNAL_API_SECRET: requireEnv('INTERNAL_API_SECRET'),
 
   // Optional numeric settings with defaults

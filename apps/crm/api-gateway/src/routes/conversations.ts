@@ -14,6 +14,7 @@ async function conversationsRoutes(app: FastifyInstance): Promise<void> {
         ...headers,
         ...request.authHeaders,
         'x-request-id': request.requestId,
+        'x-internal-api-key': config.CONVERSATION_SERVICE_API_KEY,
       }),
     });
   };
