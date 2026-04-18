@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { registerLoginCommand }         from './commands/login.js';
-import { registerConfigCommands }       from './commands/config.js';
-import { registerLeadsCommands }        from './commands/leads.js';
-import { registerPipelineCommands }     from './commands/pipeline.js';
+import { registerLoginCommand }          from './commands/login.js';
+import { registerConfigCommands }        from './commands/config.js';
+import { registerLeadsCommands }         from './commands/leads.js';
+import { registerPipelineCommands }      from './commands/pipeline.js';
 import { registerConversationsCommands } from './commands/conversations.js';
-import { registerLocationsCommands }    from './commands/locations.js';
+import { registerLocationsCommands }     from './commands/locations.js';
+import { registerImportsCommands }       from './commands/imports.js';
 
 const program = new Command();
 
@@ -20,5 +21,6 @@ registerLeadsCommands(program);
 registerPipelineCommands(program);
 registerConversationsCommands(program);
 registerLocationsCommands(program);
+registerImportsCommands(program);
 
 program.parse();
