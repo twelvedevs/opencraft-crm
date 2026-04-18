@@ -19,7 +19,7 @@ export async function insertEvent(
     `INSERT INTO platform_analytics.analytics_events
        (event_id, event_type, source, entity_type, entity_id, dimensions, properties, occurred_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (event_id) DO NOTHING`,
+     ON CONFLICT (event_id, occurred_at) DO NOTHING`,
     [
       params.event_id,
       params.event_type,
