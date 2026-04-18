@@ -98,11 +98,11 @@ describe.skipIf(!process.env['DATABASE_URL'])('api-keys routes integration', () 
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.keys).toHaveLength(1);
-    expect(body.keys[0].name).toBe('Key 1');
-    expect(body.keys[0].status).toBe('active');
-    expect(body.keys[0]).not.toHaveProperty('key_hash');
-    expect(body.keys[0]).not.toHaveProperty('key');
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].name).toBe('Key 1');
+    expect(body.data[0].status).toBe('active');
+    expect(body.data[0]).not.toHaveProperty('key_hash');
+    expect(body.data[0]).not.toHaveProperty('key');
   });
 
   it('POST /identity/api-keys/validate with correct X-Internal-Secret returns 200 with permissions', async () => {

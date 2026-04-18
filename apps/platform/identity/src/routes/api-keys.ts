@@ -86,7 +86,7 @@ export async function apiKeysRoutes(
   }, async (_req, reply) => {
     const keys = await apiKeyService.listApiKeys(pool);
     return reply.status(200).send({
-      keys: keys.map((k) => ({
+      data: keys.map((k) => ({
         id: k.id,
         name: k.name,
         permissions: k.permissions,
