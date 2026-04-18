@@ -82,7 +82,7 @@ scenarios:
         path: /identity/users
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   - id: user-create
     name: "Users: create call center agent"
@@ -210,7 +210,7 @@ scenarios:
         path: /v1/leads?page=1&limit=10
         expect:
           status: 200
-          body_contains: ["data", "total"]
+          body_contains: ["data", "nextCursor"]
 
   - id: lead-update
     name: "Leads: update"
@@ -237,7 +237,7 @@ scenarios:
         path: /v1/leads/{{lead_id}}/activities
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   - id: lead-duplicates-list
     name: "Leads: list duplicate pairs"
@@ -249,7 +249,7 @@ scenarios:
         path: /v1/leads/duplicates
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   # ── Appointments ─────────────────────────────────────────────────────────
   - id: appointment-create
@@ -397,7 +397,7 @@ scenarios:
         path: /v1/conversations?location_id={{location_id}}&limit=20
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "total"]
 
   - id: conversation-inbox-settings-get
     name: "Conversations: get inbox settings for location"
@@ -425,7 +425,7 @@ scenarios:
         path: /v1/campaigns
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "total"]
 
   - id: campaign-create
     name: "Campaigns: create draft"
@@ -516,7 +516,7 @@ scenarios:
         path: /v1/referrals/referrers
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   - id: referral-link-create
     name: "Referrals: create link for referrer"
@@ -545,7 +545,7 @@ scenarios:
         path: /v1/referrals/referrers/{{referrer_id}}/links
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   - id: referral-list
     name: "Referrals: list referrals"
@@ -557,7 +557,7 @@ scenarios:
         path: /v1/referrals
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   - id: referral-leaderboard
     name: "Referrals: get leaderboard"
@@ -581,7 +581,7 @@ scenarios:
         path: /v1/referrals/rewards
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   # ── Reporting ─────────────────────────────────────────────────────────────
   # NOTE: reporting service uses /reporting/* route paths internally.
@@ -669,7 +669,7 @@ scenarios:
         path: /v1/notifications
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["data", "nextCursor"]
 
   - id: notification-read-all
     name: "Notifications: mark all as read"
