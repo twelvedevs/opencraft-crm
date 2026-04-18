@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, symlinkSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, symlinkSync, lstatSync } from 'fs'
 import { resolve, join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import yaml from 'js-yaml'
@@ -185,7 +185,7 @@ async function main(): Promise<void> {
   writeFileSync(outFile, JSON.stringify(runResult, null, 2))
 
   const latestLink = join(resultsDir, 'latest.json')
-  if (existsSync(latestLink)) unlinkSync(latestLink)
+  try { lstatSync(latestLink); unlinkSync(latestLink) } catch { /* doesn't exist */ }
   symlinkSync(outFile, latestLink)
 
   console.log(`\n  Total: ${summary.total}  Passed: ${summary.passed}  Failed: ${summary.failed}  Skipped: ${summary.skipped}`)

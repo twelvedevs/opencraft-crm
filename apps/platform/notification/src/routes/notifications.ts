@@ -1,6 +1,5 @@
-import { createSecretKey } from 'crypto';
 import { type FastifyInstance } from 'fastify';
-import { jwtVerify } from 'jose';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 import type { Redis } from 'ioredis';
 import { validateChannelPattern, validateChannelAccess } from '../services/channel-validator.js';
 import type { NotificationsRepo, NotificationRow } from '../repositories/notifications.repo.js';
@@ -11,23 +10,7 @@ const MAX_LIMIT = 100;
 export interface NotificationsRouteOptions {
   repo: NotificationsRepo;
   redis: Redis;
-  jwtSecret: string;
-}
-
-function parseUserJwt(
-  authHeader: string | undefined,
-  secretKey: ReturnType<typeof createSecretKey>,
-): Promise<{ sub: string; locations?: string[] }> | null {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.slice('Bearer '.length);
-  return jwtVerify(token, secretKey, { algorithms: ['HS256'] })
-    .then(({ payload }) => {
-      if (!payload.sub) throw new Error('no sub');
-      return {
-        sub: payload.sub,
-        locations: payload['locations'] as string[] | undefined,
-      };
-    });
+  jwksUrl: string;
 }
 
 function rowToResponse(row: NotificationRow) {
@@ -42,29 +25,37 @@ function rowToResponse(row: NotificationRow) {
   };
 }
 
+async function parseUserJwt(
+  authHeader: string | undefined,
+  jwks: ReturnType<typeof createRemoteJWKSet>,
+): Promise<{ sub: string; locations?: string[] }> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('missing_token');
+  }
+  const token = authHeader.slice('Bearer '.length);
+  const { payload } = await jwtVerify(token, jwks, { algorithms: ['RS256'] });
+  if (!payload.sub) throw new Error('no sub');
+  return {
+    sub: payload.sub,
+    locations: payload['locations'] as string[] | undefined,
+  };
+}
+
 export async function notificationsRoute(
   fastify: FastifyInstance,
   opts: NotificationsRouteOptions,
 ): Promise<void> {
-  const secretKey = createSecretKey(Buffer.from(opts.jwtSecret, 'utf-8'));
+  const jwks = createRemoteJWKSet(new URL(opts.jwksUrl));
   const { repo, redis } = opts;
 
   // GET /notifications — paginated notification history
   fastify.get('/notifications', { schema: { tags: ['Notifications'], summary: 'List notifications' } as object }, async (request, reply) => {
-    // Validate Authorization
-    const authHeader = request.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.status(401).send({ error: 'missing_token' });
-    }
-
     let jwtClaims: { sub: string; locations?: string[] };
     try {
-      const result = parseUserJwt(authHeader, secretKey);
-      if (!result) {
-        return reply.status(401).send({ error: 'missing_token' });
-      }
-      jwtClaims = await result;
-    } catch {
+      jwtClaims = await parseUserJwt(request.headers['authorization'], jwks);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'invalid_token';
+      if (msg === 'missing_token') return reply.status(401).send({ error: 'missing_token' });
       return reply.status(403).send({ error: 'invalid_token' });
     }
 
@@ -128,17 +119,12 @@ export async function notificationsRoute(
 
   // POST /notifications/read-all — mark all unread in channels as read
   fastify.post('/notifications/read-all', { schema: { tags: ['Notifications'], summary: 'Mark all notifications as read' } as object }, async (request, reply) => {
-    const authHeader = request.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.status(401).send({ error: 'missing_token' });
-    }
-
     let jwtClaims: { sub: string; locations?: string[] };
     try {
-      const result = parseUserJwt(authHeader, secretKey);
-      if (!result) return reply.status(401).send({ error: 'missing_token' });
-      jwtClaims = await result;
-    } catch {
+      jwtClaims = await parseUserJwt(request.headers['authorization'], jwks);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'invalid_token';
+      if (msg === 'missing_token') return reply.status(401).send({ error: 'missing_token' });
       return reply.status(403).send({ error: 'invalid_token' });
     }
 
@@ -171,17 +157,12 @@ export async function notificationsRoute(
 
   // POST /notifications/:id/read — mark a single notification as read
   fastify.post('/notifications/:id/read', { schema: { tags: ['Notifications'], summary: 'Mark notification as read' } as object }, async (request, reply) => {
-    const authHeader = request.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.status(401).send({ error: 'missing_token' });
-    }
-
     let jwtClaims: { sub: string; locations?: string[] };
     try {
-      const result = parseUserJwt(authHeader, secretKey);
-      if (!result) return reply.status(401).send({ error: 'missing_token' });
-      jwtClaims = await result;
-    } catch {
+      jwtClaims = await parseUserJwt(request.headers['authorization'], jwks);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'invalid_token';
+      if (msg === 'missing_token') return reply.status(401).send({ error: 'missing_token' });
       return reply.status(403).send({ error: 'invalid_token' });
     }
 

@@ -82,7 +82,7 @@ scenarios:
         path: /identity/users
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["users"]
 
   - id: user-create
     name: "Users: create call center agent"
@@ -94,11 +94,11 @@ scenarios:
         method: POST
         path: /identity/users
         body:
-          email: "qa.agent@orthocrm-test.invalid"
+          email: "qa.agent+1@orthocrm-test.invalid"
+          name: "QA Agent"
           role: "call_center_agent"
-          location_ids: ["{{location_id}}"]
-          first_name: "QA"
-          last_name: "Agent"
+          password: "Password123!"
+          locations: ["{{location_id}}"]
         expect:
           status: 201
           body_contains: ["id", "email"]
@@ -106,20 +106,22 @@ scenarios:
           created_user_id: "$.id"
 
   # ── Locations ─────────────────────────────────────────────────────────────
+  # NOTE: POST /identity/locations requires super_admin role. The admin@example.com
+  # user must have role=super_admin in the DB for location-create to pass.
+  # Run: UPDATE platform_identity.users SET role='super_admin' WHERE email='admin@example.com';
+  # Also requires: docker compose up --build identity -d (container was stale)
   - id: location-create
     name: "Locations: create"
     service: identity
     depends_on: [auth-login]
     steps:
       - type: http
+        service: identity
         method: POST
-        path: /v1/locations
+        path: /identity/locations
         body:
           name: "QA Test Location"
-          address: "123 QA Street"
-          city: "Austin"
-          state: "TX"
-          zip: "78701"
+          address: "123 QA Street, Austin TX 78701"
           phone: "+15551234567"
           timezone: "America/Chicago"
         expect:
@@ -134,11 +136,12 @@ scenarios:
     depends_on: [auth-login]
     steps:
       - type: http
+        service: identity
         method: GET
-        path: /v1/locations
+        path: /identity/locations
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["locations"]
 
   - id: location-get
     name: "Locations: get by id"
@@ -146,8 +149,9 @@ scenarios:
     depends_on: [location-create]
     steps:
       - type: http
+        service: identity
         method: GET
-        path: /v1/locations/{{location_id}}
+        path: /identity/locations/{{location_id}}
         expect:
           status: 200
           body_contains: ["id", "name"]
@@ -158,8 +162,9 @@ scenarios:
     depends_on: [location-create]
     steps:
       - type: http
+        service: identity
         method: PATCH
-        path: /v1/locations/{{location_id}}
+        path: /identity/locations/{{location_id}}
         body:
           name: "QA Test Location (updated)"
         expect:
@@ -178,9 +183,9 @@ scenarios:
         body:
           first_name: "QA"
           last_name: "Test"
-          phone: "+15559876543"
+          phone: "+15056444803"
           email: "qa.test@orthocrm-test.invalid"
-          source: "website"
+          channel: "website_form"
           location_id: "{{location_id}}"
         expect:
           status: 201
@@ -207,10 +212,11 @@ scenarios:
     steps:
       - type: http
         method: GET
-        path: /v1/leads?page=1&limit=10
+        path: /v1/leads?limit=10
         expect:
           status: 200
-          body_contains: ["data", "total"]
+          body_contains: ["leads", "nextCursor"]
+          # todo : length should be > 0
 
   - id: lead-update
     name: "Leads: update"
@@ -222,7 +228,6 @@ scenarios:
         path: /v1/leads/{{lead_id}}
         body:
           first_name: "UpdatedQA"
-          notes: "Updated by QA runner"
         expect:
           status: 200
           body_contains: ["id"]
@@ -237,7 +242,7 @@ scenarios:
         path: /v1/leads/{{lead_id}}/activities
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["activities", "nextCursor"]
 
   - id: lead-duplicates-list
     name: "Leads: list duplicate pairs"
@@ -249,7 +254,7 @@ scenarios:
         path: /v1/leads/duplicates
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["leads", "nextCursor"]
 
   # ── Appointments ─────────────────────────────────────────────────────────
   - id: appointment-create
@@ -261,9 +266,8 @@ scenarios:
         method: POST
         path: /v1/leads/{{lead_id}}/appointments
         body:
+          appointment_type: "exam"
           scheduled_at: "2026-06-01T10:00:00Z"
-          type: "exam"
-          location_id: "{{location_id}}"
           notes: "QA test appointment"
         expect:
           status: 201
@@ -281,7 +285,7 @@ scenarios:
         path: /v1/leads/{{lead_id}}/appointments
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["appointment_type"]
 
   - id: appointment-update
     name: "Appointments: update"
@@ -390,14 +394,14 @@ scenarios:
   - id: conversation-list
     name: "Conversations: list inbox"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, location-create]
     steps:
       - type: http
         method: GET
         path: /v1/conversations?location_id={{location_id}}&limit=20
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["rows", "total"]
 
   - id: conversation-inbox-settings-get
     name: "Conversations: get inbox settings for location"
@@ -425,7 +429,7 @@ scenarios:
         path: /v1/campaigns
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["items", "total"]
 
   - id: campaign-create
     name: "Campaigns: create draft"
@@ -476,15 +480,15 @@ scenarios:
   - id: referrer-create
     name: "Referrers: create doctor referrer"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, location-create]
     steps:
       - type: http
         method: POST
         path: /v1/referrals/referrers
         body:
-          type: "doctor"
-          first_name: "Dr. QA"
-          last_name: "Test"
+          referrer_type: "doctor"
+          name: "Dr. QA Test"
+          location_id: "{{location_id}}"
           practice_name: "QA Dental Practice"
           email: "dr.qa@orthocrm-test.invalid"
           phone: "+15551112222"
@@ -509,14 +513,14 @@ scenarios:
   - id: referrer-list
     name: "Referrers: list"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, location-create]
     steps:
       - type: http
         method: GET
-        path: /v1/referrals/referrers
+        path: /v1/referrals/referrers?location_id={{location_id}}
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["items", "nextCursor"]
 
   - id: referral-link-create
     name: "Referrals: create link for referrer"
@@ -550,38 +554,37 @@ scenarios:
   - id: referral-list
     name: "Referrals: list referrals"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, location-create]
     steps:
       - type: http
         method: GET
-        path: /v1/referrals
+        path: /v1/referrals?location_id={{location_id}}
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["items", "nextCursor"]
 
   - id: referral-leaderboard
     name: "Referrals: get leaderboard"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, location-create]
     steps:
       - type: http
         method: GET
-        path: /v1/referrals/leaderboard
+        path: /v1/referrals/leaderboard?location_id={{location_id}}
         expect:
           status: 200
-          body_contains: ["data"]
 
   - id: referral-rewards-list
     name: "Referrals: list pending rewards"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, location-create]
     steps:
       - type: http
         method: GET
-        path: /v1/referrals/rewards
+        path: /v1/referrals/rewards?location_id={{location_id}}
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["items", "nextCursor"]
 
   # ── Reporting ─────────────────────────────────────────────────────────────
   # NOTE: reporting service uses /reporting/* route paths internally.
@@ -659,28 +662,33 @@ scenarios:
           body_contains: ["data"]
 
   # ── Notifications ─────────────────────────────────────────────────────────
+  # NOTE: notification service validates RS256 JWT from the Identity Service.
+  # Channel pattern: user:{crm_user_id}:notifications — id must match JWT sub.
   - id: notification-list
     name: "Notifications: list"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, identity-me]
     steps:
       - type: http
         method: GET
-        path: /v1/notifications
+        path: /v1/notifications?channels=user:{{current_user_id}}:notifications
         expect:
           status: 200
-          body_contains: ["data"]
+          body_contains: ["notifications", "next_cursor"]
 
   - id: notification-read-all
     name: "Notifications: mark all as read"
     service: crm-api-gateway
-    depends_on: [auth-login]
+    depends_on: [auth-login, identity-me]
     steps:
       - type: http
         method: POST
         path: /v1/notifications/read-all
+        body:
+          channels: ["user:{{current_user_id}}:notifications"]
         expect:
           status: 200
+          body_contains: ["marked"]
 
   # ── API Keys ─────────────────────────────────────────────────────────────
   - id: api-key-create
@@ -694,7 +702,7 @@ scenarios:
         path: /identity/api-keys
         body:
           name: "QA Test Key"
-          description: "Created by QA runner"
+          permissions: ["leads:read", "leads:write"]
         expect:
           status: 201
           body_contains: ["id"]

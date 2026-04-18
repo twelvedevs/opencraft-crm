@@ -8,7 +8,7 @@ const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'
 
 async function reportsRoutes(app: FastifyInstance): Promise<void> {
   const handler: Parameters<typeof app.route>[0]['handler'] = async (request, reply) => {
-    const upstreamPath = request.url.replace(/^\/v1/, '');
+    const upstreamPath = request.url.replace(/^\/v1\/reports/, '/reporting');
     return reply.from(`${config.REPORTING_SERVICE_URL}${upstreamPath}`, {
       rewriteRequestHeaders: (_req, headers) => ({
         ...headers,

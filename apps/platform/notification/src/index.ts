@@ -88,7 +88,7 @@ if (repo && redis) {
   await app.register(notificationsRoute, {
     repo,
     redis,
-    jwtSecret: config.JWT_HMAC_SECRET,
+    jwksUrl: config.IDENTITY_JWKS_URL,
   });
 }
 

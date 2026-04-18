@@ -1,3 +1,9 @@
+---
+name: ortho-qa
+description: "Run the QA scenario pipeline against the live Ortho CRM stack and orchestrate the fix-retest loop. Use when testing the running stack, verifying a service after a fix, or generating Vitest integration tests from passing scenarios. Triggers on: run qa, test the stack, qa loop, run scenarios, fix and retest, ortho-qa."
+user-invocable: true
+---
+
 # QA Orchestrator
 
 Run the QA scenario pipeline and orchestrate the fix-retest loop.
