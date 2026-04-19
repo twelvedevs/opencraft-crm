@@ -103,6 +103,8 @@ All specs are **Approved** unless noted otherwise.
 | [2026-04-12-crm-cli.md](superpowers/plans/2026-04-12-crm-cli.md) | CRM CLI — 14-task plan (leads, pipeline, conversations) |
 | [2026-04-17-automated-qa-pipeline.md](superpowers/plans/2026-04-17-automated-qa-pipeline.md) | Automated QA Pipeline — 11-task plan (scenario runner, health checker, `/qa` orchestrator) |
 | [2026-04-18-list-response-standard.md](superpowers/plans/2026-04-18-list-response-standard.md) | List Response Standard — 13-task plan (shared types + 11 services + QA scenarios) |
+| [2026-04-19-sequence-ui-phase-1.md](superpowers/plans/2026-04-19-sequence-ui-phase-1.md) | @platform/sequence-ui Phase 1 — scaffold, types, API clients, hooks (9 tasks) |
+| [2026-04-19-sequence-ui-phase-2.md](superpowers/plans/2026-04-19-sequence-ui-phase-2.md) | @platform/sequence-ui Phase 2 — React components (pending) |
 
 ## Phase / Rollout Specs (`docs/superpowers/specs/`)
 
