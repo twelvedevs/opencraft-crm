@@ -1,0 +1,31 @@
+/* @platform/sequence-ui — interactive state styles
+   All layout/spacing/color are inline styles on components.
+   This file handles only what inline styles cannot: hover, active, transitions. */
+
+.sq-step-item:hover { background: #f0f4ff; }
+.sq-step-item.selected { border-color: #0066cc; background: #fff; }
+.sq-step-item.dragging { opacity: 0.5; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+
+.sq-drag-handle { cursor: grab; color: #adb5bd; user-select: none; }
+.sq-drag-handle:active { cursor: grabbing; }
+
+.sq-tab { cursor: pointer; border-bottom: 2px solid transparent; transition: border-color 0.15s, color 0.15s; }
+.sq-tab.active { border-bottom-color: #0066cc; color: #0066cc; font-weight: 600; }
+.sq-tab:hover:not(.active) { color: #495057; }
+
+.sq-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sq-template-item { padding: 8px 12px; border-radius: 4px; cursor: pointer; }
+.sq-template-item:hover { background: #e8f0fe; }
+.sq-template-item.selected { background: #cfe2ff; }
+
+.sq-enrollment-row { cursor: pointer; }
+.sq-enrollment-row:hover td { background: #f8f9fa; }
