@@ -32,6 +32,6 @@ export type {
   SequenceStatus,
 } from './types.js'
 
-// Components are added in Phase 2
-// export { SequenceList } from './components/SequenceList.js'
-// export { SequenceBuilder } from './components/SequenceBuilder.js'
+// Components
+export { SequenceList } from './components/SequenceList.js'
+export { SequenceBuilder } from './components/SequenceBuilder.js'
