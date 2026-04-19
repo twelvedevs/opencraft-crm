@@ -1,1 +1,7 @@
-// Global test setup — extend here as needed
+import { afterEach, beforeAll, afterAll } from 'vitest'
+import { cleanup } from '@testing-library/react'
+import { server } from './msw-server.js'
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+afterEach(() => { server.resetHandlers(); cleanup() })
+afterAll(() => server.close())
