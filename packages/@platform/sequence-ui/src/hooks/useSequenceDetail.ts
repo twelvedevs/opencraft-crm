@@ -10,6 +10,8 @@ export interface UseSequenceDetailResult {
   update: (patch: Partial<SequenceDraftPayload>) => void
   saveDraft: () => Promise<void>
   activate: () => Promise<void>
+  disable: () => Promise<void>
+  reload: () => void
 }
 
 export function useSequenceDetail(
@@ -75,5 +77,14 @@ export function useSequenceDetail(
     load()
   }, [client, sequenceId, load])
 
-  return { sequence, loading, error, isDirty, update, saveDraft, activate }
+  const disable = useCallback(async () => {
+    await client.disable(sequenceId)
+    load()
+  }, [client, sequenceId, load])
+
+  const reload = useCallback(() => {
+    load()
+  }, [load])
+
+  return { sequence, loading, error, isDirty, update, saveDraft, activate, disable, reload }
 }
