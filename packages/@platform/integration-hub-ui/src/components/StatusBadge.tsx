@@ -15,7 +15,7 @@ const CONFIG: Record<StatusBadgeStatus, { bg: string; color: string }> = {
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {
-  const { bg, color } = CONFIG[status] ?? CONFIG.error
+  const { bg, color } = CONFIG[status]
   return (
     <span style={{
       background: bg,

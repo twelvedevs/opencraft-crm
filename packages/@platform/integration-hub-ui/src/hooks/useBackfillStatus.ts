@@ -5,6 +5,12 @@ import type { BackfillJob } from '../types.js'
 export interface UseBackfillStatusResult {
   latestJob: BackfillJob | null
   triggering: boolean
+  /**
+   * Starts a backfill and stores the resulting job status. Rejections from the
+   * API propagate to the caller — unlike sibling hooks, errors are not stored
+   * in hook state because the action is user-initiated and the caller owns the
+   * button that triggered it. `triggering` always resets via `finally`.
+   */
   triggerBackfill: (from: string, to: string) => Promise<void>
 }
 

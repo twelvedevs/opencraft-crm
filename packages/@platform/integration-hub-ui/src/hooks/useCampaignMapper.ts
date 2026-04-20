@@ -28,9 +28,12 @@ export function useCampaignMapper(
       setMappings({})
       return
     }
+    // Guard against stale responses when accountId changes mid-flight.
+    let cancelled = false
     setLoading(true)
     setError(null)
     client.getCampaigns(accountId).then(data => {
+      if (cancelled) return
       setCampaigns(data)
       const m: Record<string, string> = {}
       for (const c of data) {
@@ -38,8 +41,12 @@ export function useCampaignMapper(
       }
       setMappings(m)
     }).catch(err => {
+      if (cancelled) return
       setError(err instanceof Error ? err.message : 'Failed to load campaigns')
-    }).finally(() => setLoading(false))
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => { cancelled = true }
   }, [client, accountId])
 
   const setMapping = useCallback((campaignId: string, locationId: string | null) => {

@@ -67,4 +67,18 @@ describe('useBackfillStatus', () => {
     expect(client.triggerBackfill).not.toHaveBeenCalled()
     expect(result.current.latestJob).toBeNull()
   })
+
+  it('propagates errors from the API and resets triggering', async () => {
+    const client = makeClient({
+      triggerBackfill: vi.fn().mockRejectedValue(new Error('Rate limited')),
+    })
+    const { result } = renderHook(() => useBackfillStatus(client, 'acc-1'))
+
+    await expect(
+      act(async () => { await result.current.triggerBackfill('2026-01-01', '2026-03-31') }),
+    ).rejects.toThrow('Rate limited')
+
+    expect(result.current.triggering).toBe(false)
+    expect(result.current.latestJob).toBeNull()
+  })
 })

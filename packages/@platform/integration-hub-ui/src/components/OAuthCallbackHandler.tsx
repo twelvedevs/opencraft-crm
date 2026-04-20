@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react'
 
+const MAX_MESSAGE_LENGTH = 200
+
+// `message` comes from an untrusted URL param. React escapes it when rendered,
+// but callers must not use it for navigation — sanitize here to keep length
+// bounded and strip C0/C1 control characters.
+function sanitizeMessage(raw: string): string {
+  return raw.replace(/[\x00-\x1F\x7F]/g, '').slice(0, MAX_MESSAGE_LENGTH)
+}
+
 export interface OAuthCallbackHandlerProps {
   onSuccess: () => void
   onError: (message: string) => void
@@ -12,7 +21,7 @@ export function OAuthCallbackHandler({ onSuccess, onError }: OAuthCallbackHandle
     const params = new URLSearchParams(window.location.search)
     const platform = params.get('platform') ?? ''
     const status = params.get('status')
-    const message = params.get('message') ?? 'Connection failed'
+    const message = sanitizeMessage(params.get('message') ?? 'Connection failed')
     const ok = status === 'success'
     const platformLabel = platform === 'facebook_ads' ? 'Meta' : 'Google Ads'
 
