@@ -11,7 +11,6 @@ export interface UseSequenceDetailResult {
   saveDraft: () => Promise<void>
   activate: () => Promise<void>
   disable: () => Promise<void>
-  reload: () => void
 }
 
 export function useSequenceDetail(
@@ -19,12 +18,12 @@ export function useSequenceDetail(
   sequenceId: string,
 ): UseSequenceDetailResult {
   const [sequence, setSequence] = useState<SequenceDetail | null>(null)
-  const [draft, setDraft] = useState<Partial<SequenceDraftPayload>>({})
+  const [isDirty, setIsDirty] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isDirty, setIsDirty] = useState(false)
-  const draftRef = useRef(draft)
-  draftRef.current = draft
+  // draftRef holds the in-progress patch synchronously so saveDraft() can read the
+  // most recent edits without waiting for React to flush a setState triggered by update().
+  const draftRef = useRef<Partial<SequenceDraftPayload>>({})
 
   const load = useCallback(() => {
     let cancelled = false
@@ -35,7 +34,7 @@ export function useSequenceDetail(
       .then((s) => {
         if (!cancelled) {
           setSequence(s)
-          setDraft({})
+          draftRef.current = {}
           setIsDirty(false)
           setLoading(false)
         }
@@ -54,7 +53,7 @@ export function useSequenceDetail(
   useEffect(() => load(), [load])
 
   const update = useCallback((patch: Partial<SequenceDraftPayload>) => {
-    setDraft((d) => ({ ...d, ...patch }))
+    draftRef.current = { ...draftRef.current, ...patch }
     setIsDirty(true)
   }, [])
 
@@ -82,9 +81,5 @@ export function useSequenceDetail(
     load()
   }, [client, sequenceId, load])
 
-  const reload = useCallback(() => {
-    load()
-  }, [load])
-
-  return { sequence, loading, error, isDirty, update, saveDraft, activate, disable, reload }
+  return { sequence, loading, error, isDirty, update, saveDraft, activate, disable }
 }
