@@ -6,7 +6,7 @@ import { SegmentEditor } from './SegmentEditor.js';
 
 type View = { mode: 'library' } | { mode: 'editor'; segmentId?: string };
 
-export function SegmentBuilder({ audienceEngineUrl, fields, onSelect, onFetchEntities }: SegmentBuilderProps) {
+export function SegmentBuilder({ audienceEngineUrl, fields, onSelect, onFetchEntities, canActivate }: SegmentBuilderProps) {
   const [view, setView] = useState<View>({ mode: 'library' });
   const [client] = useState(() => new AudienceApiClient(audienceEngineUrl));
 
@@ -35,6 +35,8 @@ export function SegmentBuilder({ audienceEngineUrl, fields, onSelect, onFetchEnt
         if (onSelect) onSelect(id);
       }}
       onCreateNew={() => setView({ mode: 'editor' })}
+      onEditSegment={(id) => setView({ mode: 'editor', segmentId: id })}
+      canActivate={canActivate}
     />
   );
 }

@@ -1,4 +1,4 @@
-import type { SegmentSummary } from './types.js';
+import type { SegmentSummary, SegmentStatus } from './types.js';
 
 export class AudienceApiClient {
   private baseUrl: string;
@@ -45,12 +45,26 @@ export class AudienceApiClient {
     if (!res.ok) throw new Error(`disableSegment failed: ${res.status}`);
   }
 
-  async getSegment(id: string): Promise<{ segment_id: string; name: string; filter: unknown | null; status: string }> {
+  async getSegment(id: string): Promise<{
+    segment_id: string;
+    name: string;
+    filter: unknown | null;
+    status: SegmentStatus;
+    active_version: number | null;
+    current_version: number;
+  }> {
     const res = await fetch(`${this.baseUrl}/audiences/segments/${id}`, {
       headers: { 'Content-Type': 'application/json' },
     });
     if (!res.ok) throw new Error(`getSegment failed: ${res.status}`);
-    return res.json() as Promise<{ segment_id: string; name: string; filter: unknown | null; status: string }>;
+    return res.json() as Promise<{
+      segment_id: string;
+      name: string;
+      filter: unknown | null;
+      status: SegmentStatus;
+      active_version: number | null;
+      current_version: number;
+    }>;
   }
 
   async updateSegment(id: string, filter: unknown): Promise<{ segment_id: string; version: number; status: string }> {

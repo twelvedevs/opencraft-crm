@@ -16,8 +16,9 @@ const STATUS_COLORS: Record<string, string> = {
   disabled: '#dc2626',
 };
 
-export function AudiencePreview({ audienceEngineUrl, segmentId }: AudiencePreviewProps) {
+export function AudiencePreview({ audienceEngineUrl, segmentId, onFetchEntities }: AudiencePreviewProps) {
   const [segment, setSegment] = useState<SegmentData | null>(null);
+  const [count, setCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,14 +28,25 @@ export function AudiencePreview({ audienceEngineUrl, segmentId }: AudiencePrevie
 
     setLoading(true);
     setError(null);
+    setCount(null);
 
     client
       .getSegment(segmentId)
-      .then((data) => {
-        if (!cancelled) {
-          setSegment(data);
-          setLoading(false);
+      .then(async (data) => {
+        if (cancelled) return;
+        setSegment(data);
+        if (onFetchEntities && data.filter) {
+          try {
+            const entities = await onFetchEntities(data.filter);
+            if (!cancelled) {
+              const result = await client.evaluateInline(data.filter, entities);
+              if (!cancelled) setCount(result.matched_count);
+            }
+          } catch {
+            // count unavailable — non-fatal
+          }
         }
+        if (!cancelled) setLoading(false);
       })
       .catch((err: Error) => {
         if (!cancelled) {
@@ -87,7 +99,7 @@ export function AudiencePreview({ audienceEngineUrl, segmentId }: AudiencePrevie
           <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
             {conditions.length} condition{conditions.length !== 1 ? 's' : ''}
           </div>
-          <ul style={{ margin: 0, paddingLeft: 20 }}>
+          <ul style={{ margin: 0, paddingLeft: 20, marginBottom: 12 }}>
             {conditions.map((text, i) => (
               <li key={i} style={{ fontSize: 14, marginBottom: 4 }}>
                 {text}
@@ -96,8 +108,14 @@ export function AudiencePreview({ audienceEngineUrl, segmentId }: AudiencePrevie
           </ul>
         </>
       ) : (
-        <div style={{ fontSize: 13, color: '#6b7280' }}>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
           No filter conditions available
+        </div>
+      )}
+
+      {count !== null && (
+        <div style={{ fontSize: 13, color: '#374151' }}>
+          Estimated audience: <strong>{count.toLocaleString()}</strong>
         </div>
       )}
     </div>
