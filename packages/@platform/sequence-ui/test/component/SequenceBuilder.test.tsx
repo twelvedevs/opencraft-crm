@@ -70,15 +70,20 @@ describe('SequenceBuilder', () => {
     expect(props.onBack).toHaveBeenCalled()
   })
 
-  it('Save Draft button calls PUT endpoint and clears dirty state', async () => {
-    let putCalled = false
-    server.use(http.put(`${NURTURING_URL}/sequences/seq-1`, () => { putCalled = true; return HttpResponse.json({}) }))
+  it('Save Draft button calls PUT endpoint and includes the pending edits in the body', async () => {
+    let putBody: unknown = null
+    server.use(
+      http.put(`${NURTURING_URL}/sequences/seq-1`, async ({ request }) => {
+        putBody = await request.json()
+        return HttpResponse.json({})
+      }),
+    )
     renderBuilder()
     await waitFor(() => screen.getByText('No Response Follow-up'))
-    // make a change to create dirty state by clicking Add Step
+    // The mock sequence has 2 steps; clicking Add Step should produce a 3-step payload.
     await userEvent.click(screen.getByRole('button', { name: '+ Add Step' }))
-    const saveBtn = screen.getByRole('button', { name: /save draft/i })
-    await userEvent.click(saveBtn)
-    await waitFor(() => expect(putCalled).toBe(true))
+    await userEvent.click(screen.getByRole('button', { name: /save draft/i }))
+    await waitFor(() => expect(putBody).not.toBeNull())
+    expect((putBody as { steps: unknown[] }).steps).toHaveLength(3)
   })
 })

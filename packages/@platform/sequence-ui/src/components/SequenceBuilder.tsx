@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import type { SequenceBuilderProps, ActiveHours, ABTest, StepDraft } from '../types.js'
+import React, { useState, useMemo } from 'react'
+import type { SequenceBuilderProps, ActiveHours, ABTest, SequenceDetail } from '../types.js'
 import { SequenceApiClient } from '../api/SequenceApiClient.js'
 import { GatewayApiClient } from '../api/GatewayApiClient.js'
 import { useSequenceDetail } from '../hooks/useSequenceDetail.js'
@@ -55,60 +55,39 @@ const dangerOutlineBtn: React.CSSProperties = {
   fontSize: 13,
 }
 
-type SequenceLoaded = NonNullable<ReturnType<typeof useSequenceDetail>['sequence']>
-
 interface InnerBuilderProps {
-  sequence: SequenceLoaded
+  sequence: SequenceDetail
   gatewayClient: GatewayApiClient
-  onDirty: () => void
-  onSaveData: (steps: StepDraft[], activeHours: ActiveHours | null, abTest: ABTest | null) => void
+  update: (patch: { steps?: SequenceDetail['steps']; active_hours?: ActiveHours | null; ab_test?: ABTest | null }) => void
+  onAbTestChange: (v: ABTest | null) => void
 }
 
 /**
  * Mounts once per sequence version (keyed by sequenceId + current_version in parent).
- * Owns local steps/activeHours/abTest state; propagates changes upward.
+ * Pushes every mutation through `update()` so the hook's draft is the single source of truth.
  */
-function InnerBuilder({ sequence, gatewayClient, onDirty, onSaveData }: InnerBuilderProps) {
+function InnerBuilder({ sequence, gatewayClient, update, onAbTestChange }: InnerBuilderProps) {
   const [activeHours, setActiveHours] = useState<ActiveHours | null>(sequence.active_hours)
   const [abTest, setAbTest] = useState<ABTest | null>(sequence.ab_test)
 
-  const handleStepsChange = useCallback(
-    (newSteps: StepDraft[]) => {
-      onDirty()
-      // abTest/activeHours captured via closure are stale here — use ref approach via effect below
-    },
-    [onDirty],
-  )
-
   const { steps, selectedStepId, selectStep, addStep, removeStep, updateStep, reorderSteps } =
-    useStepEditor(sequence.steps, handleStepsChange)
-
-  // Keep parent informed of latest pending save data whenever anything changes
-  useEffect(() => {
-    onSaveData(steps, activeHours, abTest)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [steps, activeHours, abTest])
+    useStepEditor(sequence.steps, (newSteps) => update({ steps: newSteps }))
 
   const handleActiveHoursChange = (v: ActiveHours | null) => {
     setActiveHours(v)
-    onDirty()
+    update({ active_hours: v })
   }
 
   const handleAbTestChange = (v: ABTest | null) => {
     setAbTest(v)
-    onDirty()
-  }
-
-  const handleAddStep = () => {
-    addStep()
-    onDirty()
+    update({ ab_test: v })
+    onAbTestChange(v)
   }
 
   const selectedStep = steps.find((s) => s.id === selectedStepId) ?? null
 
   return (
     <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-      {/* Left panel */}
       <div
         style={{
           width: 280,
@@ -122,7 +101,7 @@ function InnerBuilder({ sequence, gatewayClient, onDirty, onSaveData }: InnerBui
           steps={steps}
           selectedStepId={selectedStepId}
           onSelectStep={selectStep}
-          onAddStep={handleAddStep}
+          onAddStep={addStep}
           onReorder={reorderSteps}
         />
         <div style={{ padding: '0 12px 12px' }}>
@@ -131,20 +110,13 @@ function InnerBuilder({ sequence, gatewayClient, onDirty, onSaveData }: InnerBui
         </div>
       </div>
 
-      {/* Right panel */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {selectedStep ? (
           <StepEditor
             step={selectedStep}
             gatewayClient={gatewayClient}
-            onUpdate={(updated) => {
-              updateStep(updated.id, updated)
-              onDirty()
-            }}
-            onRemove={() => {
-              removeStep(selectedStep.id)
-              onDirty()
-            }}
+            onUpdate={(updated) => updateStep(updated.id, updated)}
+            onRemove={() => removeStep(selectedStep.id)}
           />
         ) : (
           <div style={{ padding: 24, color: '#6c757d', fontSize: 13 }}>
@@ -173,64 +145,77 @@ export function SequenceBuilder({
     [crmGatewayUrl, token],
   )
 
-  const {
-    sequence,
-    loading,
-    error,
-    isDirty: hookDirty,
-    update,
-    saveDraft,
-    activate,
-    disable,
-  } = useSequenceDetail(seqClient, sequenceId)
+  const { sequence, loading, error, isDirty, update, saveDraft, activate, disable } =
+    useSequenceDetail(seqClient, sequenceId)
 
   const [activeTab, setActiveTab] = useState<Tab>('builder')
-  const [localDirty, setLocalDirty] = useState(false)
-
-  // Pending save data accumulated from InnerBuilder
-  const [pendingSteps, setPendingSteps] = useState<StepDraft[]>([])
-  const [pendingActiveHours, setPendingActiveHours] = useState<ActiveHours | null>(null)
+  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(new Set(['builder']))
+  // Track A/B toggle within the current editing session so the A/B Results tab appears
+  // as soon as the user enables the test (before save). Reset on remount via builderKey.
   const [pendingAbTest, setPendingAbTest] = useState<ABTest | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  // Key remounts InnerBuilder when sequence reloads (after save/activate)
+  const selectTab = (tab: Tab) => {
+    setActiveTab(tab)
+    setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)))
+  }
+
   const builderKey = sequence
     ? `${sequence.sequence_id}-${sequence.current_version}`
     : 'loading'
 
-  const handleDirty = useCallback(() => {
-    setLocalDirty(true)
-  }, [])
-
-  const handleSaveData = useCallback(
-    (steps: StepDraft[], activeHours: ActiveHours | null, abTest: ABTest | null) => {
-      setPendingSteps(steps)
-      setPendingActiveHours(activeHours)
-      setPendingAbTest(abTest)
-    },
-    [],
-  )
-
   const handleSaveDraft = async () => {
-    update({ steps: pendingSteps, active_hours: pendingActiveHours, ab_test: pendingAbTest })
-    await saveDraft()
-    setLocalDirty(false)
+    setSaving(true)
+    setActionError(null)
+    try {
+      await saveDraft()
+      setPendingAbTest(null)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleActivate = async () => {
-    await activate()
-    setLocalDirty(false)
+    setSaving(true)
+    setActionError(null)
+    try {
+      await activate()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Activate failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleDisable = async () => {
-    await disable()
+    setSaving(true)
+    setActionError(null)
+    try {
+      await disable()
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Disable failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const canManage = userRole === 'marketing_manager' || userRole === 'super_admin'
-  const showSaveDraft = localDirty
-  const showActivate = canManage && sequence?.status === 'draft' && !localDirty && !hookDirty
+  const hasPendingNewVersion =
+    !!sequence && sequence.active_version !== sequence.current_version
+  const showSaveDraft = isDirty
+  // Activate is shown when a draft-or-new-version exists, the manager role has access, and
+  // there are no unsaved edits. A new version of an already-active sequence is activated
+  // when current_version !== active_version.
+  const showActivate =
+    !!sequence &&
+    canManage &&
+    !isDirty &&
+    (sequence.status === 'draft' || (sequence.status === 'active' && hasPendingNewVersion))
   const showDisable = canManage && sequence?.status === 'active'
 
-  // Show A/B Results tab when sequence has ab_test OR local pending abTest is set
   const showAbResults =
     sequence != null && (sequence.ab_test !== null || pendingAbTest !== null)
 
@@ -255,7 +240,6 @@ export function SequenceBuilder({
         fontFamily: 'system-ui, sans-serif',
       }}
     >
-      {/* Header */}
       <div
         style={{
           display: 'flex',
@@ -271,26 +255,28 @@ export function SequenceBuilder({
           Back
         </button>
         <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, flex: 1 }}>{sequence.name}</h2>
+        {actionError && (
+          <span style={{ color: '#721c24', fontSize: 13 }}>{actionError}</span>
+        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {showSaveDraft && (
-            <button style={primaryBtn} onClick={() => void handleSaveDraft()}>
-              Save Draft
+            <button style={primaryBtn} disabled={saving} onClick={() => void handleSaveDraft()}>
+              {saving ? 'Saving…' : 'Save Draft'}
             </button>
           )}
           {showActivate && (
-            <button style={primaryBtn} onClick={() => void handleActivate()}>
+            <button style={primaryBtn} disabled={saving} onClick={() => void handleActivate()}>
               Activate
             </button>
           )}
           {showDisable && (
-            <button style={dangerOutlineBtn} onClick={() => void handleDisable()}>
+            <button style={dangerOutlineBtn} disabled={saving} onClick={() => void handleDisable()}>
               Disable
             </button>
           )}
         </div>
       </div>
 
-      {/* Tabs */}
       <div
         style={{
           display: 'flex',
@@ -304,7 +290,7 @@ export function SequenceBuilder({
           role="tab"
           aria-selected={activeTab === 'builder'}
           style={tabBtn(activeTab === 'builder')}
-          onClick={() => setActiveTab('builder')}
+          onClick={() => selectTab('builder')}
         >
           Builder
         </button>
@@ -312,7 +298,7 @@ export function SequenceBuilder({
           role="tab"
           aria-selected={activeTab === 'enrollments'}
           style={tabBtn(activeTab === 'enrollments')}
-          onClick={() => setActiveTab('enrollments')}
+          onClick={() => selectTab('enrollments')}
         >
           Enrollments
         </button>
@@ -321,31 +307,36 @@ export function SequenceBuilder({
             role="tab"
             aria-selected={activeTab === 'ab_results'}
             style={tabBtn(activeTab === 'ab_results')}
-            onClick={() => setActiveTab('ab_results')}
+            onClick={() => selectTab('ab_results')}
           >
             A/B Results
           </button>
         )}
       </div>
 
-      {/* Tab content */}
-      <div
-        style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-      >
-        {activeTab === 'builder' && (
-          <InnerBuilder
-            key={builderKey}
-            sequence={sequence}
-            gatewayClient={gatewayClient}
-            onDirty={handleDirty}
-            onSaveData={handleSaveData}
-          />
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {/* Lazy-mount each tab's content on first visit, then keep mounted so state
+            persists across tab switches. `display:none` hides the inactive panel. */}
+        {visitedTabs.has('builder') && (
+          <div style={{ display: activeTab === 'builder' ? 'flex' : 'none', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+            <InnerBuilder
+              key={builderKey}
+              sequence={sequence}
+              gatewayClient={gatewayClient}
+              update={update}
+              onAbTestChange={setPendingAbTest}
+            />
+          </div>
         )}
-        {activeTab === 'enrollments' && (
-          <EnrollmentLog sequenceId={sequenceId} client={seqClient} />
+        {visitedTabs.has('enrollments') && (
+          <div style={{ display: activeTab === 'enrollments' ? 'flex' : 'none', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+            <EnrollmentLog sequenceId={sequenceId} client={seqClient} />
+          </div>
         )}
-        {activeTab === 'ab_results' && showAbResults && (
-          <ABResults sequenceId={sequenceId} client={seqClient} />
+        {visitedTabs.has('ab_results') && showAbResults && (
+          <div style={{ display: activeTab === 'ab_results' ? 'flex' : 'none', flex: 1, overflow: 'hidden', flexDirection: 'column' }}>
+            <ABResults sequenceId={sequenceId} client={seqClient} />
+          </div>
         )}
       </div>
     </div>

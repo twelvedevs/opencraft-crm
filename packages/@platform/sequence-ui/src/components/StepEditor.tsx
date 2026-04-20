@@ -14,7 +14,7 @@ const ACTION_TYPES = ['send_message', 'send_email', 'call_ai', 'emit_event'] as 
 function defaultAction(type: StepAction['type']): StepAction {
   if (type === 'send_message') return { type, params: { template_id: '', to_field: '', from_field: '', context: 'context', dedup_key: '' } }
   if (type === 'send_email') return { type, params: { template_id: '', to_field: '', from_field: '', context: 'context', dedup_key: '' } }
-  if (type === 'call_ai') return { type, params: { system_prompt: '', user_prompt: '', model: 'claude-haiku-4-5-20251001', auto_send: false } }
+  if (type === 'call_ai') return { type, params: { system_prompt: '', user_prompt: '', model: 'haiku', auto_send: false } }
   return { type: 'emit_event', params: { event_type: '', payload: {}, include_context: true } }
 }
 
@@ -30,10 +30,11 @@ export function StepEditor({ step, gatewayClient, onUpdate, onRemove }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerChannel, setPickerChannel] = useState<'sms' | 'email'>('sms')
 
-  // Sync local step from prop when the step identity changes (different step selected)
+  // Sync local step whenever the prop reference changes — covers both selection changes
+  // (different step.id) and content changes from parent (e.g. post-save reload).
   React.useEffect(() => {
     setLocalStep(step)
-  }, [step.id])
+  }, [step])
 
   const update = (updated: StepDraft) => {
     setLocalStep(updated)
