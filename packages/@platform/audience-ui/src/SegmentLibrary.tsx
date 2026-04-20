@@ -6,9 +6,11 @@ export interface SegmentLibraryProps {
   client: AudienceApiClient;
   onSelectSegment: (id: string) => void;
   onCreateNew: () => void;
+  onEditSegment?: (id: string) => void;
+  canActivate?: boolean;
 }
 
-export function SegmentLibrary({ client, onSelectSegment, onCreateNew }: SegmentLibraryProps) {
+export function SegmentLibrary({ client, onSelectSegment, onCreateNew, onEditSegment, canActivate = true }: SegmentLibraryProps) {
   const [segments, setSegments] = useState<SegmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,7 +131,10 @@ export function SegmentLibrary({ client, onSelectSegment, onCreateNew }: Segment
                 <td style={{ padding: '8px' }}>{formatDate(seg.updated_at)}</td>
                 <td style={{ padding: '8px' }}>
                   <button style={buttonStyle} onClick={() => onSelectSegment(seg.segment_id)}>Use</button>
-                  {seg.status === 'draft' && (
+                  {seg.status === 'draft' && onEditSegment && (
+                    <button style={buttonStyle} onClick={() => onEditSegment(seg.segment_id)}>Edit</button>
+                  )}
+                  {seg.status === 'draft' && canActivate && (
                     <button style={buttonStyle} onClick={() => void handleActivate(seg.segment_id)}>Activate</button>
                   )}
                   {seg.status === 'active' && (

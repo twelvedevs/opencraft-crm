@@ -20,6 +20,7 @@ export interface SegmentBuilderProps {
   fields: FieldDefinition[];
   onSelect?: (segmentId: string) => void;
   onFetchEntities?: (filter: unknown) => Promise<Record<string, unknown>[]>;
+  canActivate?: boolean;
 }
 
 export interface AudiencePreviewProps {
