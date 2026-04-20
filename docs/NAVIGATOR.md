@@ -48,6 +48,7 @@ All specs are **Approved** unless noted otherwise.
 | [analytics-service-updated-design.md](superpowers/specs/2026-04-02-analytics-service-updated-design.md) _(supersedes above)_ | [memories/analytics-service.md](memories/analytics-service.md) |
 | [integration-hub-design.md](superpowers/specs/2026-03-25-integration-hub-design.md) _(superseded)_ | [memories/integration-hub.md](memories/integration-hub.md) |
 | [integration-hub-updated-design.md](superpowers/specs/2026-04-02-integration-hub-updated-design.md) _(supersedes above)_ | [memories/integration-hub.md](memories/integration-hub.md) |
+| [integration-hub-ui-design.md](superpowers/specs/2026-04-20-integration-hub-ui-design.md) | [memories/integration-hub.md](memories/integration-hub.md) |
 | [media-service-design.md](superpowers/specs/2026-03-25-media-service-design.md) _(superseded)_ | [memories/media-service.md](memories/media-service.md) |
 | [media-service-updated-design.md](superpowers/specs/2026-04-03-media-service-updated-design.md) _(supersedes above)_ | [memories/media-service.md](memories/media-service.md) |
 | [identity-service-design.md](superpowers/specs/2026-03-25-identity-service-design.md) _(superseded)_ | [memories/identity-service.md](memories/identity-service.md) |
@@ -105,6 +106,7 @@ All specs are **Approved** unless noted otherwise.
 | [2026-04-18-list-response-standard.md](superpowers/plans/2026-04-18-list-response-standard.md) | List Response Standard — 13-task plan (shared types + 11 services + QA scenarios) |
 | [2026-04-19-sequence-ui-phase-1.md](superpowers/plans/2026-04-19-sequence-ui-phase-1.md) | @platform/sequence-ui Phase 1 — scaffold, types, API clients, hooks (9 tasks) |
 | [2026-04-19-sequence-ui-phase-2.md](superpowers/plans/2026-04-19-sequence-ui-phase-2.md) | @platform/sequence-ui Phase 2 — React components (pending) |
+| [2026-04-20-integration-hub-ui.md](superpowers/plans/2026-04-20-integration-hub-ui.md) | @platform/integration-hub-ui — settings page, OAuth callback, campaign mapper, backfill controls |
 
 ## Phase / Rollout Specs (`docs/superpowers/specs/`)
 
