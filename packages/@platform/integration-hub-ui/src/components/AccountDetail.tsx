@@ -56,7 +56,7 @@ export function AccountDetail({
         alignItems: 'center',
       }}>
         <div>
-          <span style={{ fontWeight: 600, marginRight: 8 }}>{platformLabel}</span>
+          <span style={{ fontWeight: 600, marginRight: 8 }}>{account.account_name ?? platformLabel}</span>
           <StatusBadge status={account.status} />
           <div style={{ color: '#888', fontSize: 11, marginTop: 2 }}>
             Account #{account.account_id}
