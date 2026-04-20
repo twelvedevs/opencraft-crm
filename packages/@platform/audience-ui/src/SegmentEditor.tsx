@@ -46,6 +46,7 @@ export function SegmentEditor({
   const [loading, setLoading] = useState(!!segmentId);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!segmentId) return;
@@ -68,18 +69,32 @@ export function SegmentEditor({
     if (!onFetchEntities) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
+    abortRef.current?.abort();
+
     timerRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
         const entities = await onFetchEntities(currentFilter);
+        if (controller.signal.aborted) return;
         const result = await client.evaluateInline(currentFilter, entities);
+        if (controller.signal.aborted) return;
         setPreviewCount(result.matched_count);
         setPreviewError(null);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setPreviewError(err instanceof Error ? err.message : 'Preview failed');
         setPreviewCount(null);
       }
     }, 500);
   };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const handleFilterChange = (updated: FilterNode) => {
     setFilter(updated);
