@@ -114,7 +114,7 @@ interface SequenceBuilderProps {
 Renders: page header (sequence name, status badge, Save Draft button, Activate button, Back link), three tabs (Builder / Enrollments / A/B Results), and the active tab content.
 
 - **Save Draft** is enabled when `isDirty === true`.
-- **Activate** is enabled when `isDirty === false` and `userRole` is `marketing_manager` or `super_admin`.
+- **Activate** is enabled when `isDirty === false`, `userRole` is `marketing_manager` or `super_admin`, and there is an activatable version — i.e. `status === 'draft'` (first activation) OR `status === 'active' && current_version !== active_version` (a new draft version of a live sequence is ready to roll out).
 - **Builder tab**: master-detail layout — `StepList` (left) + `StepEditor` (right) + `ActiveHoursConfig` + `ABConfig` below the split.
 - **Enrollments tab**: `EnrollmentLog` — lazy-initialized on first tab open.
 - **A/B Results tab**: `ABResults` — lazy-initialized on first tab open. The tab is not rendered in the tab bar at all when `sequence.ab_test === null` (not disabled — completely absent).
@@ -135,7 +135,7 @@ class SequenceApiClient {
   saveDraft(id: string, payload: SequenceDraftPayload): Promise<void>
   activate(id: string): Promise<void>
   disable(id: string): Promise<void>
-  listEnrollments(id: string, params: EnrollmentFilters): Promise<{ data: Enrollment[]; nextCursor?: string }>
+  listEnrollments(id: string, params: EnrollmentFilters & { cursor?: string; limit?: number }): Promise<{ data: Enrollment[]; nextCursor?: string }>
   getEnrollmentDetail(sequenceId: string, enrollmentId: string): Promise<EnrollmentDetail>
   getStats(id: string): Promise<SequenceStats>
 }
@@ -184,10 +184,11 @@ Loads on mount. `activate` and `disable` call the API then `refresh()`. No optim
   update: (patch: Partial<SequenceDraftPayload>) => void   // sets isDirty = true
   saveDraft: () => Promise<void>
   activate: () => Promise<void>
+  disable: () => Promise<void>
 }
 ```
 
-Holds the local editable copy of the sequence. `update(patch)` merges `patch` into local state and sets `isDirty = true`. `saveDraft()` serializes and calls `PUT /sequences/:id`, then clears `isDirty`.
+Holds the local editable copy of the sequence. `update(patch)` merges `patch` into an internal draft ref synchronously (so `saveDraft()` called on the same tick sees the latest edits) and sets `isDirty = true`. `saveDraft()` serializes `{ ...sequence, ...draft }` and calls `PUT /sequences/:id`, then reloads the sequence and clears `isDirty`. `activate()` / `disable()` call the corresponding `POST` endpoints and reload.
 
 ### 5.3 `useStepEditor(steps, onChange)`
 
@@ -205,7 +206,7 @@ Holds the local editable copy of the sequence. `update(patch)` merges `patch` in
 
 Pure local state — no API calls. Receives the sequence's `steps` array as initial state. Calls `onChange(newSteps)` on every mutation, which propagates to `useSequenceDetail.update({ steps })` and sets `isDirty`. `reorderSteps` takes the dnd-kit `DragEndEvent` and produces the new ordered array. `addStep` inserts a new step with defaults (`delay: { value: 24, unit: 'hours' }`, `action.type: 'send_message'`).
 
-Re-initialization after save: `SequenceBuilder` renders its inner content with `key={sequenceId}` so that a full remount resets hook state whenever the sequence changes. After `saveDraft()` resolves, `useSequenceDetail` re-fetches the sequence definition and the component re-initializes from the fresh data.
+Re-initialization after save: `SequenceBuilder` renders its inner content with `key={`${sequenceId}-${current_version}`}` so that a full remount resets hook state whenever the sequence *or the current version* changes. After `saveDraft()` resolves, `useSequenceDetail` re-fetches the sequence definition (with a bumped `current_version`) and the inner builder re-mounts to re-initialize from the fresh data.
 
 ### 5.4 `useEnrollments(baseUrl, token, sequenceId)`
 
@@ -382,7 +383,11 @@ No Playwright tests in this package — the CRM web app's E2E suite covers seque
     "@types/react-dom": "^18.0.0",
     "@types/node": "^22.0.0",
     "vitest": "^2.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "jsdom": "^24.0.0",
     "@testing-library/react": "^14.0.0",
+    "@testing-library/user-event": "^14.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
     "msw": "^2.0.0"
   },
   "scripts": {
