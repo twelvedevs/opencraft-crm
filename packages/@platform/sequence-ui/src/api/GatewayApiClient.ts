@@ -13,8 +13,10 @@ export class GatewayApiClient {
       },
     })
     if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText)
-      throw new ApiError(res.status, text)
+      const text = await res.text().catch(() => '')
+      const message =
+        text && text !== '{}' && text !== 'null' ? text : `Request failed with status ${res.status}`
+      throw new ApiError(res.status, message)
     }
     return res.json() as Promise<TemplateSummary[]>
   }

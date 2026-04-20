@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { SequenceApiClient } from '../api/SequenceApiClient.js'
 import { useSequenceList } from '../hooks/useSequenceList.js'
 import type { SequenceListProps } from '../types.js'
@@ -8,7 +8,10 @@ const th: React.CSSProperties = { textAlign: 'left', padding: '8px', fontWeight:
 const td: React.CSSProperties = { padding: '8px', fontSize: 13 }
 
 export function SequenceList({ nurturingEngineUrl, token, userRole, onEdit }: SequenceListProps) {
-  const [client] = useState(() => new SequenceApiClient(nurturingEngineUrl, token))
+  const client = useMemo(
+    () => new SequenceApiClient(nurturingEngineUrl, token),
+    [nurturingEngineUrl, token],
+  )
   const { sequences, loading, error, activate, disable } = useSequenceList(client)
   const [actionError, setActionError] = useState<string | null>(null)
 

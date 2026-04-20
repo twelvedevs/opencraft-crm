@@ -31,7 +31,8 @@ function SortableStep({ step, index, isSelected, onClick }: SortableStepProps) {
     transform: CSS.Transform.toString(transform),
     transition,
     background: '#fff',
-    border: `${isSelected ? 2 : 1}px solid ${isSelected ? '#0066cc' : '#dee2e6'}`,
+    // Selected/hover/dragging state styling lives in styles.css (.sq-step-item.selected, :hover, .dragging)
+    border: '1px solid #dee2e6',
     borderRadius: 6,
     padding: '10px 10px 10px 6px',
     marginBottom: 6,

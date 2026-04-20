@@ -2,7 +2,8 @@ import React from 'react'
 import type { CallAIParams } from '../../types.js'
 import { label, inputStyle } from '../utils.js'
 
-const MODELS = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6']
+// Short alias names per spec §6; the AI Service maps these to concrete model IDs.
+const MODELS = ['haiku', 'sonnet'] as const
 
 interface Props {
   params: CallAIParams
