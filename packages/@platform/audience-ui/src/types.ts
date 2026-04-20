@@ -26,4 +26,5 @@ export interface SegmentBuilderProps {
 export interface AudiencePreviewProps {
   audienceEngineUrl: string;
   segmentId: string;
+  onFetchEntities?: (filter: unknown) => Promise<Record<string, unknown>[]>;
 }
