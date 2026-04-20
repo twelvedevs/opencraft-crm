@@ -1,14 +1,14 @@
-- [ ] implement `@ortho/interpolator` , used by Automation Engine and Nurturing Engine
-- [ ] implement `@platform/sequence-ui` as part of Nurturing Engine
+- [x] implement `@ortho/interpolator` , used by Automation Engine and Nurturing Engine
+- [x] implement `@platform/sequence-ui` as part of Nurturing Engine
 - [ ] The Automation Engine's `unenroll_sequence` action is a new action type that requires amending the Automation Engine spec and implementation
     - this raised by prd-questions skill while working on Nurturing Engine
     - prd-questions-nurturing-engine.md
     - C. Partially — add the action type definition/interface only, defer the full worker implementation
 - [ ] Build `@platform/filter-engine` as part of Audience Engine, but migrate the Automation Engine in a follow-up
-- [ ] ### `@platform/audience-ui` React Component
+- [x] ### `@platform/audience-ui` React Component
 - [ ] update event-bus docs, find what other services require updates
-- [ ] Implement `@platform/integration-hub-ui`
+- [x] Implement `@platform/integration-hub-ui`
 - [ ] надо отдельно провалидировать все ивенты и все типы и пейлоуды на целостность всей конструкции
 - [ ] build map of inter-service communications, who talks to whom, data streams
-- [ ] implement Swagger for each service
+- [x] implement Swagger for each service
 
