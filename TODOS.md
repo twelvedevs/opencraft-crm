@@ -28,8 +28,8 @@
 
 
 - [x] 1)  Implement test scenarios for "RBAC & Access Control"      , ~20  cases (Фундамент безопасности)
-- [ ] 2)  Implement test scenarios for "Создание лидов & атрибуция" , ~19  cases (Корневая сущность)
-- [ ] 3)  Implement test scenarios for "New Patient Pipeline"       , ~25  cases (Core demo path)
+- [x] 2)  Implement test scenarios for "Создание лидов & атрибуция" , ~19  cases (Корневая сущность)
+- [x] 3)  Implement test scenarios for "New Patient Pipeline"       , ~25  cases (Core demo path)
 - [ ] 4)  Implement test scenarios for "Ortho2 CSV Import"          , ~18  cases (Единственный EHR-мост)
 - [ ] 5)  Implement test scenarios for "Nurture Sequences"          , ~16  cases (Главная автоматизация)
 - [ ] 6)  Implement test scenarios for "Shared Inbox"               , ~14  cases (Ежедневная операция)

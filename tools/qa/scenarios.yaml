@@ -38,4 +38,5 @@ include:
   - scenarios/reporting.yaml
   - scenarios/notifications.yaml
   - scenarios/lead-attribution.yaml
+  - scenarios/new-patient-pipeline.yaml
   - scenarios/rbac.yaml
