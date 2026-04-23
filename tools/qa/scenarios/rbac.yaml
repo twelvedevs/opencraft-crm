@@ -1,0 +1,609 @@
+# RBAC & Access Control — Priority #1 QA scenarios (~24 cases).
+#
+# Tests boundary conditions for all four CRM roles:
+#   call_center_agent, call_center_manager, marketing_staff, marketing_manager
+# Plus cross-role boundaries: unauthenticated (401), invalid JWT (401),
+# privilege escalation (403).
+#
+# Setup creates isolated test users (qa.rbac.*@orthocrm-test.invalid) and a
+# second location so cross-location isolation can be verified without touching
+# the main QA dataset.
+#
+# auth_token field: names the context variable holding the Bearer token for
+# that step. Set to a non-existent key (e.g. _no_auth) to send no auth header.
+#
+# Known implementation gaps revealed by this suite (tests will FAIL until fixed):
+#   - marketing_staff can PATCH leads (service has no global role restriction)
+#   - marketing_staff can access conversation inbox (empty locations = all-access)
+#   - marketing_staff can trigger campaign send-now (campaign service has no RBAC)
+#   - call_center_agent can POST /sequences (nurturing service has no role check on create)
+#
+# NOTE: Nurturing sequence RBAC tested only for activate/disable (role-restricted
+# endpoints). The POST /sequences endpoint currently requires only authentication.
+
+include:
+  - pipeline.yaml
+  - campaigns.yaml
+
+scenarios:
+
+  # ─── Setup ───────────────────────────────────────────────────────────────
+  # Create a second location and one user per role so each boundary test can
+  # obtain a scoped token without modifying the shared admin context.
+
+  - id: rbac-setup-location-b
+    name: "RBAC Setup: create Location B"
+    service: identity
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/locations
+        body:
+          name: "RBAC Test Location B"
+          address: "456 RBAC Ave, Austin TX 78702"
+          phone: "+15559876543"
+          timezone: "America/Chicago"
+        expect:
+          status: 201
+          body_contains: ["id", "name"]
+        extract:
+          rbac_location_b_id: "$.id"
+
+  - id: rbac-setup-users
+    name: "RBAC Setup: create one user per role"
+    service: identity
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/users
+        body:
+          email: "qa.rbac.agent@orthocrm-test.invalid"
+          name: "RBAC Agent"
+          role: "call_center_agent"
+          password: "Rbac1234!"
+          locations: ["{{location_id}}"]
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          rbac_agent_user_id: "$.id"
+
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/users
+        body:
+          email: "qa.rbac.ccmgr@orthocrm-test.invalid"
+          name: "RBAC CC Manager"
+          role: "call_center_manager"
+          password: "Rbac1234!"
+          locations: ["{{location_id}}"]
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          rbac_ccmgr_user_id: "$.id"
+
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/users
+        body:
+          email: "qa.rbac.staff@orthocrm-test.invalid"
+          name: "RBAC Marketing Staff"
+          role: "marketing_staff"
+          password: "Rbac1234!"
+          locations: []
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          rbac_staff_user_id: "$.id"
+
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/users
+        body:
+          email: "qa.rbac.mktmgr@orthocrm-test.invalid"
+          name: "RBAC Marketing Manager"
+          role: "marketing_manager"
+          password: "Rbac1234!"
+          locations: []
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          rbac_mktmgr_user_id: "$.id"
+
+  - id: rbac-setup-lead-b
+    name: "RBAC Setup: create lead in Location B (admin)"
+    service: crm-api-gateway
+    depends_on: [auth-login, rbac-setup-location-b]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "RBAC"
+          last_name: "LeadB"
+          phone: "+15557770001"
+          email: "rbac.leadb@orthocrm-test.invalid"
+          channel: "website_form"
+          location_id: "{{rbac_location_b_id}}"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          rbac_lead_b_id: "$.id"
+
+  # ─── Call Center Agent — auth ─────────────────────────────────────────────
+
+  - id: rbac-auth-agent
+    name: "RBAC: login as call_center_agent → agent_token"
+    service: identity
+    depends_on: [rbac-setup-users]
+    steps:
+      - type: http
+        service: supabase-auth
+        method: POST
+        path: /auth/v1/token?grant_type=password
+        body:
+          email: "qa.rbac.agent@orthocrm-test.invalid"
+          password: "Rbac1234!"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          rbac_agent_provider_token: "$.access_token"
+
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/session
+        body:
+          provider_token: "{{rbac_agent_provider_token}}"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          agent_token: "$.access_token"
+
+  # ─── Call Center Agent — boundary tests ──────────────────────────────────
+
+  - id: rbac-agent-reads-own-location
+    name: "RBAC Agent: read lead from own location → 200"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-agent, lead-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads/{{lead_id}}
+        auth_token: agent_token
+        expect:
+          status: 200
+          body_contains: ["id"]
+
+  - id: rbac-agent-cross-location-lead
+    name: "RBAC Agent: read lead from different location → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-agent, rbac-setup-lead-b]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads/{{rbac_lead_b_id}}
+        auth_token: agent_token
+        expect:
+          status: 403
+
+  - id: rbac-agent-no-bulk-sms
+    name: "RBAC Agent: bulk SMS → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-agent, lead-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/conversations/bulk-sends
+        auth_token: agent_token
+        body:
+          segment: {}
+          body: "RBAC agent bulk attempt"
+          location_id: "{{location_id}}"
+        expect:
+          status: 403
+
+  - id: rbac-agent-no-import
+    name: "RBAC Agent: CSV import → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-agent, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/imports
+        auth_token: agent_token
+        body:
+          location_id: "{{location_id}}"
+          import_type: "active_patients"
+        expect:
+          status: 403
+
+  - id: rbac-agent-cross-location-analytics
+    name: "RBAC Agent: analytics for Location B → 403 or filtered"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-agent, rbac-setup-location-b]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/reports/dashboard?location_id={{rbac_location_b_id}}
+        auth_token: agent_token
+        expect:
+          status: 403
+
+  # ─── Call Center Manager — auth ───────────────────────────────────────────
+
+  - id: rbac-auth-ccmgr
+    name: "RBAC: login as call_center_manager → ccmgr_token"
+    service: identity
+    depends_on: [rbac-setup-users]
+    steps:
+      - type: http
+        service: supabase-auth
+        method: POST
+        path: /auth/v1/token?grant_type=password
+        body:
+          email: "qa.rbac.ccmgr@orthocrm-test.invalid"
+          password: "Rbac1234!"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          rbac_ccmgr_provider_token: "$.access_token"
+
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/session
+        body:
+          provider_token: "{{rbac_ccmgr_provider_token}}"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          ccmgr_token: "$.access_token"
+
+  # ─── Call Center Manager — boundary tests ────────────────────────────────
+
+  - id: rbac-ccmgr-sees-own-location
+    name: "RBAC CC Manager: list leads for own location → 200"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-ccmgr, lead-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads?location_id={{location_id}}&limit=5
+        auth_token: ccmgr_token
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: rbac-ccmgr-bulk-sms-own-location
+    name: "RBAC CC Manager: bulk SMS for own location → 202"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-ccmgr, lead-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/conversations/bulk-sends
+        auth_token: ccmgr_token
+        body:
+          segment: {}
+          body: "RBAC manager bulk test"
+          location_id: "{{location_id}}"
+        expect:
+          status: 202
+          body_contains: ["job_id"]
+
+  - id: rbac-ccmgr-no-bulk-sms-cross-location
+    name: "RBAC CC Manager: bulk SMS for Location B → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-ccmgr, rbac-setup-location-b]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/conversations/bulk-sends
+        auth_token: ccmgr_token
+        body:
+          segment: {}
+          body: "Cross-location bulk attempt"
+          location_id: "{{rbac_location_b_id}}"
+        expect:
+          status: 403
+
+  - id: rbac-ccmgr-no-activate-nurture
+    name: "RBAC CC Manager: activate nurture sequence → 403"
+    service: nurturing
+    depends_on: [rbac-auth-ccmgr, auth-login]
+    steps:
+      # Create a sequence as admin first so we have an ID to try activating.
+      - type: http
+        service: nurturing
+        method: POST
+        path: /sequences
+        body:
+          name: "RBAC Mgr Publish Test"
+          trigger_event: "lead_created"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          rbac_test_seq_id: "$.id"
+
+      # CC Manager tries to activate — only marketing_manager is permitted.
+      - type: http
+        service: nurturing
+        method: POST
+        path: /sequences/{{rbac_test_seq_id}}/activate
+        auth_token: ccmgr_token
+        body: {}
+        expect:
+          status: 403
+
+  # ─── Marketing Staff — auth ───────────────────────────────────────────────
+
+  - id: rbac-auth-staff
+    name: "RBAC: login as marketing_staff → staff_token"
+    service: identity
+    depends_on: [rbac-setup-users]
+    steps:
+      - type: http
+        service: supabase-auth
+        method: POST
+        path: /auth/v1/token?grant_type=password
+        body:
+          email: "qa.rbac.staff@orthocrm-test.invalid"
+          password: "Rbac1234!"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          rbac_staff_provider_token: "$.access_token"
+
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/session
+        body:
+          provider_token: "{{rbac_staff_provider_token}}"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          staff_token: "$.access_token"
+
+  # ─── Marketing Staff — boundary tests ────────────────────────────────────
+
+  - id: rbac-staff-reads-leads
+    name: "RBAC Marketing Staff: list leads (read-only) → 200"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-staff]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads?limit=5
+        auth_token: staff_token
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: rbac-staff-no-edit-lead
+    name: "RBAC Marketing Staff: edit lead → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-staff, lead-create]
+    steps:
+      - type: http
+        method: PATCH
+        path: /v1/leads/{{lead_id}}
+        auth_token: staff_token
+        body:
+          first_name: "UnauthorizedEdit"
+        expect:
+          status: 403
+
+  - id: rbac-staff-no-pipeline-transition
+    name: "RBAC Marketing Staff: pipeline stage transition → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-staff, pipeline-enroll]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{membership_id}}/transition
+        auth_token: staff_token
+        body:
+          stage: "contacted"
+          reason: "rbac_test"
+          override: false
+        expect:
+          status: 403
+
+  - id: rbac-staff-no-bulk-sms
+    name: "RBAC Marketing Staff: bulk SMS → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-staff, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/conversations/bulk-sends
+        auth_token: staff_token
+        body:
+          segment: {}
+          body: "Unauthorized SMS"
+          location_id: "{{location_id}}"
+        expect:
+          status: 403
+
+  - id: rbac-staff-no-publish-campaign
+    name: "RBAC Marketing Staff: send campaign → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-staff, campaign-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/campaigns/{{campaign_id}}/send-now
+        auth_token: staff_token
+        body: {}
+        expect:
+          status: 403
+
+  - id: rbac-staff-no-conversation-inbox
+    name: "RBAC Marketing Staff: access conversation inbox → 403"
+    service: crm-api-gateway
+    depends_on: [rbac-auth-staff, location-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/conversations?location_id={{location_id}}&limit=5
+        auth_token: staff_token
+        expect:
+          status: 403
+
+  # ─── Marketing Manager — auth ─────────────────────────────────────────────
+
+  - id: rbac-auth-mktmgr
+    name: "RBAC: login as marketing_manager → mktmgr_token"
+    service: identity
+    depends_on: [rbac-setup-users]
+    steps:
+      - type: http
+        service: supabase-auth
+        method: POST
+        path: /auth/v1/token?grant_type=password
+        body:
+          email: "qa.rbac.mktmgr@orthocrm-test.invalid"
+          password: "Rbac1234!"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          rbac_mktmgr_provider_token: "$.access_token"
+
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/session
+        body:
+          provider_token: "{{rbac_mktmgr_provider_token}}"
+        expect:
+          status: 200
+          body_contains: ["access_token"]
+        extract:
+          mktmgr_token: "$.access_token"
+
+  # ─── Marketing Manager — boundary tests (allowed actions) ────────────────
+
+  - id: rbac-mktmgr-activates-sequence
+    name: "RBAC Marketing Manager: activate nurture sequence → 200"
+    service: nurturing
+    depends_on: [rbac-auth-mktmgr, rbac-ccmgr-no-activate-nurture]
+    steps:
+      - type: http
+        service: nurturing
+        method: POST
+        path: /sequences/{{rbac_test_seq_id}}/activate
+        auth_token: mktmgr_token
+        body: {}
+        expect:
+          status: 200
+          body_contains: ["id"]
+
+  - id: rbac-mktmgr-creates-user
+    name: "RBAC Marketing Manager: create staff account → 201"
+    service: identity
+    depends_on: [rbac-auth-mktmgr]
+    steps:
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/users
+        auth_token: mktmgr_token
+        body:
+          email: "qa.rbac.newstaff@orthocrm-test.invalid"
+          name: "RBAC New Staff"
+          role: "marketing_staff"
+          password: "Rbac1234!"
+          locations: []
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          rbac_new_staff_id: "$.id"
+
+  - id: rbac-mktmgr-creates-api-key
+    name: "RBAC Marketing Manager: generate API key → 201"
+    service: identity
+    depends_on: [rbac-auth-mktmgr]
+    steps:
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/api-keys
+        auth_token: mktmgr_token
+        body:
+          name: "RBAC Manager Test Key"
+          permissions: ["leads:read"]
+        expect:
+          status: 201
+          body_contains: ["id"]
+
+  # ─── Cross-role boundary ──────────────────────────────────────────────────
+
+  - id: rbac-cross-no-auth
+    name: "RBAC Cross: unauthenticated request → 401"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads?limit=1
+        auth_token: _no_auth
+        expect:
+          status: 401
+
+  - id: rbac-cross-invalid-jwt
+    name: "RBAC Cross: invalid JWT signature → 401"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      # Store a syntactically valid-looking but cryptographically invalid JWT.
+      - type: cli
+        command: "printf '{\"rbac_bad_jwt\": \"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImZha2Uta2lkIn0.eyJzdWIiOiJ0ZXN0Iiwicm9sZSI6ImNhbGxfY2VudGVyX2FnZW50IiwibG9jYXRpb25zIjpbXX0.INVALIDSIGNATURE\"}'"
+        expect:
+          exit_code: 0
+        extract:
+          rbac_bad_jwt: "$.rbac_bad_jwt"
+
+      - type: http
+        method: GET
+        path: /v1/leads?limit=1
+        auth_token: rbac_bad_jwt
+        expect:
+          status: 401
+
+  - id: rbac-cross-privilege-escalation
+    name: "RBAC Cross: agent changes own role to marketing_manager → 403"
+    service: identity
+    depends_on: [rbac-auth-agent, rbac-setup-users]
+    steps:
+      - type: http
+        service: identity
+        method: PUT
+        path: /identity/users/{{rbac_agent_user_id}}
+        auth_token: agent_token
+        body:
+          role: "marketing_manager"
+        expect:
+          status: 403

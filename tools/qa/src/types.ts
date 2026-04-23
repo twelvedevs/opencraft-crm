@@ -23,6 +23,7 @@ export interface HttpStep {
   body?: Record<string, unknown>
   expect: StepExpect
   extract?: Record<string, string>  // varName → JSONPath (e.g. "$.id")
+  auth_token?: string     // context variable name holding the Bearer token (default: 'token'); set to a non-existent key to send no auth header
 }
 
 export interface CliStep {
