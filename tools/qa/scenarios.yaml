@@ -37,4 +37,5 @@ include:
   - scenarios/referrals.yaml
   - scenarios/reporting.yaml
   - scenarios/notifications.yaml
+  - scenarios/lead-attribution.yaml
   - scenarios/rbac.yaml
