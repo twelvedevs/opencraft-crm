@@ -43,7 +43,8 @@ export interface Scenario {
 }
 
 export interface ScenariosFile {
-  scenarios: Scenario[]
+  include?: string[]
+  scenarios?: Scenario[]
 }
 
 export interface StepResult {

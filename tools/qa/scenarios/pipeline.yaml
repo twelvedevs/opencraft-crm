@@ -1,0 +1,92 @@
+# Pipeline Engine — enroll leads, transition stages, inspect history.
+# NOTE: the old pipeline-lead-state scenario used GET /v1/pipeline/leads/:id
+# which does not exist. Replaced with GET /v1/pipeline/memberships?lead_id=...
+
+include:
+  - leads.yaml
+
+scenarios:
+
+  - id: pipeline-lead-memberships
+    name: "Pipeline: list memberships for lead"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/pipeline/memberships?lead_id={{lead_id}}
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: pipeline-enroll
+    name: "Pipeline: enroll lead in New Patient pipeline"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships
+        body:
+          lead_id: "{{lead_id}}"
+          location_id: "{{location_id}}"
+          pipeline: "new_patient"
+          stage: "new_lead"
+          reason: "manual"
+        expect:
+          status: 201
+          body_contains: ["id", "stage"]
+        extract:
+          membership_id: "$.id"
+
+  - id: pipeline-membership-get
+    name: "Pipeline: get membership by id"
+    service: crm-api-gateway
+    depends_on: [pipeline-enroll]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/pipeline/memberships/{{membership_id}}
+        expect:
+          status: 200
+          body_contains: ["id", "stage", "pipeline"]
+
+  - id: pipeline-memberships-list
+    name: "Pipeline: list memberships"
+    service: crm-api-gateway
+    depends_on: [pipeline-enroll]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/pipeline/memberships?location_id={{location_id}}&limit=20
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: pipeline-transition
+    name: "Pipeline: transition lead to Contacted stage"
+    service: crm-api-gateway
+    depends_on: [pipeline-enroll]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{membership_id}}/transition
+        body:
+          stage: "contacted"
+          reason: "manual"
+          override: false
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-history
+    name: "Pipeline: get stage history"
+    service: crm-api-gateway
+    depends_on: [pipeline-transition]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/pipeline/memberships/{{membership_id}}/history
+        expect:
+          status: 200
+          body_contains: ["data"]

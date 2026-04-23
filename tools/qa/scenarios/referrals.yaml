@@ -1,0 +1,116 @@
+# Referrals — doctor and patient referrers, referral links, leaderboard, rewards.
+
+include:
+  - auth.yaml
+  - identity.yaml
+
+scenarios:
+
+  - id: referrer-create
+    name: "Referrers: create doctor referrer"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/referrals/referrers
+        body:
+          referrer_type: "doctor"
+          name: "Dr. QA Test"
+          location_id: "{{location_id}}"
+          practice_name: "QA Dental Practice"
+          email: "dr.qa@orthocrm-test.invalid"
+          phone: "+15551112222"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          referrer_id: "$.id"
+
+  - id: referrer-get
+    name: "Referrers: get by id"
+    service: crm-api-gateway
+    depends_on: [referrer-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/referrals/referrers/{{referrer_id}}
+        expect:
+          status: 200
+          body_contains: ["id", "type"]
+
+  - id: referrer-list
+    name: "Referrers: list"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/referrals/referrers?location_id={{location_id}}
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]
+
+  - id: referral-link-create
+    name: "Referrals: create link for referrer"
+    service: crm-api-gateway
+    depends_on: [referrer-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/referrals/referrers/{{referrer_id}}/links
+        body:
+          campaign_tag: "qa-test"
+        expect:
+          status: 201
+          body_contains: ["id", "code"]
+        extract:
+          referral_link_id: "$.id"
+          referral_code: "$.code"
+
+  - id: referral-link-list
+    name: "Referrals: list links for referrer"
+    service: crm-api-gateway
+    depends_on: [referral-link-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/referrals/referrers/{{referrer_id}}/links
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: referral-list
+    name: "Referrals: list referrals"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/referrals?location_id={{location_id}}
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]
+
+  - id: referral-leaderboard
+    name: "Referrals: get leaderboard"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/referrals/leaderboard?location_id={{location_id}}
+        expect:
+          status: 200
+
+  - id: referral-rewards-list
+    name: "Referrals: list pending rewards"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/referrals/rewards?location_id={{location_id}}
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]

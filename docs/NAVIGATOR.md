@@ -86,6 +86,7 @@ All specs are **Approved** unless noted otherwise.
 | Guide | Description |
 |-------|-------------|
 | [local-dev.md](development/local-dev.md) | Local development setup with docker-compose |
+| [testing/qa-scenarios.md](development/testing/qa-scenarios.md) | QA scenario catalogue — ~170+ REST API test cases across 16 functional categories |
 
 ## Developer Tools (`tools/`)
 

@@ -135,6 +135,16 @@ Ralph picks the highest-priority story where `passes: false`, implements it, run
 
 The `run.sh` in the project root shows the pattern used for phased implementations (multiple `claude -p` invocations per phase).
 
+## QA Testing
+
+End-to-end QA scenarios (REST API level, ~170+ cases across 16 functional categories) are documented in:
+
+- `docs/development/testing/qa-scenarios.md` — authoritative scenario catalogue
+
+Execution tooling lives under `tools/qa/` — see README for the scenario runner + `/qa` Claude skill usage.
+
+**Test priority order** (highest first): RBAC/Access Control → Lead Creation & Attribution → New Patient Pipeline → Ortho2 CSV Import → Nurture Sequences → Shared Inbox → External Integration Failures → Analytics & Attribution → Deduplication → In Treatment Pipeline → Audit & Concurrency → In Retention → AI Communications → Email Campaigns → Referral Tracking → Multi-location
+
 ## Developer Tools
 
 Standalone utilities live under `tools/` (not part of the service monorepo — each has its own `package.json`):

@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, symlinkSync, lstatSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, symlinkSync, lstatSync } from 'fs'
 import { resolve, join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import yaml from 'js-yaml'
 import { topologicalSort } from './src/resolver.js'
+import { loadScenarios } from './src/loader.js'
 import { extractByPath, checkExpectation } from './src/utils.js'
 import { executeHttpStep, executeCliStep, collectDockerLogs } from './src/executors.js'
 import type {
-  Scenario, ScenariosFile, ServicesFile, ServiceConfig,
-  RunResult, ScenarioResult, StepResult, RunContext, Step,
+  ServicesFile, ServiceConfig,
+  RunResult, ScenarioResult, StepResult, RunContext, Step, Scenario,
 } from './src/types.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -120,13 +121,18 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const scenarioIndex = args.indexOf('--scenario')
   const scenarioFilter = scenarioIndex !== -1 ? args[scenarioIndex + 1] : undefined
+  const fileIndex = args.indexOf('--file')
+  const fileFilter = fileIndex !== -1 ? args[fileIndex + 1] : undefined
 
   const qaDir = __dirname
-  const scenariosFile = loadYaml<ScenariosFile>(join(qaDir, 'scenarios.yaml'))
+  const scenariosPath = fileFilter
+    ? resolve(qaDir, fileFilter)
+    : join(qaDir, 'scenarios.yaml')
+
   const servicesFile = loadYaml<ServicesFile>(join(qaDir, 'services.yaml'))
   const { base_url, services } = servicesFile
 
-  let scenarios = topologicalSort(scenariosFile.scenarios)
+  let scenarios = topologicalSort(loadScenarios(scenariosPath))
 
   if (scenarioFilter) {
     scenarios = scenarios.filter(s => s.id === scenarioFilter)

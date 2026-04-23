@@ -1,0 +1,80 @@
+# Reporting — executive dashboard, channel/coordinator/location metrics, report runs.
+# NOTE: reporting service uses /reporting/* route paths internally.
+# Gateway strips /v1 from /v1/reports/reporting/* → /reports/reporting/* upstream.
+# This does NOT match /reporting/* on the reporting service.
+# These scenarios will fail with 404 until either:
+#   a) Reporting service routes are renamed /reports/* → /reporting/*
+#   b) Gateway rewrite: upstreamPath.replace(/^\/reports/, '/reporting')
+
+include:
+  - auth.yaml
+
+scenarios:
+
+  - id: reporting-dashboard
+    name: "Reporting: executive dashboard"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/reports/reporting/dashboard
+        expect:
+          status: 200
+
+  - id: reporting-channel-performance
+    name: "Reporting: channel performance metrics"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/reports/reporting/metrics/channel-performance
+        expect:
+          status: 200
+
+  - id: reporting-coordinator-performance
+    name: "Reporting: coordinator performance metrics"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/reports/reporting/metrics/coordinator-performance
+        expect:
+          status: 200
+
+  - id: reporting-location-comparison
+    name: "Reporting: location comparison metrics"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/reports/reporting/metrics/location-comparison
+        expect:
+          status: 200
+
+  - id: reporting-report-configs-list
+    name: "Reporting: list report configs"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/reports/reporting/report-configs
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: reporting-runs-list
+    name: "Reporting: list report runs"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/reports/reporting/runs
+        expect:
+          status: 200
+          body_contains: ["data"]

@@ -1,0 +1,35 @@
+# Notifications — list and mark-read via SSE notification service.
+# NOTE: notification service validates RS256 JWT from the Identity Service.
+# Channel pattern: user:{crm_user_id}:notifications — id must match JWT sub.
+
+include:
+  - auth.yaml
+  - identity.yaml
+
+scenarios:
+
+  - id: notification-list
+    name: "Notifications: list"
+    service: crm-api-gateway
+    depends_on: [auth-login, identity-me]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/notifications?channels=user:{{current_user_id}}:notifications
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]
+
+  - id: notification-read-all
+    name: "Notifications: mark all as read"
+    service: crm-api-gateway
+    depends_on: [auth-login, identity-me]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/notifications/read-all
+        body:
+          channels: ["user:{{current_user_id}}:notifications"]
+        expect:
+          status: 200
+          body_contains: ["marked"]
