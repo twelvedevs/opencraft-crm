@@ -1,0 +1,571 @@
+# New Patient Pipeline — Priority #3 QA scenarios (~24 cases).
+#
+# Covers: full 7-stage happy path (new_lead → contract_signed), stage history,
+# contract_signed → in_treatment conversion, lost + reactivation, valid rollback
+# (exam_scheduled → contacted), duplicate enrollment guard, override (manager vs
+# agent, and missing triggered_by), non-existent membership 404, closed-membership
+# 409, and invalid convert (wrong source stage → 422).
+#
+# Uses dedicated phone numbers (+15550030001–+15550030005) and np_-prefixed
+# context variables to avoid conflicts with pipeline.yaml scenarios.
+
+include:
+  - auth.yaml
+  - identity.yaml
+  - leads.yaml
+  - rbac.yaml
+
+scenarios:
+
+  # ─── Happy path — setup ───────────────────────────────────────────────────
+
+  - id: pipeline-np-setup
+    name: "Pipeline NP: create lead + enroll in new_patient at new_lead → 201"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Happy"
+          last_name: "Path"
+          phone: "+15550030001"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_lead_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships
+        body:
+          lead_id: "{{np_lead_id}}"
+          location_id: "{{location_id}}"
+          pipeline: "new_patient"
+          stage: "new_lead"
+          reason: "initial QA enrollment"
+        expect:
+          status: 201
+          body_contains: ["id", "stage", "pipeline"]
+        extract:
+          np_membership_id: "$.id"
+
+  - id: pipeline-np-enroll-duplicate
+    name: "Pipeline NP: enroll same lead twice → 409 conflict"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-setup]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships
+        body:
+          lead_id: "{{np_lead_id}}"
+          location_id: "{{location_id}}"
+          pipeline: "new_patient"
+          stage: "new_lead"
+          reason: "duplicate enrollment attempt"
+        expect:
+          status: 409
+
+  # ─── Happy path — transitions ─────────────────────────────────────────────
+
+  - id: pipeline-np-to-contacted
+    name: "Pipeline NP: new_lead → contacted"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-setup]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_membership_id}}/transition
+        body:
+          stage: "contacted"
+          reason: "reached patient by phone"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-np-to-exam-scheduled
+    name: "Pipeline NP: contacted → exam_scheduled"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-to-contacted]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_membership_id}}/transition
+        body:
+          stage: "exam_scheduled"
+          reason: "appointment booked"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-np-to-exam-completed
+    name: "Pipeline NP: exam_scheduled → exam_completed"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-to-exam-scheduled]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_membership_id}}/transition
+        body:
+          stage: "exam_completed"
+          reason: "exam completed"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-np-to-tx-presented
+    name: "Pipeline NP: exam_completed → tx_presented"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-to-exam-completed]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_membership_id}}/transition
+        body:
+          stage: "tx_presented"
+          reason: "treatment plan reviewed with patient"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-np-to-contract-signed
+    name: "Pipeline NP: tx_presented → contract_signed"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-to-tx-presented]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_membership_id}}/transition
+        body:
+          stage: "contract_signed"
+          reason: "patient signed contract"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-np-contract-signed-no-transition
+    name: "Pipeline NP: transition from contract_signed (terminal stage) → 422"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-to-contract-signed]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_membership_id}}/transition
+        body:
+          stage: "tx_presented"
+          reason: "attempt to reverse from terminal stage"
+        expect:
+          status: 422
+
+  - id: pipeline-np-history
+    name: "Pipeline NP: stage history after full 7-stage progression → 200 with events"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-contract-signed-no-transition]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/pipeline/memberships/{{np_membership_id}}/history
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: pipeline-np-convert-to-in-treatment
+    name: "Pipeline NP: convert contract_signed → in_treatment/new_patient → 201"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-history]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_membership_id}}/convert
+        body:
+          to_pipeline: "in_treatment"
+          to_stage: "new_patient"
+          reason: "converted"
+          channel: "in_clinic"
+        expect:
+          status: 201
+          body_contains: ["id", "pipeline"]
+        extract:
+          np_it_membership_id: "$.id"
+
+  # ─── Lost flow ────────────────────────────────────────────────────────────
+
+  - id: pipeline-np-setup-lost-lead
+    name: "Pipeline NP: create + enroll lead for lost-flow test"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Lost"
+          last_name: "Flow"
+          phone: "+15550030002"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_lost_lead_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships
+        body:
+          lead_id: "{{np_lost_lead_id}}"
+          location_id: "{{location_id}}"
+          pipeline: "new_patient"
+          stage: "new_lead"
+          reason: "lost flow test"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_lost_membership_id: "$.id"
+
+  - id: pipeline-np-to-lost
+    name: "Pipeline NP: new_lead → lost"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-setup-lost-lead]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_lost_membership_id}}/transition
+        body:
+          stage: "lost"
+          reason: "patient not responding to calls"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-np-lost-reactivate
+    name: "Pipeline NP: lost → contacted (reactivation)"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-to-lost]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_lost_membership_id}}/transition
+        body:
+          stage: "contacted"
+          reason: "patient called back to reschedule"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  - id: pipeline-np-close-membership
+    name: "Pipeline NP: close active membership → 200"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-lost-reactivate]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_lost_membership_id}}/close
+        body:
+          reason: "closed for QA close-guard test"
+        expect:
+          status: 200
+
+  - id: pipeline-np-transition-closed
+    name: "Pipeline NP: transition on closed membership → 409"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-close-membership]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_lost_membership_id}}/transition
+        body:
+          stage: "exam_scheduled"
+          reason: "attempt on closed membership"
+        expect:
+          status: 409
+
+  # ─── Valid rollback ───────────────────────────────────────────────────────
+
+  - id: pipeline-np-setup-rollback-lead
+    name: "Pipeline NP: create + advance lead to exam_scheduled (rollback + override prep)"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Rollback"
+          last_name: "Override"
+          phone: "+15550030003"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_rollback_lead_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships
+        body:
+          lead_id: "{{np_rollback_lead_id}}"
+          location_id: "{{location_id}}"
+          pipeline: "new_patient"
+          stage: "new_lead"
+          reason: "rollback + override test"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_rollback_membership_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_rollback_membership_id}}/transition
+        body:
+          stage: "contacted"
+          reason: "advance for rollback test"
+        expect:
+          status: 200
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_rollback_membership_id}}/transition
+        body:
+          stage: "exam_scheduled"
+          reason: "advance for rollback test"
+        expect:
+          status: 200
+
+  - id: pipeline-np-rollback-exam-to-contacted
+    name: "Pipeline NP: exam_scheduled → contacted (valid rollback)"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-setup-rollback-lead]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_rollback_membership_id}}/transition
+        body:
+          stage: "contacted"
+          reason: "patient cancelled exam"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  # ─── Override transition ──────────────────────────────────────────────────
+  # Membership is at 'contacted' after rollback. Override tests try to skip
+  # to 'exam_completed' (bypassing exam_scheduled) — invalid without override.
+
+  - id: pipeline-np-override-requires-agent
+    name: "Pipeline NP: override transition as call-center agent → 403"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-rollback-exam-to-contacted, rbac-agent-login]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_rollback_membership_id}}/transition
+        auth_token: agent_token
+        body:
+          stage: "exam_completed"
+          override: true
+          reason: "agent override attempt"
+          triggered_by: "call-center-agent"
+        expect:
+          status: 403
+
+  - id: pipeline-np-override-missing-triggered-by
+    name: "Pipeline NP: override=true without triggered_by as manager → 400"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-override-requires-agent, rbac-ccmgr-login]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_rollback_membership_id}}/transition
+        auth_token: ccmgr_token
+        body:
+          stage: "exam_completed"
+          override: true
+          reason: "override without triggered_by field"
+        expect:
+          status: 400
+
+  - id: pipeline-np-override-as-manager
+    name: "Pipeline NP: override skip (contacted → exam_completed) as CC manager → 200"
+    service: crm-api-gateway
+    depends_on: [pipeline-np-override-missing-triggered-by, rbac-ccmgr-login]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_rollback_membership_id}}/transition
+        auth_token: ccmgr_token
+        body:
+          stage: "exam_completed"
+          override: true
+          reason: "manager approved stage skip"
+          triggered_by: "cc-manager-override"
+        expect:
+          status: 200
+          body_contains: ["id", "stage"]
+
+  # ─── Invalid transitions ──────────────────────────────────────────────────
+
+  - id: pipeline-np-invalid-transition
+    name: "Pipeline NP: new_lead → contract_signed (skip all stages) → 422"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Invalid"
+          last_name: "Skip"
+          phone: "+15550030004"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_invalid_lead_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships
+        body:
+          lead_id: "{{np_invalid_lead_id}}"
+          location_id: "{{location_id}}"
+          pipeline: "new_patient"
+          stage: "new_lead"
+          reason: "invalid transition test"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_invalid_membership_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_invalid_membership_id}}/transition
+        body:
+          stage: "contract_signed"
+          reason: "attempt to skip all intermediate stages"
+        expect:
+          status: 422
+
+  # ─── Non-existent membership ──────────────────────────────────────────────
+
+  - id: pipeline-np-membership-not-found
+    name: "Pipeline NP: transition non-existent membership → 404"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/00000000-0000-0000-0000-000000000000/transition
+        body:
+          stage: "contacted"
+          reason: "ghost membership"
+        expect:
+          status: 404
+
+  - id: pipeline-np-history-not-found
+    name: "Pipeline NP: history for non-existent membership → 404"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/pipeline/memberships/00000000-0000-0000-0000-000000000000/history
+        expect:
+          status: 404
+
+  # ─── Invalid convert ─────────────────────────────────────────────────────
+  # Only contract_signed → in_treatment is allowed; tx_presented → 422.
+
+  - id: pipeline-np-invalid-convert
+    name: "Pipeline NP: convert from tx_presented (wrong stage) → 422"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "BadConvert"
+          last_name: "Test"
+          phone: "+15550030005"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_badconv_lead_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships
+        body:
+          lead_id: "{{np_badconv_lead_id}}"
+          location_id: "{{location_id}}"
+          pipeline: "new_patient"
+          stage: "new_lead"
+          reason: "bad convert test"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          np_badconv_membership_id: "$.id"
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_badconv_membership_id}}/transition
+        body:
+          stage: "contacted"
+          reason: "advance step 1"
+        expect:
+          status: 200
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_badconv_membership_id}}/transition
+        body:
+          stage: "exam_scheduled"
+          reason: "advance step 2"
+        expect:
+          status: 200
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_badconv_membership_id}}/transition
+        body:
+          stage: "exam_completed"
+          reason: "advance step 3"
+        expect:
+          status: 200
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_badconv_membership_id}}/transition
+        body:
+          stage: "tx_presented"
+          reason: "arrive at tx_presented — not contract_signed"
+        expect:
+          status: 200
+
+      - type: http
+        method: POST
+        path: /v1/pipeline/memberships/{{np_badconv_membership_id}}/convert
+        body:
+          to_pipeline: "in_treatment"
+          to_stage: "new_patient"
+          reason: "converted"
+          channel: "in_clinic"
+        expect:
+          status: 422

@@ -15,8 +15,9 @@ export async function executeHttpStep(
   const url = `${baseUrl}${path}`
 
   const headers: Record<string, string> = {}
-  if (context['token']) {
-    headers['Authorization'] = `Bearer ${context['token']}`
+  const tokenVar = step.auth_token ?? 'token'
+  if (context[tokenVar]) {
+    headers['Authorization'] = `Bearer ${context[tokenVar]}`
   }
 
   const body = step.body
