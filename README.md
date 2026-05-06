@@ -1,6 +1,8 @@
 # OpenCraft CRM
 
-![OpenCraft CRM logo](./docs/assets/opencraft-crm-logo.svg)
+<p align="center">
+  <img src="./docs/assets/opencraft-crm-logo.svg" alt="OpenCraft CRM logo" width="88" />
+</p>
 
 OpenCraft CRM is an open-source **headless CRM engine** built as a service-oriented backend platform.
 This repository currently contains the backend services, shared packages, local infra, QA tooling, and a CLI.
