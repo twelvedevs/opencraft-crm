@@ -1,7 +1,7 @@
 # OpenCraft CRM
 
 <p align="center">
-  <img src="./docs/assets/opencraft-crm-logo.svg" alt="OpenCraft CRM logo" width="88" />
+  <img src="./docs/assets/opencraft-crm-logo.svg" alt="OpenCraft CRM logo" width="188" />
 </p>
 
 OpenCraft CRM is an open-source **headless CRM engine** built as a service-oriented backend platform.
