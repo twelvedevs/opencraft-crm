@@ -1,0 +1,67 @@
+# Campaigns — email broadcast CRUD.
+# NOTE: campaign creation requires a template_id from the Template Service (port 3102).
+# The template service is NOT proxied through the API Gateway — it's called directly.
+# Set TEMPLATE_ID env var, or pre-create a template manually before running.
+# If TEMPLATE_ID is not set, campaign-create will fail with a validation error.
+
+include:
+  - auth.yaml
+
+scenarios:
+
+  - id: campaign-list
+    name: "Campaigns: list"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/campaigns
+        expect:
+          status: 200
+          body_contains: ["data", "total"]
+
+  - id: campaign-create
+    name: "Campaigns: create draft"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/campaigns
+        body:
+          name: "QA Test Campaign"
+          template_id: "{{TEMPLATE_ID}}"
+          subject: "QA Test Subject Line"
+        expect:
+          status: 201
+          body_contains: ["id", "name"]
+        extract:
+          campaign_id: "$.id"
+
+  - id: campaign-get
+    name: "Campaigns: get by id"
+    service: crm-api-gateway
+    depends_on: [campaign-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/campaigns/{{campaign_id}}
+        expect:
+          status: 200
+          body_contains: ["id", "name", "status"]
+
+  - id: campaign-update
+    name: "Campaigns: update draft"
+    service: crm-api-gateway
+    depends_on: [campaign-create]
+    steps:
+      - type: http
+        method: PATCH
+        path: /v1/campaigns/{{campaign_id}}
+        body:
+          name: "QA Test Campaign (updated)"
+          subject: "Updated Subject Line"
+        expect:
+          status: 200
+          body_contains: ["id"]

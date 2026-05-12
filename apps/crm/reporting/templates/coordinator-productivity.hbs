@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coordinator Productivity Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+    h1 { color: #1a3c5e; border-bottom: 2px solid #1a3c5e; padding-bottom: 8px; }
+    h2 { color: #2c6e9e; margin-top: 24px; }
+    .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { background: #1a3c5e; color: #fff; padding: 10px 12px; text-align: left; font-size: 13px; }
+    td { padding: 9px 12px; border-bottom: 1px solid #e0e0e0; font-size: 13px; }
+    tr:nth-child(even) td { background: #f7f9fb; }
+    .summary-bar { display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap; }
+    .summary-item { background: #f0f4f8; border-radius: 6px; padding: 12px 20px; }
+    .summary-label { font-size: 12px; color: #666; }
+    .summary-value { font-size: 18px; font-weight: bold; color: #1a3c5e; }
+    .null-value { color: #aaa; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Coordinator Productivity Report</h1>
+  <div class="meta">
+    <strong>Period:</strong> {{period}}&nbsp;&nbsp;
+    {{#if location_ids}}<strong>Locations:</strong> {{location_ids}}&nbsp;&nbsp;{{/if}}
+    <strong>Generated:</strong> {{generated_at}}
+  </div>
+
+  <div class="summary-bar">
+    <div class="summary-item">
+      <div class="summary-label">Avg Lead Response Time</div>
+      <div class="summary-value">
+        {{#if lead_response_time}}{{formatSeconds lead_response_time}}{{else}}<span class="null-value">N/A</span>{{/if}}
+      </div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Avg Time in Stage</div>
+      <div class="summary-value">
+        {{#if time_in_stage}}{{formatSeconds time_in_stage}}{{else}}<span class="null-value">N/A</span>{{/if}}
+      </div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Total Coordinators</div>
+      <div class="summary-value">{{raw.coordinators.coordinators.length}}</div>
+    </div>
+  </div>
+
+  <h2>Per-Coordinator Performance</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Coordinator ID</th>
+        <th>Stage Transitions</th>
+        <th>Exams Booked</th>
+        <th>Conversions</th>
+        <th>Avg Response Time</th>
+        <th>Avg Time in Stage</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each raw.coordinators.coordinators}}
+      <tr>
+        <td>{{coordinator_id}}</td>
+        <td>{{stage_transitions}}</td>
+        <td>{{exams_booked}}</td>
+        <td>{{conversions}}</td>
+        <td>{{#if avg_response_time_seconds}}{{formatSeconds avg_response_time_seconds}}{{else}}—{{/if}}</td>
+        <td>{{#if avg_time_in_stage_seconds}}{{formatSeconds avg_time_in_stage_seconds}}{{else}}—{{/if}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+</body>
+</html>

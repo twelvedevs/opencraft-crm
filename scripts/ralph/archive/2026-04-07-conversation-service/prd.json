@@ -1,0 +1,351 @@
+{
+  "project": "Ortho CRM — Conversation Service",
+  "branchName": "feature/conversation-service",
+  "description": "Conversation Service (apps/crm/conversation) — shared SMS inbox with conversation threading, coordinator workflow, scheduled sends, bulk SMS, AI reply drafts/summary/objection handling, AI Agent autonomous mode, and EventBridge integration.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Service scaffold — package.json, tsconfig, env, db, app, index, internal-auth, health",
+      "description": "As a developer, I need the Conversation Service bootstrapped with Fastify, Knex (searchPath: crm_conversations), internal-auth middleware, BullMQ workers wired, EventBus subscriptions registered, and graceful SIGTERM shutdown.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/package.json: name '@crm/conversation', type 'module', scripts: build/dev/start/test/typecheck; dependencies: fastify ^5, @fastify/sensible ^6, knex ^3, pg ^8, @sinclair/typebox ^0.34, bullmq latest, @ortho/event-bus file:../../../packages/@ortho/event-bus, @ortho/logger file:../../../packages/@ortho/logger, @ortho/auth-middleware file:../../../packages/@ortho/auth-middleware; devDependencies: typescript ^5, tsx ^4, vitest ^2, @types/node ^22, @types/pg ^8, nock latest",
+        "apps/crm/conversation/tsconfig.json: module NodeNext, moduleResolution NodeNext, target ES2022, strict true, outDir dist",
+        "apps/crm/conversation/src/env.ts: exports const env with PORT (default 3006), DATABASE_URL (required), REDIS_URL (required), BULLMQ_REDIS_URL (required), EVENT_BUS_NAME (required), EVENT_BUS_CONSUMER_GROUP (default 'crm-conversation'), AWS_REGION (default 'us-east-1'), INTERNAL_API_KEY (required), MESSAGING_SERVICE_URL (required), LEAD_SERVICE_URL (required), AI_SERVICE_URL (required), AUDIENCE_ENGINE_URL (required), NOTIFICATION_SERVICE_URL (required), AI_AGENT_CONCURRENCY (default 5), SCHEDULED_SEND_CONCURRENCY (default 10), BULK_SEND_CONCURRENCY (default 1), LOG_LEVEL (default 'info')",
+        "apps/crm/conversation/src/db.ts: exports default knex instance with client 'pg', connection env.DATABASE_URL, searchPath ['crm_conversations']; exports destroy(): Promise<void>",
+        "apps/crm/conversation/src/plugins/internal-auth.ts: Fastify onRequest hook; reads x-internal-api-key header; if !== env.INTERNAL_API_KEY → reply.status(401).send({ error: 'unauthorized' }); skip for path starting with '/health'",
+        "apps/crm/conversation/src/app.ts: exports async buildApp(db: Knex, eventBus: EventBus): Promise<FastifyInstance>; registers @fastify/sensible; registers internal-auth plugin; registers GET /health returning { ok: true }; registers all route plugins under prefix '/conversations' (route stubs returning 501 acceptable at this stage); bulk-sends route registered before /:id route",
+        "apps/crm/conversation/src/index.ts: creates eventBus via createEventBus(); calls bus.subscribe() for inbound_message.received, message.delivered, message.failed; calls bus.start(); starts BullMQ workers (ai-agent-reply, scheduled-send, bulk-send); calls app.listen({ port: env.PORT, host: '0.0.0.0' }); SIGTERM handler: pause(true) then close() on all three workers; bus.stop(); db.destroy(); process.exit(0)",
+        "apps/crm/conversation/Dockerfile: FROM node:24-alpine, WORKDIR /app, copies package.json + dist, RUN npm ci --omit=dev, CMD node dist/index.js",
+        "GET /health returns 200 { ok: true } without X-Internal-Api-Key",
+        "POST /conversations returns 401 when X-Internal-Api-Key is absent or wrong",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Database migrations — crm_conversations schema and all 6 tables",
+      "description": "As a developer, I need the migration file that creates the crm_conversations schema and all six tables (conversations, conversation_messages, conversation_notes, conversation_reads, scheduled_messages, location_conversation_settings, bulk_send_jobs) with all columns, constraints, and indexes.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/migrations/20260325000000_create_conversations.ts: up() creates schema crm_conversations IF NOT EXISTS; down() drops schema CASCADE",
+        "up() creates table conversations: id uuid PK DEFAULT gen_random_uuid(), lead_id uuid NOT NULL, location_id uuid NOT NULL, practice_number text NOT NULL, lead_phone text NOT NULL, status text NOT NULL DEFAULT 'open' CHECK IN ('open','closed'), assigned_to uuid NULL, escalated boolean NOT NULL DEFAULT false, agent_mode_active boolean NOT NULL DEFAULT false, agent_exchange_count integer NOT NULL DEFAULT 0, last_message_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now()",
+        "up() creates table conversation_messages: id uuid PK DEFAULT gen_random_uuid(), conversation_id uuid NOT NULL REFERENCES conversations(id), direction text NOT NULL CHECK IN ('inbound','outbound'), author_id uuid NULL, body text NULL, media_urls text[] NULL, message_type text NOT NULL DEFAULT 'normal' CHECK IN ('normal','stop','unstop'), status text NOT NULL, is_automated boolean NOT NULL DEFAULT false, is_agent boolean NOT NULL DEFAULT false, messaging_message_id uuid NULL, sent_at timestamptz NULL, delivered_at timestamptz NULL, received_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now()",
+        "up() creates table conversation_notes: id uuid PK DEFAULT gen_random_uuid(), conversation_id uuid NOT NULL REFERENCES conversations(id), author_id uuid NOT NULL, body text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()",
+        "up() creates table conversation_reads: conversation_id uuid NOT NULL, user_id uuid NOT NULL, last_read_message_id uuid NULL, read_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (conversation_id, user_id)",
+        "up() creates table scheduled_messages: id uuid PK DEFAULT gen_random_uuid(), conversation_id uuid NOT NULL REFERENCES conversations(id), body text NOT NULL, media_url text NULL, scheduled_for timestamptz NOT NULL, status text NOT NULL DEFAULT 'pending' CHECK IN ('pending','sent','cancelled'), created_by uuid NOT NULL, bullmq_job_id text NULL, sent_at timestamptz NULL, created_at timestamptz NOT NULL DEFAULT now()",
+        "up() creates table location_conversation_settings: location_id uuid PRIMARY KEY, inactivity_days integer NOT NULL DEFAULT 30, agent_mode_enabled boolean NOT NULL DEFAULT false, agent_max_exchanges integer NOT NULL DEFAULT 3, location_phone text NULL, practice_number text NULL, updated_at timestamptz NOT NULL DEFAULT now(); CHECK constraint: agent_mode_enabled = false OR (location_phone IS NOT NULL AND practice_number IS NOT NULL)",
+        "up() creates table bulk_send_jobs: id uuid PK DEFAULT gen_random_uuid(), location_id uuid NOT NULL, segment jsonb NOT NULL, body text NOT NULL, status text NOT NULL DEFAULT 'pending' CHECK IN ('pending','processing','completed','failed'), total integer NULL, sent integer NOT NULL DEFAULT 0, failed integer NOT NULL DEFAULT 0, created_by uuid NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz NULL",
+        "Indexes: conversations(location_id, status, last_message_at DESC); conversations(lead_id, practice_number, last_message_at DESC); conversation_messages(conversation_id, created_at DESC); conversation_messages(messaging_message_id)",
+        "apps/crm/conversation/knexfile.ts: exports default with client 'pg', connection process.env.DATABASE_URL, searchPath ['crm_conversations'], migrations.directory './migrations', migrations.loadExtensions ['.ts']",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "@ortho/types update + service-client.ts",
+      "description": "As a developer, I need the MessageReceivedPayload and MessageReceivedEvent types added to @ortho/types, and a local service-client.ts that wraps native fetch with base URL + auth header, instantiated for all five downstream services.",
+      "acceptanceCriteria": [
+        "packages/@ortho/types/src/events.ts: add export interface MessageReceivedPayload { entity_type: 'lead'; entity_id: string; message_id: string; conversation_id: string; lead_id: string; location_id: string; body: string; message_type: 'normal' | 'stop' | 'unstop'; from_number: string; practice_number: string; received_at: string; }",
+        "packages/@ortho/types/src/events.ts: add export type MessageReceivedEvent = OrthoEvent<'message.received', MessageReceivedPayload>",
+        "packages/@ortho/types/src/index.ts (or equivalent barrel): exports MessageReceivedPayload and MessageReceivedEvent",
+        "apps/crm/conversation/src/lib/service-client.ts: exports function createServiceClient(baseUrl: string, apiKey: string) returning { post<T>(path: string, body: unknown): Promise<T>; get<T>(path: string, params?: Record<string, string>): Promise<T> }; uses Node.js 24 native fetch; attaches X-Internal-Api-Key header; throws typed error { status: number, body: unknown } on non-2xx responses",
+        "service-client.ts exports: messagingClient, leadClient, aiClient, audienceClient, notificationClient — each instantiated with the corresponding env var URL and env.INTERNAL_API_KEY",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Core repositories — conversations.repo.ts, messages.repo.ts, reads.repo.ts",
+      "description": "As a developer, I need the three core repository modules for conversations (find, create, update), conversation messages (insert, update status, paginate), and conversation reads (upsert, unread count query).",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/repositories/conversations.repo.ts: exports TypeScript interface Conversation matching all columns; exports findById(db, id): Promise<Conversation|null>; exports findRecent(db, leadId: string, practiceNumber: string, afterTimestamp: Date): Promise<Conversation|null> — SELECT most recent conversation WHERE lead_id=? AND practice_number=? AND last_message_at > afterTimestamp ORDER BY last_message_at DESC LIMIT 1; exports create(db, data: { lead_id, location_id, practice_number, lead_phone }): Promise<Conversation>; exports update(db, id: string, data: Partial<{ assigned_to, escalated, status, agent_mode_active, agent_exchange_count, last_message_at }>): Promise<Conversation>; exports list(db, filters: { location_id: string, lead_id?: string, status?: string, assigned_to?: string, page?: number, limit?: number }): Promise<{ rows: ConversationListRow[], total: number }> — ConversationListRow includes unread_count and last_message_preview (fetched via subquery/join, not stored columns)",
+        "apps/crm/conversation/src/repositories/messages.repo.ts: exports interface ConversationMessage matching all columns; exports insert(db, data: { conversation_id, direction, author_id?, body?, media_urls?, message_type?, status, is_automated?, is_agent?, messaging_message_id?, sent_at?, received_at? }): Promise<ConversationMessage>; exports updateStatus(db, messagingMessageId: string, update: { status: string, delivered_at?: Date }): Promise<number> — returns number of rows updated (0 = no match); exports listByConversation(db, conversationId: string, opts: { before?: string, limit?: number }): Promise<ConversationMessage[]> — cursor-based, newest-first; exports getLatestMessageId(db, conversationId: string): Promise<string|null>",
+        "apps/crm/conversation/src/repositories/reads.repo.ts: exports interface ConversationRead; exports upsert(db, conversationId: string, userId: string, lastReadMessageId: string): Promise<void>; exports getUnreadCount(db, conversationId: string, userId: string): Promise<number> — count messages after last_read_message_id cursor; if no read record exists returns total message count",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Supporting repositories — notes, scheduled, bulk-send-jobs, settings",
+      "description": "As a developer, I need repository modules for conversation notes, scheduled messages, bulk send jobs, and location conversation settings.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/repositories/notes.repo.ts: exports interface ConversationNote; exports create(db, data: { conversation_id, author_id, body }): Promise<ConversationNote>; exports deleteById(db, id: string, conversationId: string): Promise<boolean> — returns true if deleted, false if not found",
+        "apps/crm/conversation/src/repositories/scheduled.repo.ts: exports interface ScheduledMessage; exports create(db, data: { conversation_id, body, media_url?, scheduled_for, created_by }): Promise<ScheduledMessage>; exports updateBullmqJobId(db, id: string, bullmqJobId: string): Promise<void>; exports findById(db, id: string): Promise<ScheduledMessage|null>; exports updateStatus(db, id: string, status: 'sent' | 'cancelled', sentAt?: Date): Promise<ScheduledMessage>; exports listPending(db, conversationId: string): Promise<ScheduledMessage[]>",
+        "apps/crm/conversation/src/repositories/bulk-send-jobs.repo.ts: exports interface BulkSendJob; exports create(db, data: { location_id, segment, body, created_by }): Promise<BulkSendJob>; exports updateStatus(db, id: string, status: string, extra?: { total?: number, sent?: number, failed?: number, completed_at?: Date }): Promise<void>; exports findById(db, id: string): Promise<BulkSendJob|null>",
+        "apps/crm/conversation/src/repositories/settings.repo.ts: exports interface LocationConversationSettings; exports findByLocationId(db, locationId: string): Promise<LocationConversationSettings|null>; exports upsert(db, locationId: string, data: Partial<{ inactivity_days, agent_mode_enabled, agent_max_exchanges, location_phone, practice_number }>): Promise<LocationConversationSettings>; exports getEffectiveSettings(db, locationId: string): Promise<LocationConversationSettings> — returns row if exists, otherwise returns default values { inactivity_days: 30, agent_mode_enabled: false, agent_max_exchanges: 3, location_phone: null, practice_number: null }",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Event publisher + delivery status handlers",
+      "description": "As a developer, I need the EventBridge publisher for message.received events, and the two delivery status event handlers (message.delivered and message.failed) that update conversation_messages rows.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/events/publisher.ts: exports publishMessageReceived(bus: EventBus, data: { correlationId: string, causationId: string, payload: MessageReceivedPayload }): Promise<void> — builds OrthoEvent with event_id: randomUUID(), schema_version: '1.0', event_type: 'message.received', entity_type: 'lead', entity_id: payload.lead_id, correlation_id: data.correlationId, causation_id: data.causationId",
+        "apps/crm/conversation/src/events/handlers/message-delivered.handler.ts: exports handleMessageDelivered(db: Knex, event: OrthoEvent): Promise<void>; calls messages.repo updateStatus(db, event.payload.message_id, { status: 'delivered', delivered_at: new Date(event.payload.delivered_at) }); if 0 rows updated → log debug 'message not owned by conversation service, skipping' and return (silent no-op)",
+        "apps/crm/conversation/src/events/handlers/message-failed.handler.ts: exports handleMessageFailed(db: Knex, event: OrthoEvent): Promise<void>; calls messages.repo updateStatus(db, event.payload.message_id, { status: 'failed' }); if 0 rows updated → silent no-op (message owned by another service)",
+        "apps/crm/conversation/src/index.ts: updated to register bus.subscribe('message.delivered', (e) => handleMessageDelivered(db, e)) and bus.subscribe('message.failed', (e) => handleMessageFailed(db, e)) before bus.start()",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Conversation resolver service + outbound sender service",
+      "description": "As a developer, I need the conversation-resolver service (find-or-create with inactivity window logic) and the outbound-sender service (coordinator send → Messaging Service → store message).",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/services/conversation-resolver.ts: exports resolveConversation(db: Knex, opts: { leadId: string, locationId: string, practiceNumber: string, leadPhone: string }): Promise<Conversation>; logic: load settings via getEffectiveSettings; SELECT most recent conversation WHERE lead_id=leadId AND practice_number=practiceNumber AND last_message_at > now() - inactivity_days; if found: update status='open' if status was 'closed'; return existing conversation; if not found: INSERT new conversation with (lead_id, location_id, practice_number, lead_phone); return new conversation",
+        "conversation-resolver.ts handles the case where no last_message_at exists on the candidate conversation (treat as inactive — create new)",
+        "apps/crm/conversation/src/services/outbound-sender.ts: exports sendOutbound(db: Knex, opts: { conversationId: string, body: string, mediaUrl?: string, authorId: string }): Promise<{ messageId: string, status: string }>; loads conversation; if agent_mode_active → update conversations SET agent_mode_active=false; POSTs to Messaging Service: { to: conversation.lead_phone, from_number: conversation.practice_number, body, dedup_key: randomUUID() }; inserts conversation_messages row with { direction: 'outbound', author_id, body, status: 'queued', messaging_message_id: response.message_id }; updates conversations SET last_message_at=now(); returns { messageId: inserted message id, status: 'queued' }",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Inbound message event handler",
+      "description": "As a developer, I need the inbound-message.handler.ts that processes inbound_message.received events: resolves the lead, finds or creates a conversation, stores the message, publishes message.received to EventBridge, sends an in-app notification, and optionally enqueues an AI agent reply job.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/events/handlers/inbound-message.handler.ts: exports handleInboundMessage(db: Knex, bus: EventBus, queues: { aiAgentQueue: Queue }, event: OrthoEvent): Promise<void>",
+        "Handler: GET /leads?phone={event.payload.from_number} on leadClient; if no lead found → log warn 'unknown number, skipping'; return (no conversation created)",
+        "Handler: calls resolveConversation(db, { leadId: lead.id, locationId: lead.location_id, practiceNumber: event.payload.to_number, leadPhone: event.payload.from_number })",
+        "Handler: INSERT conversation_messages via messages.repo: { conversation_id, direction: 'inbound', body: event.payload.body, message_type: event.payload.message_type, status: 'received', messaging_message_id: event.payload.message_id, received_at: new Date(event.payload.received_at) }; UPDATE conversations SET last_message_at=now()",
+        "Handler: calls publishMessageReceived(bus, { correlationId: event.correlation_id, causationId: event.event_id, payload: { entity_type: 'lead', entity_id: lead.id, message_id: insertedMessage.id, conversation_id: conversation.id, lead_id: lead.id, location_id: lead.location_id, body: event.payload.body, message_type: event.payload.message_type, from_number: event.payload.from_number, practice_number: event.payload.to_number, received_at: event.payload.received_at } })",
+        "Handler: POSTs to notificationClient: { channel: 'location:{location_id}:conversations', payload: { type: 'inbound_message', conversation_id: conversation.id, lead_id: lead.id, preview: body.slice(0, 80) } }",
+        "Handler: if message_type !== 'normal' → return (skip AI agent for STOP/UNSTOP)",
+        "Handler: loads settings via getEffectiveSettings; if settings.agent_mode_enabled AND conversation.agent_mode_active AND conversation.assigned_to IS NULL AND NOT conversation.escalated: if conversation.agent_exchange_count >= settings.agent_max_exchanges → UPDATE conversations SET escalated=true; POST notificationClient { type: 'agent_escalation', conversation_id }; else → enqueue BullMQ job 'conversation:ai-agent-reply' { conversation_id: conversation.id, trigger_message_id: insertedMessage.id }",
+        "apps/crm/conversation/src/index.ts: updated to register bus.subscribe('inbound_message.received', (e) => handleInboundMessage(db, bus, { aiAgentQueue }, e)) before bus.start(); aiAgentQueue is a BullMQ Queue instance created at startup",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Inbox routes — GET /conversations, GET /:id, PATCH /:id, POST /:id/read",
+      "description": "As a developer, I need the four inbox route handlers: list conversations with unread counts, get conversation detail with messages and notes, update conversation fields (assignment, escalation, status, agent mode), and mark a conversation as read.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/routes/conversations.ts: GET /conversations requires location_id query param; returns 403 { error: 'forbidden' } if missing; accepts optional: lead_id, status, assigned_to, page (default 1), limit (default 25); returns { rows: ConversationListRow[], total: number } where each row includes id, lead_id, location_id, practice_number, lead_phone, status, assigned_to, escalated, agent_mode_active, last_message_at, last_message_preview (body truncated to 80 chars, fetched via join), unread_count (cursor-based count per calling user from conversation_reads)",
+        "GET /conversations/:id: finds conversation by id; returns 404 if not found; returns conversation + last 50 messages (listByConversation with limit 50) + all notes for the conversation",
+        "PATCH /conversations/:id: TypeBox body schema: { assigned_to?: string|null, escalated?: boolean, status?: 'open'|'closed', agent_mode_active?: boolean }; if agent_mode_active: true in body → check req.user.role === 'marketing_manager'; return 403 if not; if true, also reset agent_exchange_count to 0; calls conversations.repo update() with provided fields; returns 200 updated conversation",
+        "POST /conversations/:id/read: upserts conversation_reads for calling user (req.user.sub) with last_read_message_id = result of getLatestMessageId(); returns 200 { ok: true }",
+        "All routes enforce location-scoped access: resolved conversation.location_id must be in req.user.locations (array of allowed location IDs); return 403 if not",
+        "TypeBox schemas for all request bodies and response shapes; error responses: 400 validation_error, 403 forbidden, 404 not_found, 500 internal_error",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Message thread routes — GET /:id/messages, POST /:id/messages",
+      "description": "As a developer, I need the paginated message thread endpoint and the outbound send endpoint.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/routes/messages.ts: GET /conversations/:id/messages?before=uuid&limit=50 — cursor-based, newest-first; validates conversation exists and is location-accessible; calls messages.repo listByConversation; returns { messages: ConversationMessage[], hasMore: boolean }",
+        "POST /conversations/:id/messages: TypeBox body: { body: Type.String({ minLength: 1 }), media_url?: Type.String() }; validates conversation exists and location-accessible; calls outbound-sender.ts sendOutbound; returns 200 { message_id: string, status: 'queued' }",
+        "TypeBox schemas for request/response; 400 on validation failure, 403 on location mismatch, 404 if conversation not found",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Notes routes — POST/DELETE /:id/notes",
+      "description": "As a developer, I need the two internal notes endpoints: create a note and delete a note by ID.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/routes/notes.ts: POST /conversations/:id/notes — TypeBox body: { body: Type.String({ minLength: 1 }) }; validates conversation exists and location-accessible; creates note via notes.repo.create with author_id=req.user.sub; returns 201 ConversationNote",
+        "DELETE /conversations/:id/notes/:note_id — finds note by id and conversation_id; returns 404 if not found; deletes via notes.repo.deleteById; returns 200 { ok: true }",
+        "TypeBox schemas; 400 on validation failure, 403 on location mismatch, 404 if conversation or note not found",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Scheduled message routes + BullMQ worker",
+      "description": "As a developer, I need the three scheduled-message endpoints (create, list, cancel) and the BullMQ scheduled-send worker that fires delayed jobs and calls the Messaging Service.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/routes/scheduled.ts: POST /conversations/:id/scheduled-messages — TypeBox body: { body: string, media_url?: string, scheduled_for: Type.String({ format: 'date-time' }) }; validates conversation accessible; INSERT via scheduled.repo.create; enqueue BullMQ delayed job on 'conversation:scheduled-send' queue with delay = scheduled_for - now(); update bullmq_job_id in DB; returns 201 { scheduled_message_id: string }",
+        "GET /conversations/:id/scheduled-messages — returns list of pending scheduled messages via scheduled.repo.listPending",
+        "DELETE /conversations/:id/scheduled-messages/:msg_id — loads scheduled message; if status !== 'pending' → 409 { error: 'conflict' }; updates status='cancelled'; calls job.remove() on the BullMQ job (getJob + remove); returns 200 { ok: true }",
+        "apps/crm/conversation/src/workers/scheduled-send.worker.ts: exports createScheduledSendWorker(db: Knex): Worker; processes 'conversation:scheduled-send' queue; job data: { scheduled_message_id: string }; handler: load scheduled message; if status !== 'pending' → return (idempotency guard — already sent or cancelled); POST to messagingClient /messages/send { to: conversation.lead_phone, from_number: conversation.practice_number, body, dedup_key: 'sched:' + scheduled_message_id }; INSERT conversation_messages; UPDATE scheduled_messages SET status='sent', sent_at=now(); UPDATE conversations SET last_message_at=now()",
+        "Worker concurrency from env.SCHEDULED_SEND_CONCURRENCY; connection uses BULLMQ_REDIS_URL",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "AI features service + routes",
+      "description": "As a developer, I need the ai-features service that calls the AI Service for smart reply drafts, conversation summary, and objection handling, plus the three route handlers and the four AI prompt files registered in apps/platform/ai.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/services/ai-features.ts: exports getDraftReplies(conversationId: string, db: Knex): Promise<{ drafts: { body: string, label: string }[] }> — loads last 10 messages + conversation (lead_id); GETs lead from leadClient; POSTs to aiClient /ai/complete { prompt_id: 'conversation-reply-drafts', context: { lead_name, lead_stage, treatment_interest, recent_messages } }; parses response.text as JSON array; returns { drafts }",
+        "ai-features.ts exports getSummary(conversationId: string, db: Knex): Promise<{ summary: string }> — loads last 20 messages; POSTs to aiClient { prompt_id: 'conversation-summary', context: { recent_messages } }; returns { summary: response.text }",
+        "ai-features.ts exports getObjectionStrategies(conversationId: string, objectionType: string, db: Knex): Promise<{ strategies: { title: string, body: string }[] }> — POSTs to aiClient { prompt_id: 'conversation-objection-handling', context: { objection_type: objectionType } }; parses response.text as JSON array; returns { strategies }",
+        "apps/crm/conversation/src/routes/ai.ts: POST /conversations/:id/ai/drafts → calls getDraftReplies; returns 200 { drafts }; POST /conversations/:id/ai/summary → calls getSummary; returns 200 { summary }; POST /conversations/:id/ai/objection — TypeBox body { objection_type: string } → calls getObjectionStrategies; returns 200 { strategies }; all routes validate location access; 404 if conversation not found",
+        "apps/platform/ai/src/prompts/conversation-reply-drafts.ts: registers prompt with id 'conversation-reply-drafts', system prompt instructing Claude to return JSON array [{ body, label }] with 2-3 reply options based on context",
+        "apps/platform/ai/src/prompts/conversation-summary.ts: registers 'conversation-summary', instructs 3-sentence briefing as plain text",
+        "apps/platform/ai/src/prompts/conversation-objection-handling.ts: registers 'conversation-objection-handling', instructs JSON array [{ title, body }] strategies",
+        "apps/platform/ai/src/prompts/conversation-agent-reply.ts: registers 'conversation-agent-reply', instructs JSON object { text, escalate: boolean, reason?: string }; instructs escalate=true for clinical questions, pricing disputes, or any uncertainty",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "AI Agent mode service + worker",
+      "description": "As a developer, I need the agent-mode service (escalation logic, JSON parse, disclosure footer) and the ai-agent-reply BullMQ worker that autonomously responds to leads.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/services/agent-mode.ts: exports function buildDisclosureFooter(locationPhone: string): string — returns 'This message was sent automatically. Reply STOP to opt out or call us at {locationPhone} to speak with our team.'",
+        "agent-mode.ts exports function parseAgentResponse(responseText: string): { text: string, escalate: boolean, reason?: string } | null — parses responseText as JSON; returns null if parsing fails (fail-safe escalation trigger)",
+        "apps/crm/conversation/src/workers/ai-agent-reply.worker.ts: exports createAiAgentReplyWorker(db: Knex): Worker; processes 'conversation:ai-agent-reply' queue; job data: { conversation_id: string, trigger_message_id: string }",
+        "Worker handler: load conversation + last 10 messages; load settings via getEffectiveSettings; GET /leads/:lead_id from leadClient; POST to aiClient /ai/complete { prompt_id: 'conversation-agent-reply', context: { lead_name, lead_stage, treatment_interest, location_name: settings.location_phone, recent_messages } }",
+        "Worker handler: call parseAgentResponse(response.text); if null (parse failure) OR parsed.escalate === true → UPDATE conversations SET escalated=true, agent_mode_active=false; POST notificationClient { channel: 'location:{location_id}:conversations', payload: { type: 'agent_escalation', conversation_id } }; return",
+        "Worker handler (non-escalate path): POST messagingClient /messages/send { to: conversation.lead_phone, from_number: conversation.practice_number, body: parsed.text + '\\n\\n' + buildDisclosureFooter(settings.location_phone), dedup_key: 'agent:' + conversation_id + ':' + conversation.agent_exchange_count }; INSERT conversation_messages { direction: 'outbound', is_agent: true, is_automated: false, status: 'queued', messaging_message_id: response.message_id, body: full body with footer }; UPDATE conversations SET agent_exchange_count = agent_exchange_count + 1, last_message_at = now()",
+        "Worker concurrency from env.AI_AGENT_CONCURRENCY; connection uses BULLMQ_REDIS_URL; child logger with { jobId, conversationId } bound at job start",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Bulk send service + BullMQ worker",
+      "description": "As a developer, I need the bulk-sender service that orchestrates Lead Service → Audience Engine → Messaging Service, and the bulk-send BullMQ worker that executes the batch job with progress tracking.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/src/services/bulk-sender.ts: exports executeBulkSend(db: Knex, jobId: string, opts: { locationId: string, segment: unknown, body: string }): Promise<void>; UPDATE bulk_send_jobs SET status='processing'; load settings via getEffectiveSettings (for practice_number)",
+        "bulk-sender.ts: paginate through leadClient GET /leads?location_id={locationId}&status=active&limit=200&cursor=... accumulating lead objects (Map<lead_id, lead>) until all pages fetched",
+        "bulk-sender.ts: POST audienceClient /audiences/evaluate { filter: segment, entities: [{ id, current_stage, current_pipeline, created_at, tags, phone }], snapshot: false }; get matched_lead_ids array; UPDATE bulk_send_jobs SET total=matched_lead_ids.length",
+        "bulk-sender.ts: for each matched lead_id in batches of 50: get phone from leadMap; POST messagingClient /messages/send { to: phone, from_number: settings.practice_number, body, dedup_key: jobId + ':' + lead_id }; increment sent or failed counter on failure (do not throw — log error per failed send); after all batches: UPDATE bulk_send_jobs SET status='completed', sent=N, failed=M, completed_at=now()",
+        "On uncaught error: UPDATE bulk_send_jobs SET status='failed' before re-throwing",
+        "apps/crm/conversation/src/workers/bulk-send.worker.ts: exports createBulkSendWorker(db: Knex): Worker; processes 'conversation:bulk-send' queue; job data: { job_id: string, location_id: string, segment: unknown, body: string }; calls executeBulkSend; concurrency 1 (from env.BULK_SEND_CONCURRENCY default 1); connection uses BULLMQ_REDIS_URL",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Bulk sends routes + @ortho/auth-middleware update + location settings routes",
+      "description": "As a developer, I need the bulk-sends REST endpoints (POST to create, GET for status), the bulk-sms:write permission added to @ortho/auth-middleware, and the location settings GET/PATCH endpoints.",
+      "acceptanceCriteria": [
+        "packages/@ortho/auth-middleware: add 'bulk-sms:write' to ROLE_PERMISSIONS for call_center_manager, marketing_manager, super_admin roles",
+        "apps/crm/conversation/src/routes/bulk-sends.ts: registered BEFORE /:id param routes in app.ts; POST /bulk-sends — TypeBox body: { segment: Type.Unknown(), body: Type.String({ minLength: 1 }), location_id: Type.String({ format: 'uuid' }) }; guard: requireRole(['call_center_manager', 'marketing_manager', 'super_admin']); call_center_manager restricted to own location (req.user.locations must include location_id); create bulk_send_job via repo; enqueue BullMQ job on 'conversation:bulk-send' queue; returns 202 { job_id: string }",
+        "GET /bulk-sends/:job_id — finds job; location-scoped access check; returns 200 { status, total, sent, failed } or 404",
+        "apps/crm/conversation/src/routes/settings.ts: GET /settings/locations/:id — requires marketing_manager or super_admin role; calls settings.repo.findByLocationId; returns 200 settings or 404 if not configured",
+        "PATCH /settings/locations/:id — TypeBox body: { inactivity_days?: integer, agent_mode_enabled?: boolean, agent_max_exchanges?: integer, location_phone?: string, practice_number?: string }; requires marketing_manager or super_admin role; if agent_mode_enabled: true — validate location_phone is set (either in request body or already in DB); 422 if missing; if practice_number not set: 422; calls settings.repo.upsert; returns 200 updated settings",
+        "app.ts updated to register bulkSendsRoute before conversationsRoute under /conversations prefix",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Unit tests — conversation-resolver, agent-mode, outbound-sender",
+      "description": "As a developer, I need unit tests for the three pure/isolated service functions: conversation resolver (find/create logic), agent mode (escalation, JSON parse, disclosure footer), and outbound sender (agent disable, dedup key).",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/test/unit/conversation-resolver.test.ts: mock DB via vi.fn() stubs; 'finds existing conversation within inactivity window and returns it without creating new'; 'reopens closed conversation within inactivity window (sets status open)'; 'creates new conversation when last_message_at is older than inactivity_days'; 'creates new conversation when no existing conversation found'; 'uses correct (lead_id, practice_number) key for lookup'",
+        "apps/crm/conversation/test/unit/agent-mode.test.ts: 'parseAgentResponse returns parsed object for valid JSON with text and escalate: false'; 'parseAgentResponse returns parsed object for escalate: true'; 'parseAgentResponse returns null for invalid JSON (fail-safe escalation)'; 'parseAgentResponse returns null for non-object JSON'; 'buildDisclosureFooter includes location_phone in message'; 'buildDisclosureFooter includes STOP instructions'",
+        "apps/crm/conversation/test/unit/outbound-sender.test.ts: mock DB + messagingClient; 'sets agent_mode_active=false when sending while agent mode is active'; 'does NOT disable agent mode when agent_mode_active is already false'; 'generates a unique dedup_key on each call (two calls produce different keys)'",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Integration tests — inbound message flows",
+      "description": "As a developer, I need integration tests for all inbound message scenarios: happy path, new conversation on inactivity, unknown phone, STOP message, AI agent enqueue, and exchange-count escalation.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/test/integration/setup.ts: DATABASE_URL from env or 'postgresql://localhost:5432/test_conversations'; BULLMQ_REDIS_URL=redis://localhost:6379; INTERNAL_API_KEY='test-key'; LOG_LEVEL='silent'; EVENT_BUS_DRIVER='mock'",
+        "apps/crm/conversation/test/integration/helpers.ts: exports HAS_DB; runMigrations/cleanup/truncateTables (truncate all 7 tables); buildTestApp(db, eventBus) with MockDriver; exports LOCATION_ID, LEAD_ID, PRACTICE_NUMBER constants; exports mock for leadClient (nock intercept)",
+        "test/integration/inbound.test.ts: describe.skipIf(!HAS_DB); set up nock intercept for GET /leads?phone=... returning mock lead { id, location_id, phone, current_stage, treatment_interest, name }; set up nock for POST /notifications/publish",
+        "'Inbound happy path': call handleInboundMessage directly; assert conversation created; message row inserted with direction=inbound, status=received; message.received event published with entity_type=lead, entity_id=lead.id; notification POST intercepted",
+        "'Inbound appends to existing conversation': pre-insert conversation with last_message_at = now(); call handleInboundMessage again; assert same conversation_id in new message; no new conversation row created",
+        "'Inbound creates new conversation after inactivity': pre-insert conversation with last_message_at = 31 days ago (settings default 30d); call handleInboundMessage; assert new conversation row created; old conversation untouched",
+        "'Inbound unknown phone': nock returns 404 for lead lookup; assert no conversation created, no message inserted, no event published, warning logged",
+        "'Inbound STOP message': event has message_type=stop; assert message stored with message_type=stop; assert NO BullMQ job enqueued (even if agent_mode_active=true); assert message.received still published",
+        "'Inbound AI agent enqueue': set location settings agent_mode_enabled=true; pre-create conversation with agent_mode_active=true, assigned_to=null, escalated=false, agent_exchange_count=0; call handleInboundMessage; assert BullMQ job queued on conversation:ai-agent-reply queue",
+        "'Inbound escalation on max exchanges': set agent_exchange_count >= agent_max_exchanges; assert conversations.escalated=true; assert escalation notification sent; assert NO BullMQ job enqueued",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Integration tests — outbound, delivery updates, AI agent worker, scheduled send, read tracking",
+      "description": "As a developer, I need integration tests for outbound coordinator send, delivery status updates, AI agent reply worker logic, scheduled send lifecycle, and read tracking.",
+      "acceptanceCriteria": [
+        "test/integration/outbound.test.ts: 'POST /conversations/:id/messages sends via Messaging Service and stores with status queued' (nock intercept for POST /messages/send returning { message_id: uuid }); assert conversation_messages row inserted direction=outbound, status=queued, messaging_message_id set; assert last_message_at updated",
+        "outbound.test.ts: 'POST /conversations/:id/messages disables agent mode when agent_mode_active=true'; pre-set conversation.agent_mode_active=true; POST message; assert conversation.agent_mode_active=false",
+        "test/integration/delivery.test.ts: 'message.delivered event updates conversation_messages.status to delivered, delivered_at set'; pre-insert outbound message with messaging_message_id X; call handleMessageDelivered with event.payload.message_id=X; assert status=delivered, delivered_at set",
+        "delivery.test.ts: 'message.delivered for unknown messaging_message_id is silent no-op'; call handleMessageDelivered with unknown message_id; assert no error, no rows changed",
+        "test/integration/ai-agent.test.ts: call ai-agent-reply worker handler directly (not via BullMQ queue); nock intercepts for GET /leads/:id, POST /ai/complete (returns { text: JSON.stringify({ text: 'Hello!', escalate: false }) }), POST /messages/send; assert conversation_messages row inserted with is_agent=true; assert agent_exchange_count incremented",
+        "ai-agent.test.ts: 'AI agent escalation — escalate:true': POST /ai/complete returns { text: JSON.stringify({ text: '', escalate: true }) }; assert conversation.escalated=true, agent_mode_active=false; assert Messaging Service NOT called",
+        "ai-agent.test.ts: 'AI agent escalation — parse failure': POST /ai/complete returns { text: 'not json' }; assert conversation.escalated=true; assert Messaging Service NOT called",
+        "test/integration/scheduled.test.ts: 'create + fire scheduled send': POST /conversations/:id/scheduled-messages; call worker handler directly with scheduled_message_id; nock for POST /messages/send; assert scheduled_messages.status=sent; conversation_messages row inserted",
+        "scheduled.test.ts: 'cancel before fire': POST scheduled message; DELETE /:id/scheduled-messages/:msg_id; call worker handler; assert worker skips (idempotency guard, status=cancelled); Messaging Service NOT called",
+        "test/integration/reads.test.ts: 'POST /conversations/:id/read upserts read record with latest message id'; pre-insert 3 messages; POST /read; assert conversation_reads row with last_read_message_id = id of most recent message; 'GET /conversations returns unread_count=0 after read'",
+        "test/integration/patch.test.ts: 'PATCH agent_mode_active:true returns 403 for call_center_agent role'; 'PATCH agent_mode_active:true succeeds for marketing_manager role and resets agent_exchange_count to 0'",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Contract tests — message.received event payload + Messaging Service + AI Service call shapes",
+      "description": "As a developer, I need contract tests that verify the message.received event envelope and payload, the Messaging Service call shape for outbound sends, and the AI Service call shape for agent replies.",
+      "acceptanceCriteria": [
+        "apps/crm/conversation/test/contract/events.test.ts: uses MockDriver + EventBusImpl directly (no HTTP, no DB); calls publishMessageReceived with test data; asserts published event has event_id (non-empty string), event_type='message.received', entity_type='lead', entity_id=lead_id, schema_version='1.0', correlation_id forwarded, causation_id set to triggering event id",
+        "contract/events.test.ts: asserts payload has entity_type: 'lead', entity_id, message_id, conversation_id, lead_id, location_id, body, message_type, from_number, practice_number, received_at (all fields present, all strings)",
+        "apps/crm/conversation/test/contract/messaging-client.test.ts: test that outbound-sender.ts calls Messaging Service with required fields { to, from_number, body, dedup_key } all present; verify dedup_key is a non-empty string (unique per send)",
+        "apps/crm/conversation/test/contract/ai-client.test.ts: test that ai-agent-reply worker calls AI Service with { prompt_id: 'conversation-agent-reply', context: { lead_name, lead_stage, treatment_interest, recent_messages } } — prompt_id and context both present; verify response.text is parseable as { text, escalate } JSON per agent-mode.ts parseAgentResponse",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

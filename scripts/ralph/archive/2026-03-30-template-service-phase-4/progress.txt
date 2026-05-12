@@ -1,0 +1,14 @@
+# Ralph Progress Log
+Started: Mon Mar 30 20:17:12 +03 2026
+---
+
+## Codebase Patterns
+- lru-cache v11 captures `performance` at module import time — `vi.useFakeTimers()` cannot advance its TTL clock. Use `createTemplateCache(ttl)` factory with a short real TTL (100ms) for TTL expiry tests instead.
+- No ajv-formats plugin in this service — TypeBox `format: 'uuid'` won't validate at runtime; use manual UUID regex `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i`.
+- Auth plugin uses `new TextEncoder().encode(secret)` for JWT verification (not `createSecretKey` from crypto) — test token helpers must use the same key format.
+- `app.requireAuth()` is used for service-to-service endpoints; `app.requireRole('role')` is used for user-facing manager-only endpoints.
+- `buildApp(db, jwtSecret)` in `src/app.ts` accepts a Knex instance and JWT secret — integration tests pass TEST_DB_URL knex instance and TEST_JWT_SECRET.
+- ESM project — migration imports use `.js` extension even though source files are `.ts` (TypeScript resolves these correctly).
+- Node.js 24 — global `fetch` is available; no node-fetch needed for HTTP test calls.
+- Template cache is a module-level singleton (`templateCache` from `src/services/template-cache.ts`) — can be imported in tests to call `templateCache.evict(id)` for cache cleanup between tests.
+

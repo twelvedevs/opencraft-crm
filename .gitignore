@@ -1,2 +1,14 @@
 .superpowers/
 node_modules
+tmp/
+dist/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+
+# QA runtime output
+tools/qa/results/
+tools/qa/bugs/

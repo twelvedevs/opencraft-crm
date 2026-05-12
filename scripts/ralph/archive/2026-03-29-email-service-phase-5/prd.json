@@ -1,0 +1,100 @@
+{
+  "project": "Ortho CRM — Email Service",
+  "branchName": "ralph/email-service-phase-5",
+  "description": "Email Service Phase 5 — Observability & Hardening: structured logging via @ortho/logger, health check endpoint, SIGTERM graceful shutdown, Datadog dashboard definition, and API Gateway routing rule for SendGrid webhook",
+  "userStories": [
+    {
+      "id": "US-012",
+      "title": "Add @ortho/logger structured logging across all service components",
+      "description": "As an operator, I want all Email Service components to emit structured logs with Datadog-compatible fields so that I can correlate events across the distributed system.",
+      "acceptanceCriteria": [
+        "Import @ortho/logger in all route handlers: src/routes/sends.ts, src/routes/campaigns.ts, src/routes/spam-check.ts, src/routes/domains.ts, src/routes/webhooks.ts",
+        "Import @ortho/logger in all services: src/services/sendgrid-client.ts, src/services/spam-scanner.ts, src/services/domain-resolver.ts, src/services/webhook-processor.ts",
+        "Import @ortho/logger in both workers: src/workers/transactional-send.worker.ts, src/workers/campaign-recipient.worker.ts",
+        "Request-entry log in each route handler includes relevant context fields (location_id, job_id, email_id where applicable)",
+        "Worker start/completion logs include job_id, email_id or recipient_id, sendgrid_message_id, and attempt count where applicable",
+        "All catch/error paths log the full error object at error level",
+        "Domain resolver logs cache hits vs. DB misses at debug level",
+        "Webhook processor logs per-event routing decision (campaign vs. transactional path) and any dropped events (sendgrid_message_id not found) at warn level",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Health check endpoint GET /health",
+      "description": "As the ECS task health check, I need GET /health to verify DB and Redis connectivity so that unhealthy tasks are replaced automatically.",
+      "acceptanceCriteria": [
+        "GET /health performs a DB connectivity check (SELECT 1 via Knex) and a Redis connectivity check (PING via ioredis client)",
+        "Returns 200 { \"status\": \"ok\", \"checks\": { \"db\": true, \"redis\": true } } when both pass",
+        "Returns 503 { \"status\": \"error\", \"checks\": { \"db\": <bool>, \"redis\": <bool> } } when either fails, with the failed check set to false",
+        "Route is registered in app.ts at GET /health (no auth required)",
+        "Unit test: mocked DB and Redis both pass → 200 { status: 'ok' }",
+        "Unit test: DB check throws → 503 with db: false",
+        "Unit test: Redis PING fails → 503 with redis: false",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "SIGTERM graceful shutdown — drain workers and close DB pool",
+      "description": "As an ECS operator, I want the Email Service to handle SIGTERM gracefully so that in-flight sends complete before the task exits and no messages are lost.",
+      "acceptanceCriteria": [
+        "src/index.ts registers a process.on('SIGTERM', ...) handler",
+        "On SIGTERM: call fastify.close() to stop accepting new HTTP requests",
+        "On SIGTERM: call worker.close() on the transactional-send BullMQ worker (waits for in-flight job to finish)",
+        "On SIGTERM: call worker.close() on the campaign-recipient BullMQ worker",
+        "On SIGTERM: close the Knex DB connection pool after workers drain",
+        "On SIGTERM: call process.exit(0) after all resources are closed",
+        "Workers are instantiated before the SIGTERM handler is registered so their references are in scope",
+        "A comment in index.ts notes ECS stop timeout must be >= 30s to allow campaign-recipient workers to finish",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Datadog dashboard definition for Email Service",
+      "description": "As a platform operator, I want a committed Datadog dashboard definition so that the Email Service monitoring dashboard can be provisioned from code.",
+      "acceptanceCriteria": [
+        "File created at apps/platform/email/datadog/dashboard.json containing a valid Datadog dashboard API v1 JSON definition",
+        "Dashboard title: 'Email Service — Platform'",
+        "Widget: BullMQ transactional-send queue depth (metric: bullmq.queue.waiting, queue tag: transactional-send); monitor alert threshold > 1000 for 5 minutes",
+        "Widget: BullMQ campaign-recipient queue depth (metric: bullmq.queue.waiting, queue tag: campaign-recipient); monitor alert threshold > 50000 for 10 minutes",
+        "Widget: Campaign send rate — emails sent per minute derived from sent_count increments (metric: email_service.campaign.sent_count or equivalent custom metric)",
+        "Widget: Webhook processing lag — p95 time from SendGrid event timestamp to processing completion; monitor alert threshold p95 > 30s",
+        "Widget: Spam check failure rate — percentage of campaign send jobs blocked by spam gate (status = spam_check_failed / total jobs)",
+        "Widget: email.failed dead-letter rate — count of email.failed EventBridge events; alert on any occurrence",
+        "dashboard.json is valid JSON (no syntax errors)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "API Gateway routing rule for SendGrid webhook endpoint",
+      "description": "As the infrastructure owner, I want the SendGrid webhook endpoint isolated behind an API Gateway routing rule so that only SendGrid traffic reaches POST /webhooks/sendgrid.",
+      "acceptanceCriteria": [
+        "File created at apps/platform/email/infra/api-gateway-sendgrid-rule.ts defining an AWS CDK construct for the API Gateway routing rule",
+        "Routing rule matches POST /webhooks/sendgrid path",
+        "Routing rule includes SendGrid IP CIDR allowlist (documented comment with reference to SendGrid's published IP ranges)",
+        "The construct exports a description string noting this rule is separate from the main Email Service API listener",
+        "A comment notes the rule forwards to the same ECS service target group as the main API but is registered as a separate listener rule with higher priority",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

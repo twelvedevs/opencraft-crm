@@ -1,0 +1,32 @@
+# Conversations — shared inbox, inbox settings.
+# Conversations are created when inbound SMS arrives via Twilio webhook.
+# In dev, the inbox may be empty — these verify endpoints respond correctly.
+
+include:
+  - auth.yaml
+  - identity.yaml
+
+scenarios:
+
+  - id: conversation-list
+    name: "Conversations: list inbox"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/conversations?location_id={{location_id}}&limit=20
+        expect:
+          status: 200
+          body_contains: ["data", "total"]
+
+  - id: conversation-inbox-settings-get
+    name: "Conversations: get inbox settings for location"
+    service: crm-api-gateway
+    depends_on: [location-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/conversations/settings/locations/{{location_id}}
+        expect:
+          status: 200

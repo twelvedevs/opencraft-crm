@@ -1,0 +1,225 @@
+# Health checks — no auth required.
+# Run first to verify all services are reachable before functional tests.
+
+scenarios:
+
+  - id: health-api-gateway
+    name: "Health: CRM API Gateway"
+    service: crm-api-gateway
+    steps:
+      - type: http
+        method: GET
+        path: /health
+        expect:
+          status: 200
+          body_contains: ["status"]
+
+  - id: health-identity
+    name: "Health: Identity Service (ready)"
+    service: identity
+    steps:
+      - type: http
+        service: identity
+        method: GET
+        path: /ready
+        expect:
+          status: 200
+          body_contains: ["status"]
+
+  - id: health-lead
+    name: "Health: Lead Service"
+    service: lead
+    steps:
+      - type: http
+        service: lead
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-pipeline
+    name: "Health: Pipeline Service"
+    service: pipeline
+    steps:
+      - type: http
+        service: pipeline
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-conversation
+    name: "Health: Conversation Service"
+    service: conversation
+    steps:
+      - type: http
+        service: conversation
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-campaign
+    name: "Health: Campaign Service"
+    service: campaign
+    steps:
+      - type: http
+        service: campaign
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-reporting
+    name: "Health: Reporting Service"
+    service: reporting
+    steps:
+      - type: http
+        service: reporting
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-referral
+    name: "Health: Referral Service"
+    service: referral
+    steps:
+      - type: http
+        service: referral
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-messaging
+    name: "Health: Messaging Service"
+    service: messaging
+    steps:
+      - type: http
+        service: messaging
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-email
+    name: "Health: Email Service"
+    service: email
+    steps:
+      - type: http
+        service: email
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-notification
+    name: "Health: Notification Service"
+    service: notification
+    steps:
+      - type: http
+        service: notification
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-template
+    name: "Health: Template Service"
+    service: template
+    steps:
+      - type: http
+        service: template
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-nurturing
+    name: "Health: Nurturing Engine"
+    service: nurturing
+    steps:
+      - type: http
+        service: nurturing
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-automation
+    name: "Health: Automation Engine"
+    service: automation
+    steps:
+      - type: http
+        service: automation
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-audience
+    name: "Health: Audience Engine"
+    service: audience
+    steps:
+      - type: http
+        service: audience
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-analytics
+    name: "Health: Analytics Service"
+    service: analytics
+    steps:
+      - type: http
+        service: analytics
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-ai
+    name: "Health: AI Service"
+    service: ai
+    steps:
+      - type: http
+        service: ai
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-integration-hub
+    name: "Health: Integration Hub"
+    service: integration-hub
+    steps:
+      - type: http
+        service: integration-hub
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-media
+    name: "Health: Media Service"
+    service: media
+    steps:
+      - type: http
+        service: media
+        method: GET
+        path: /health
+        expect:
+          status: 200
+
+  - id: health-import
+    name: "Health: Data Import Service"
+    service: import
+    steps:
+      - type: http
+        service: import
+        method: GET
+        path: /health
+        expect:
+          status: 200

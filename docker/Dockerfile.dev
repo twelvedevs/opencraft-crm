@@ -1,0 +1,39 @@
+# Multi-stage dev build. Build any platform service via SERVICE_PATH build arg.
+# Usage: docker build --build-arg SERVICE_PATH=apps/platform/identity -f docker/Dockerfile.dev .
+ARG SERVICE_PATH
+
+# ── Stage 1: build ──────────────────────────────────────────────────────────
+FROM node:24-alpine AS builder
+ARG SERVICE_PATH
+
+WORKDIR /repo
+
+# Copy workspace packages so file: dependencies resolve
+COPY packages/ ./packages/
+
+# Install service deps (including devDeps — tsx needed for migrations)
+COPY ${SERVICE_PATH}/package*.json ./${SERVICE_PATH}/
+WORKDIR /repo/${SERVICE_PATH}
+RUN npm ci
+
+# Copy source and compile
+WORKDIR /repo
+COPY ${SERVICE_PATH}/ ./${SERVICE_PATH}/
+WORKDIR /repo/${SERVICE_PATH}
+RUN npm run build
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM node:24-alpine
+ARG SERVICE_PATH
+
+# Preserve /repo structure so file: dependency symlinks in node_modules resolve.
+# npm symlinks @ortho/* packages relative to /repo/packages/, so both trees
+# must exist at the same paths as in the builder stage.
+WORKDIR /repo
+
+COPY --from=builder /repo/packages ./packages
+COPY --from=builder /repo/${SERVICE_PATH} ./${SERVICE_PATH}
+
+WORKDIR /repo/${SERVICE_PATH}
+
+CMD ["node", "dist/index.js"]

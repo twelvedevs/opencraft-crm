@@ -1,0 +1,38 @@
+{
+  "name": "@platform/notification",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "npx tsx node_modules/knex/bin/cli.js migrate:latest --knexfile knexfile.ts"
+  },
+  "dependencies": {
+    "@ortho/logger": "file:../../../packages/@ortho/logger",
+    "@ortho/fastify-logger": "file:../../../packages/@ortho/fastify-logger",
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
+    "@fastify/sensible": "^5.0.0",
+    "@sinclair/typebox": "^0.34.0",
+    "bullmq": "^5.0.0",
+    "fastify": "^5.0.0",
+    "ioredis": "^5.0.0",
+    "jose": "^5.0.0",
+    "knex": "^3.0.0",
+    "pg": "^8.0.0",
+    "pino": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}

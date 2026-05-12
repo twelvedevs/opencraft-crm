@@ -1,0 +1,166 @@
+# Ralph Progress Log
+Started: Wed Apr  8 - Campaign Service Phase 2
+---
+
+## Codebase Patterns
+- Integration tests for worker logic: simulate processJob by calling resolveAudience + orchestrateNonAB directly — never import worker module in tests (side-effect: creates BullMQ Worker)
+- Integration test fetch mocking: compose JWKS mock (delegate to savedFetch) + service mocks in a single createServiceFetchMock helper; restore in afterEach
+- HAS_REDIS guard: setup.ts uses `??` for BULLMQ_REDIS_URL; helpers.ts checks `!== 'redis://localhost:6379'` (mirrors HAS_DB pattern)
+- BullMQ Queue for route handlers: create inside workflowRoutes() using `new Queue(ORCHESTRATE_QUEUE, { connection: bullmqRedis })` — avoids module-level side effects
+- Queue.remove(jobId) for cancelling delayed jobs — wrap in try/catch since job may already be processing
+- Campaign service uses `src/api.ts` (not `src/app.ts`) for the buildApp function per PRD spec
+- Auth: use `authPlugin` from `@ortho/auth-middleware` with `jwksUrl` and `allowedPaths: ['/health']` — requires `IDENTITY_JWKS_URL` env var
+- DB: use `knexLib` default import from `knex`, searchPath `['crm_campaigns', 'public']`
+- Logger: `createLogger('crm-campaign')` cast as `unknown as FastifyBaseLogger` for Fastify
+- All services export `destroy()` from db.ts for clean shutdown
+- Migrations: use `knex.schema.withSchema('crm_campaigns')` for tables, `knex.raw()` for CHECK constraints and indexes
+- knexfile.ts: uses `process.env['DATABASE_URL']` directly (not env.ts), with `schemaName: 'crm_campaigns'` for migration tracking
+- FK references within same schema use fully qualified: `.references('id').inTable('crm_campaigns.campaigns')`
+- State machine: use `validateTransition(status, action)` before any status change; use `targetStatus(status, action)` to get destination status
+- Service layer: pure functions (no DB), exported from `src/services/campaign-service.ts`; routes call these before repo writes
+- Routes: register as Fastify plugin `async function fooRoutes(app, opts: { db: Knex })`, registered with `{ prefix: '/campaigns', db }` in api.ts
+- Auth: use `requirePermission('campaigns:write')` as preHandler for all campaign routes; `requirePermission('campaigns:manage')` for manager-only routes
+- Integration tests: RSA keypair + JWKS mock on globalThis.fetch; `describe.skipIf(!HAS_DB)` to skip without Postgres; `pool: 'forks'` + `singleFork: true` in vitest config
+- Test factories: use direct DB insert (bypassing routes) via `insertCampaign(db, overrides)` to set up specific statuses
+- env.ts: all Phase 2 env vars already present (BULLMQ_REDIS_URL, SQS_QUEUE_URL, EVENTBRIDGE_BUS_NAME, AUDIENCE_ENGINE_URL, LEAD_SERVICE_URL, EMAIL_SERVICE_URL, TEMPLATE_SERVICE_URL)
+- package.json: bullmq, ioredis already in dependencies; start:api, start:worker, dev:worker scripts already present
+- Phase 2 stubs: POST /:id/schedule, DELETE /:id/schedule, POST /:id/send-now return 501 in workflow.ts — ready to be replaced
+- BullMQ queue names: ORCHESTRATE_QUEUE = 'campaign:orchestrate', AB_WINNER_QUEUE = 'campaign:ab-winner-select' (prefixed to avoid collision)
+- SQS consumer: startConsumer(db, bus) pattern — bus instance shared between subscribe+publish; bus created with createBus({ queueUrl: env.SQS_QUEUE_URL })
+- Workers: place in `src/workers/` dir, import as side-effect in `src/worker.ts`; export job data interface (e.g. `OrchestrateJobData`)
+- For COALESCE in knex updates: use `db.raw('COALESCE(col, now())')` directly in the update object
+- Repositories: use `Omit<Interface, 'id'>` for insert data type; `Partial<Omit<Interface, 'id'>>` for update data type
+- campaign_recipients has composite PK (campaign_id, lead_id) — no auto-generated id column
+- batchInsert: `db.batchInsert(TABLE, rows, chunkSize)` — third arg is chunk size (1000)
+- ioredis: import as `{ Redis }` (named export), not default — default fails TS constructable check
+- Queue connection: `src/queue/connection.ts` exports `bullmqRedis`, `ORCHESTRATE_QUEUE`, `AB_WINNER_QUEUE`
+- Worker entry: `src/worker.ts` — import workers here; use `bullmqRedis.quit()` for graceful shutdown
+- HTTP service calls: use native `fetch` + `new URL()` for building paginated requests; mock via `globalThis.fetch = vi.fn(...)` in unit tests
+- Audience Engine API: segments → POST /audiences/segments/:id/evaluate { snapshot_id, entities, done }; inline → POST /audiences/evaluate { snapshot_id, filter, entities, snapshot: true, done }; snapshot → GET /audiences/snapshots/:id { entity_ids }
+- Lead Service API: paginated GET /leads?contact_status=active&limit=500&offset=N → { items }; by IDs GET /leads?ids=csv → { items }
+- SQS consumer: `startConsumer(db, bus)` in `src/handlers/sqs-consumer.ts` — subscribes to events then calls `bus.start()`; bus created via `createEventBus()` in worker.ts
+- Event handlers: place in `src/handlers/` dir; export pure async function taking (payload, db, bus) — easy to unit test with vi.mock() on repos
+- Terminal status logic: all_failed→'failed'; has_completion+has_errors→'completed_with_errors'; else→'completed'
+---
+
+## 2026-04-08 - US-011
+- Implemented campaign-sends and campaign-recipients repositories
+- Files changed:
+  - src/repositories/campaign-sends.repo.ts (new)
+  - src/repositories/campaign-recipients.repo.ts (new)
+- **Learnings for future iterations:**
+  - campaign_sends has unique constraint on email_job_ref — useful for crash recovery (findByEmailJobRef)
+  - campaign_recipients uses composite PK (campaign_id, lead_id), no auto id
+  - countNonTerminalSends excludes: completed, completed_with_errors, failed, cancelled
+  - batchInsert third arg is the chunk size, knex handles chunking internally
+---
+
+## 2026-04-08 - US-012
+- Implemented BullMQ queue connection and worker entry point
+- Files changed:
+  - src/queue/connection.ts (new) — shared Redis connection + queue name constants
+  - src/worker.ts (new) — worker entry point with graceful shutdown
+- **Learnings for future iterations:**
+  - ioredis must be imported as `{ Redis }` (named export), not `default` — default import fails TypeScript constructable check
+  - worker.ts is separate from index.ts; future workers import from queue/connection.ts and are registered in worker.ts
+  - bullmqRedis.quit() for graceful shutdown (not disconnect)
+  - Package.json scripts (dev:worker, start:worker) were already set up in Phase 1 stubs
+---
+
+## 2026-04-08 - US-013
+- Implemented audience-resolver service with full pipeline: Lead Service pagination → Audience Engine evaluation → snapshot fetch → contact data batch-fetch → group by location_id
+- Files changed:
+  - src/services/audience-resolver.ts (new) — resolveAudience(), extractPreFilters(), LeadContact interface
+  - test/unit/audience-resolver.test.ts (new) — 11 tests covering pagination, done flag, pre-filters, error handling, segment vs inline filter
+- **Learnings for future iterations:**
+  - audience-resolver uses globalThis.fetch (native fetch) for HTTP calls to Lead Service and Audience Engine — mock with `globalThis.fetch = vi.fn(...)` in tests
+  - Pre-filter extraction scans `audience_filter.conditions` array for top-level { field, op, value } objects where field is in (location_id, pipeline, stage) and op is 'eq' or '='
+  - Lead Service pagination: GET /leads?contact_status=active&limit=500&offset=N returns { items: LeadContact[] }
+  - Audience Engine: named segment → POST /audiences/segments/:id/evaluate; inline filter → POST /audiences/evaluate with { filter, snapshot: true }
+  - Audience Engine snapshot: GET /audiences/snapshots/:id returns { entity_ids: string[] }
+  - Lead Service by IDs: GET /leads?ids=id1,id2,... returns { items: LeadContact[] }
+  - resolveAudience first arg is `db` (unused currently, kept for interface consistency with future callers)
+  - Event publisher: `publishCampaignSent(bus, payload)` wraps `bus.publish()` with `event_type: 'campaign.sent'`, `entity_type: 'campaign'`
+  - Send orchestrator: `orchestrateNonAB(db, campaign, groupedByLocation, env)` — per-location loop with crash recovery guard via `findByEmailJobRef`
+  - Email Service call: POST /emails/campaigns/send returns `{ job_id }` on 202; 422 means spam_check_failed/domain_not_configured
+  - campaign_sends + campaign_recipients wrapped in a single knex transaction for atomicity
+  - email_job_ref format: `{campaign_id}:{location_id}` for non-A/B sends
+---
+
+## 2026-04-08 - US-014
+- Implemented non-A/B send orchestrator and campaign.sent event publisher
+- Files changed:
+  - src/events/publisher.ts (new) — publishCampaignSent(bus, payload) using @ortho/event-bus
+  - src/services/send-orchestrator.ts (new) — orchestrateNonAB per-location send loop with crash recovery guard
+  - test/unit/send-orchestrator.test.ts (new) — 4 tests: skip guard, transaction scope, bulk insert chunking, 422 handling
+- **Learnings for future iterations:**
+  - Event publisher pattern: wrap bus.publish() with typed payload interface (CampaignSentPayload); use event_type + entity_type + entity_id
+  - @ortho/event-bus EventBus interface: publish(OrthoEvent) where OrthoEvent has { event_type, entity_type, entity_id, payload }
+  - Send orchestrator uses native fetch for Email Service calls — mock with globalThis.fetch in tests
+  - email_job_ref = "{campaign_id}:{location_id}" for non-A/B; used as crash recovery idempotency key
+  - 422 from Email Service = spam_check_failed or domain_not_configured → insert failed send, continue to next location
+  - Transaction wraps campaign_sends insert + campaign_recipients bulkInsert — if either fails, both roll back
+  - vi.mock() for repository modules works well for isolating send-orchestrator unit tests from DB
+---
+
+## 2026-04-08 - US-015
+- Implemented campaign-orchestrate BullMQ worker for non-A/B send path
+- Files changed:
+  - src/workers/campaign-orchestrate.worker.ts (new) — BullMQ Worker with full orchestration pipeline
+  - src/worker.ts (updated) — uncommented worker import
+- **Learnings for future iterations:**
+  - Worker files go in `src/workers/` directory; import them in `src/worker.ts` as side-effect imports (`import './workers/foo.worker.js'`)
+  - For COALESCE in updates, use `db.raw('COALESCE(sent_at, now())')` directly in the knex update object — the campaigns.repo.update() doesn't support raw expressions in a typed way
+  - Worker exports `OrchestrateJobData` interface (`{ campaign_id: string }`) — route handlers will need this type when enqueuing jobs
+  - BullMQ Worker constructor: `new Worker(queueName, processor, { connection: ioredisInstance, concurrency: 1 })`
+  - Snapshot expiry check: GET /audiences/snapshots/:id returns 404 if expired — clear audience_snapshot_id and re-resolve
+  - Empty audience → status='failed' with campaign_events comment='empty_audience'
+---
+
+## 2026-04-08 - US-016
+- Implemented email.campaign_completed handler and SQS consumer wiring
+- Files changed:
+  - src/handlers/email-campaign-completed.handler.ts (new) — handleEmailCampaignCompleted() with 5-step pipeline
+  - src/handlers/sqs-consumer.ts (new) — startConsumer(db, bus) subscribes to email.campaign_completed
+  - src/worker.ts (updated) — imports createEventBus, calls startConsumer, adds bus.stop() to SIGTERM
+  - test/unit/email-campaign-completed.test.ts (new) — 6 tests covering all scenarios
+- **Learnings for future iterations:**
+  - Event handlers go in `src/handlers/` directory; pure functions taking (payload, db, bus) for testability
+  - SQS consumer pattern: bus.subscribe() then bus.start() — subscribe must be called before start
+  - createEventBus() from @ortho/event-bus reads EVENT_BUS_DRIVER env var to select driver
+  - Terminal status determination: load all sends, check all_failed first (→'failed'), then has_completion+has_errors (→'completed_with_errors'), else 'completed'
+  - For unit tests: vi.mock() all repo modules + publisher; use vi.mocked() for type-safe mock setup
+  - Bus instance should be cleaned up with bus.stop() in SIGTERM handler alongside bullmqRedis.quit()
+  - The handler loads campaign early (before publish) to get template_id for the campaign.sent event payload
+---
+
+## 2026-04-08 - US-017
+- Replaced 501 stubs for POST /:id/schedule, DELETE /:id/schedule, POST /:id/send-now with full implementations
+- Updated POST /:id/cancel to remove pending BullMQ job before status change
+- Added BullMQ Queue instance in workflowRoutes for enqueuing/removing jobs
+- Files changed:
+  - src/routes/workflow.ts (modified) — replaced 3 stubs, updated cancel, added Queue + imports
+- **Learnings for future iterations:**
+  - BullMQ Queue instance created inside route plugin function (not module-level) to avoid eager Redis connection at import time
+  - Queue.remove(jobId) removes a delayed job by its ID — wrap in try/catch for idempotency
+  - Don't import from worker files in API process — the Worker constructor runs at module level as a side effect
+  - schedule delay = `scheduledFor.getTime() - Date.now()` in ms — BullMQ delay option takes milliseconds
+  - orchestrate_job_id stored as `job.id!` (BullMQ job ID is string | undefined, but always present after add)
+---
+
+## 2026-04-08 - US-018
+- Implemented integration tests for Phase 2 orchestration scenarios
+- 4 test cases: non-A/B happy path, empty audience, multi-location (3 locations), crash recovery
+- Files changed:
+  - test/integration/setup.ts (modified) — BULLMQ_REDIS_URL now uses ?? to preserve real env values
+  - test/integration/helpers.ts (modified) — added HAS_REDIS export
+  - test/integration/orchestration.test.ts (new) — 4 integration tests with globalThis.fetch mocking
+- **Learnings for future iterations:**
+  - HAS_REDIS guard pattern: check env var !== fallback default (same as HAS_DB pattern)
+  - setup.ts must use `??` for env vars that need real-vs-default detection in helpers.ts
+  - Integration tests can simulate worker processJob by calling resolveAudience + orchestrateNonAB directly — avoids importing worker module which creates a BullMQ Worker as side effect
+  - createServiceFetchMock helper composes JWKS mock (delegating to savedFetch) with external service mocks for Lead Service, Audience Engine, Email Service
+  - fireWorkerLogic helper replicates the worker's steps (status transition, audience resolution, empty guard, orchestration) using the test db
+  - Crash recovery test: pre-insert campaign_sends rows for 2 of 3 locations, then verify orchestrateNonAB only makes 1 Email Service call (skip guard via findByEmailJobRef)
+  - Multi-location test: handleEmailCampaignCompleted must be called for ALL sends before terminal status is determined (countNonTerminalSends check)
+---

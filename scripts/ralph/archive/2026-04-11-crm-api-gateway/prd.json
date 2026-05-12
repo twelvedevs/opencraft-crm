@@ -1,0 +1,326 @@
+{
+  "project": "Ortho CRM — CRM API Gateway",
+  "branchName": "ralph/crm-api-gateway",
+  "description": "CRM API Gateway (apps/crm/api-gateway) — Fastify 5 reverse proxy with JWT + API key auth, tiered rate limiting, SSE proxy, and two gateway-layer RBAC rules. No DB, no EventBridge, no BullMQ.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Service scaffold — package.json, tsconfig, index.ts, Dockerfile, env config",
+      "description": "As a developer, I need the service skeleton so all subsequent stories have a compilable base to build on.",
+      "acceptanceCriteria": [
+        "Create apps/crm/api-gateway/ with src/, test/ directories",
+        "package.json: name='@ortho/crm-api-gateway', type='module', Node 24 engine, dependencies: fastify@5, @fastify/reply-from, @fastify/rate-limit, @ortho/auth-middleware, @ortho/logger, lru-cache; devDependencies: typescript@5, vitest@2, tsx",
+        "tsconfig.json: strict, ESM (module: NodeNext, moduleResolution: NodeNext), target: ES2022, outDir: dist/, rootDir: src/",
+        "src/config.ts: reads all required env vars (LEAD_SERVICE_URL, PIPELINE_SERVICE_URL, CONVERSATION_SERVICE_URL, CAMPAIGN_SERVICE_URL, REFERRAL_SERVICE_URL, REPORTING_SERVICE_URL, IMPORT_SERVICE_URL, NOTIFICATION_SERVICE_URL, IDENTITY_SERVICE_URL, LEAD_SERVICE_API_KEY, INTERNAL_API_SECRET); throws on any missing required var; reads optional numeric vars with defaults (JWKS_CACHE_TTL_MS=300000, API_KEY_CACHE_TTL_MS=60000, UPSTREAM_TIMEOUT_MS=30000, PORT=3000, MAX_BODY_SIZE_BYTES=1048576, IMPORT_MAX_BODY_SIZE_BYTES=5242880); exports typed config object",
+        "src/index.ts: creates Fastify instance with @ortho/logger, registers global plugins (request-id, auth, rate-limit, error-handler) in that order, then registers all route plugins; listens on PORT; placeholder imports for plugins and routes are fine — will be implemented in later stories",
+        "Dockerfile: FROM node:24-alpine, WORKDIR /app, COPY package*.json, RUN npm ci --omit=dev, COPY dist/ dist/, CMD ['node', 'dist/index.js']",
+        "package.json scripts: build (tsc), dev (tsx watch src/index.ts), typecheck (tsc --noEmit), test (vitest run)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Plugin — request-id (X-Request-ID injection)",
+      "description": "As the gateway, I need to assign a fresh UUID v4 request ID to every request so that distributed traces are trustworthy and cannot be spoofed by clients.",
+      "acceptanceCriteria": [
+        "Create src/plugins/request-id.ts as a Fastify plugin (fp-wrapped for encapsulation)",
+        "On every request: generate a UUID v4 using crypto.randomUUID(), discard any client-supplied X-Request-ID header, store the generated ID in request.requestId (extend FastifyRequest interface via declaration merge)",
+        "The generated X-Request-ID is NOT forwarded to upstreams in this plugin — forwarding is handled by route plugins via @fastify/reply-from rewriteRequestHeaders",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Lib — api-key-cache (LRU cache for validated API keys)",
+      "description": "As the auth plugin, I need an in-process LRU cache for API key validation results so repeated requests with the same key don't hit Identity Service on every call.",
+      "acceptanceCriteria": [
+        "Create src/lib/api-key-cache.ts",
+        "Uses lru-cache npm package, max 500 entries, TTL from config.API_KEY_CACHE_TTL_MS",
+        "Cache key: SHA256 hex digest of raw key (computed via node:crypto createHash('sha256'))",
+        "Exports: computeKeyHash(rawKey: string): string; getFromCache(keyHash: string): { permissions: string[] } | undefined; setInCache(keyHash: string, value: { permissions: string[] }): void; clearCache(): void (for tests)",
+        "Cache stores { permissions: string[] } values",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Lib — channel-resolver (Lead Service lookup for /convert enrichment)",
+      "description": "As the pipeline route, I need to resolve a lead's attribution channel from the Lead Service before forwarding /convert requests, so the Pipeline Engine always receives a valid channel and clients cannot spoof it.",
+      "acceptanceCriteria": [
+        "Create src/lib/channel-resolver.ts",
+        "Exports resolveChannel(leadId: string): Promise<ResolveChannelResult>",
+        "ResolveChannelResult is a discriminated union: { ok: true; channel: string } | { ok: false; error: 'lead_not_found' | 'upstream_unavailable' | 'channel_resolution_failed' }",
+        "Valid channel enum: 'google_ads' | 'facebook' | 'website' | 'referral_patient' | 'referral_doctor' | 'call_tracking' | 'walk_in' | 'chat' | 'google_business' | 'import' | 'unknown'",
+        "Calls GET <LEAD_SERVICE_URL>/leads/:leadId with Authorization: Bearer <LEAD_SERVICE_API_KEY> and timeout UPSTREAM_TIMEOUT_MS",
+        "Lead Service 404 → error: 'lead_not_found'",
+        "Lead Service 5xx or network error/timeout → error: 'upstream_unavailable'",
+        "Lead Service 200 but channel is null, absent, not in valid enum, or body is malformed/unparseable → error: 'channel_resolution_failed'",
+        "Lead Service 200 with valid channel → ok: true, channel: <value>",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Plugin — auth (JWT + API key validation, header stripping + injection)",
+      "description": "As the gateway, I need to authenticate every request (JWT or API key) and populate request context with auth claims, so downstream route plugins can enforce RBAC and so all forwarded requests carry the correct identity headers.",
+      "acceptanceCriteria": [
+        "Create src/plugins/auth.ts as a Fastify plugin",
+        "Step 1 — Strip incoming synthetic headers unconditionally on every request: remove X-User-Id, X-User-Role, X-User-Locations, X-Api-Key-Permissions",
+        "Step 2 — Detect route skip: if request.routeOptions.config.auth === false, skip authentication entirely",
+        "Step 3a — Public routes: no auth check, no context population",
+        "Step 3b — JWT path: Authorization header is present and does NOT start with 'Bearer ak_'; use @ortho/auth-middleware to verify RS256 signature against Identity Service JWKS (<IDENTITY_SERVICE_URL>/.well-known/jwks.json); JWKS cached at startup with JWKS_CACHE_TTL_MS; on unknown kid: re-fetch JWKS up to 3 retries with exponential backoff capped at 5s/retry; JWKS unreachable with unknown kid → 401 { error: 'unauthorized' }; JWT invalid/expired → 401 { error: 'unauthorized' }; on success: extract sub, role, locations, must_change_password from claims; if must_change_password is true → 403 { error: 'password_change_required' } for ALL routes without exception",
+        "Step 3c — API key path: Authorization header starts with 'Bearer ak_'; extract raw key; compute keyHash = SHA256(rawKey); check LRU cache; on miss: POST <IDENTITY_SERVICE_URL>/identity/api-keys/validate with X-Internal-Secret header and body { key: rawKey }; Identity 401 → 401 { error: 'unauthorized' }; Identity 5xx/unreachable → 503 { error: 'auth_unavailable' } (fail closed, never fail open); on success: cache { permissions } keyed on keyHash; store { keyHash, permissions } in request context",
+        "Step 4 — Missing/invalid Authorization on non-public routes → 401 { error: 'unauthorized' }",
+        "Step 5 — Header injection for forwarding (stored on request object for route plugins to use via rewriteRequestHeaders): JWT routes: set request.authHeaders = { 'X-User-Id': sub, 'X-User-Role': role, 'X-User-Locations': locations.join(',') (omitted entirely if locations array is empty), 'Authorization': original JWT header }; API key routes: set request.authHeaders = { 'X-Api-Key-Permissions': permissions.join(',') } (Authorization header NOT forwarded); Public routes: request.authHeaders = {}",
+        "Extend FastifyRequest interface: add authType: 'jwt' | 'api-key' | 'public', jwtClaims?: { sub, role, locations, must_change_password }, apiKeyContext?: { keyHash, permissions }, authHeaders: Record<string, string>",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Plugin — rate-limit (tiered IP / user / API key limiting)",
+      "description": "As the gateway, I need tiered rate limiting so that unauthenticated, browser, and machine callers each have appropriate request budgets.",
+      "acceptanceCriteria": [
+        "Create src/plugins/rate-limit.ts as a Fastify plugin",
+        "Registers @fastify/rate-limit as a global plugin",
+        "GET /health is excluded from rate limiting (check request.routeOptions.config.skipRateLimit or equivalent @fastify/rate-limit skip option)",
+        "Key generator reads auth context (set by auth plugin) to select tier: if authType === 'jwt': key = jwtClaims.sub, max = 300, timeWindow = 60s; if authType === 'api-key': key = apiKeyContext.keyHash, max = 600, timeWindow = 60s; else (public / unauthenticated): key = rightmost value in X-Forwarded-For header (last IP added by ALB), max = 60, timeWindow = 60s",
+        "Rate limit exceeded: 429 { error: 'rate_limit_exceeded' } with Retry-After header",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Plugin — error-handler (gateway error shape normalization)",
+      "description": "As the gateway, I need a centralized error handler so all gateway-generated errors use the { error: string } shape and upstream timeouts produce 502 responses.",
+      "acceptanceCriteria": [
+        "Create src/plugins/error-handler.ts as a Fastify plugin",
+        "Set Fastify setErrorHandler to catch errors thrown by route plugins",
+        "If error is a network timeout or connection refused (from @fastify/reply-from): return 502 { error: 'upstream_unavailable' }",
+        "If error has a statusCode property (Fastify HTTP errors): return that status code with { error: error.message }",
+        "Otherwise: return 500 { error: 'internal_error' } and log the error",
+        "Upstream errors that @fastify/reply-from passes through unchanged (non-network errors) are NOT caught here — they are forwarded as-is by reply-from",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Route — health check (GET /health)",
+      "description": "As ECS Fargate, I need a health check endpoint that always returns 200 so the target group can confirm the gateway is alive.",
+      "acceptanceCriteria": [
+        "Create src/routes/health.ts as a Fastify plugin",
+        "Register GET /health (no /v1 prefix) with { config: { auth: false, skipRateLimit: true } }",
+        "Returns 200 { status: 'ok' }",
+        "No auth, no rate limiting applied (verified by config flags)",
+        "Registered in src/index.ts before route plugins (no prefix needed)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Routes — leads + conversations (simple pass-through proxies)",
+      "description": "As the frontend and EHR integration, I need /v1/leads/* and /v1/conversations/* requests forwarded to their respective upstream services with auth headers injected.",
+      "acceptanceCriteria": [
+        "Create src/routes/leads.ts and src/routes/conversations.ts as Fastify plugins",
+        "Each plugin registers a wildcard route matching ALL HTTP methods on /* within its prefix (/v1/leads and /v1/conversations respectively)",
+        "Uses @fastify/reply-from reply.from() to proxy to upstream URL: LEAD_SERVICE_URL and CONVERSATION_SERVICE_URL",
+        "Before proxying: strip /v1 prefix from path (forward /leads/... not /v1/leads/...)",
+        "Inject auth headers via rewriteRequestHeaders: spread request.authHeaders into upstream request headers, also inject X-Request-ID from request.requestId",
+        "Upstream timeout: UPSTREAM_TIMEOUT_MS (non-SSE routes)",
+        "Downstream errors pass through as-is (status code + body unchanged) — @fastify/reply-from default behavior",
+        "Both route plugins registered in src/index.ts under prefix '/v1/leads' and '/v1/conversations'",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Routes — campaigns + reports (simple pass-through proxies)",
+      "description": "As the frontend, I need /v1/campaigns/* and /v1/reports/* requests forwarded to their respective upstream services.",
+      "acceptanceCriteria": [
+        "Create src/routes/campaigns.ts and src/routes/reports.ts as Fastify plugins",
+        "Same pass-through pattern as US-009: wildcard routes, reply.from() with CAMPAIGN_SERVICE_URL and REPORTING_SERVICE_URL",
+        "Strip /v1 prefix, inject auth headers (request.authHeaders) and X-Request-ID via rewriteRequestHeaders",
+        "Upstream timeout: UPSTREAM_TIMEOUT_MS",
+        "Both registered in src/index.ts under '/v1/campaigns' and '/v1/reports'",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Route — pipeline (override RBAC + /convert channel enrichment)",
+      "description": "As the gateway, I need to enforce role-based guards on pipeline override transitions and resolve the lead's attribution channel before forwarding /convert requests, so Pipeline Engine receives trustworthy inputs.",
+      "acceptanceCriteria": [
+        "Create src/routes/pipeline.ts as a Fastify plugin registered under prefix '/v1/pipeline'",
+        "For ALL pipeline routes: strip /v1 prefix, inject auth headers + X-Request-ID, proxy to PIPELINE_SERVICE_URL",
+        "Override RBAC — for POST /v1/pipeline/transitions only: read request body; if body.override === true, check request.jwtClaims.role; permitted roles: 'call_center_manager', 'marketing_manager', 'super_admin'; blocked roles: 'call_center_agent', 'marketing_staff'; blocked role with override: true → 403 { error: 'forbidden' } without forwarding; override: false or absent → no RBAC check, forward as-is; API key callers: no override RBAC check (body.triggered_by forwarded as-is)",
+        "Channel enrichment — for POST /v1/pipeline/convert only: extract lead_id from request body; call resolveChannel(lead_id) from channel-resolver lib; if error 'lead_not_found' → 404 { error: 'lead_not_found' } without forwarding; if error 'upstream_unavailable' → 502 { error: 'upstream_unavailable' } without forwarding; if error 'channel_resolution_failed' → 422 { error: 'channel_resolution_failed' } without forwarding; on success: overwrite (or inject) channel field in the forwarded request body with the resolved value; then forward to PIPELINE_SERVICE_URL/pipeline/convert",
+        "All other /v1/pipeline/* routes: simple pass-through with auth headers + X-Request-ID",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Route — referrals (public routes + JWT routes split)",
+      "description": "As the practice website widget and authenticated users, I need some referral routes to be publicly accessible without JWT while others require authentication.",
+      "acceptanceCriteria": [
+        "Create src/routes/referrals.ts as a Fastify plugin registered under prefix '/v1/referrals'",
+        "Public routes (registered with { config: { auth: false } }): GET /v1/referrals/r/:code (302 click redirect) and GET /v1/referrals/links/:code and GET /v1/referrals/portal/:token",
+        "GET /v1/referrals/r/:code: proxy to REFERRAL_SERVICE_URL with followRedirects: false on this specific route's reply-from call, so the 302 is returned to the browser as-is",
+        "All other /v1/referrals/* routes: require JWT auth (no { config: { auth: false } }); missing/invalid JWT → 401 as enforced by auth plugin",
+        "All routes: inject X-Request-ID; public routes inject no auth headers; JWT routes inject request.authHeaders",
+        "All routes: strip /v1 prefix, proxy to REFERRAL_SERVICE_URL",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Route — imports (body size override for /upload)",
+      "description": "As the import coordinator, I need to upload large Ortho2 CSV files via /v1/imports/upload, which requires a larger body size limit than the gateway default.",
+      "acceptanceCriteria": [
+        "Create src/routes/imports.ts as a Fastify plugin registered under prefix '/v1/imports'",
+        "POST /v1/imports/upload: override body size limit to IMPORT_MAX_BODY_SIZE_BYTES (5MB default) for this route only; proxy to IMPORT_SERVICE_URL",
+        "All other /v1/imports/* routes: use default MAX_BODY_SIZE_BYTES (1MB); simple pass-through proxy to IMPORT_SERVICE_URL",
+        "All routes: strip /v1 prefix, inject auth headers + X-Request-ID via rewriteRequestHeaders",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Route — notifications (SSE proxy for /stream + standard buffered routes)",
+      "description": "As the frontend, I need the SSE stream from the Notification Service delivered without buffering, and other notification routes handled as standard proxies.",
+      "acceptanceCriteria": [
+        "Create src/routes/notifications.ts as a Fastify plugin registered under prefix '/v1/notifications'",
+        "GET /v1/notifications/stream: JWT auth required; proxy to NOTIFICATION_SERVICE_URL/notifications/stream using @fastify/reply-from in streaming mode (pipe upstream response body without buffering); NO upstream timeout on this route (long-lived connection); forward Last-Event-ID header from client to upstream; set response headers: Content-Type: text/event-stream, Cache-Control: no-cache, X-Accel-Buffering: no, Connection: keep-alive; inject X-Request-ID and request.authHeaders via rewriteRequestHeaders",
+        "All other /v1/notifications/* routes (GET /v1/notifications, POST /v1/notifications/:id/read, POST /v1/notifications/read-all): standard buffered proxy to NOTIFICATION_SERVICE_URL with UPSTREAM_TIMEOUT_MS; inject auth headers + X-Request-ID",
+        "All routes: strip /v1 prefix",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Tests — auth.test.ts (JWT + API key + header stripping + must_change_password)",
+      "description": "As a developer, I need integration tests for all authentication paths so regressions in the auth plugin are caught before deploy.",
+      "acceptanceCriteria": [
+        "Create test/auth.test.ts using Vitest",
+        "Use Fastify's inject() (no real HTTP server) for all tests; mock @ortho/auth-middleware, Identity Service calls, and api-key-cache",
+        "JWT valid: 200 forwarded to upstream; X-User-Id, X-User-Role, X-User-Locations injected; Authorization header forwarded unchanged",
+        "JWT invalid/malformed: 401 { error: 'unauthorized' }",
+        "JWT expired: 401 { error: 'unauthorized' }",
+        "JWT with must_change_password: true: 403 { error: 'password_change_required' } on every route",
+        "JWT with empty locations[]: X-User-Locations header OMITTED from forwarded request",
+        "API key valid (cache miss): Identity Service called; permissions cached; X-Api-Key-Permissions injected; Authorization header NOT forwarded",
+        "API key valid (cache hit): Identity Service NOT called; cached permissions used",
+        "API key invalid: Identity Service returns 401 → gateway returns 401 { error: 'unauthorized' }",
+        "Identity Service unreachable for API key validation: 503 { error: 'auth_unavailable' } (fail closed)",
+        "Header spoofing: client sends X-User-Id, X-User-Role, X-User-Locations, X-Api-Key-Permissions → all stripped; upstream receives only gateway-injected values",
+        "Public route (no auth config): no Authorization header needed, no 401",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Tests — pipeline.test.ts (override RBAC + channel resolution)",
+      "description": "As a developer, I need integration tests for pipeline gateway logic so role-based guards and channel enrichment failures are caught before deploy.",
+      "acceptanceCriteria": [
+        "Create test/pipeline.test.ts using Vitest; use Fastify inject() with mocked upstream services",
+        "Override RBAC — POST /v1/pipeline/transitions with override: true: call_center_manager → 200 forwarded; marketing_manager → 200 forwarded; super_admin → 200 forwarded; call_center_agent → 403 { error: 'forbidden' }; marketing_staff → 403 { error: 'forbidden' }",
+        "Override RBAC — POST /v1/pipeline/transitions with override: false or absent: all roles forwarded without RBAC check",
+        "Channel resolution — POST /v1/pipeline/convert happy path: Lead Service returns valid channel → gateway overwrites channel in body, forwards to Pipeline Engine",
+        "Channel resolution — Lead Service returns 404 → 404 { error: 'lead_not_found' }, not forwarded",
+        "Channel resolution — Lead Service returns 500 → 502 { error: 'upstream_unavailable' }, not forwarded",
+        "Channel resolution — Lead Service unreachable/timeout → 502 { error: 'upstream_unavailable' }, not forwarded",
+        "Channel resolution — Lead Service returns 200 but channel is null → 422 { error: 'channel_resolution_failed' }",
+        "Channel resolution — Lead Service returns 200 but channel is invalid enum value → 422 { error: 'channel_resolution_failed' }",
+        "Channel resolution — Lead Service returns malformed JSON → 422 { error: 'channel_resolution_failed' }",
+        "Client-supplied channel field in /convert body is overwritten by gateway-resolved value",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Tests — referrals.test.ts (public route bypass + JWT enforcement + followRedirects)",
+      "description": "As a developer, I need integration tests confirming that public referral routes need no auth and that the click redirect returns 302 as-is.",
+      "acceptanceCriteria": [
+        "Create test/referrals.test.ts using Vitest; use Fastify inject() with mocked upstream",
+        "GET /v1/referrals/r/:code: no Authorization header → request succeeds (no 401); upstream returns 302 → gateway forwards 302 to client without following the redirect (followRedirects: false verified)",
+        "GET /v1/referrals/links/:code: no Authorization header → no 401",
+        "GET /v1/referrals/portal/:token: no Authorization header → no 401",
+        "GET /v1/referrals (non-public route): no Authorization header → 401 { error: 'unauthorized' }; valid JWT → 200 forwarded",
+        "POST /v1/referrals/* (non-public route): no Authorization header → 401; valid JWT → forwarded",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Tests — rate-limit.test.ts (per-tier enforcement + /health exemption)",
+      "description": "As a developer, I need integration tests confirming the three rate limit tiers and the /health exclusion.",
+      "acceptanceCriteria": [
+        "Create test/rate-limit.test.ts using Vitest; use Fastify inject() with @fastify/rate-limit configured with low limits for test speed",
+        "Public tier (IP key): after 60 requests from same IP within 1 minute → 429 { error: 'rate_limit_exceeded' } with Retry-After header; request from different IP is not rate limited",
+        "JWT tier (sub key): after 300 requests with same JWT sub → 429; requests from different sub are not affected",
+        "API key tier (keyHash key): after 600 requests with same ak_ key → 429; different key not affected",
+        "GET /health: unlimited requests → never 429 regardless of tier",
+        "429 response includes Retry-After header",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

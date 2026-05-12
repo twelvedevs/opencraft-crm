@@ -1,0 +1,107 @@
+{
+  "project": "Ortho CRM — Email Service",
+  "branchName": "ralph/email-service-phase-4",
+  "description": "Email Service Phase 4 — SendGrid webhook processing: ECDSA signature verification, forward-only DB status updates for campaign recipients and transactional sends, per-click tracking (email_recipient_clicks, email_send_clicks), and EventBridge engagement event publishing",
+  "userStories": [
+    {
+      "id": "US-008",
+      "title": "Webhook repository methods — forward-only status updates, click inserts, sendgrid_message_id lookup",
+      "description": "As a developer, I need the data access methods required by the webhook processor: forward-only status update methods on EmailCampaignRecipientsRepository and EmailSendsRepository, a findBySendgridMessageId lookup on both, EmailRecipientClicksRepository with insert, and EmailSendClicksRepository with insert.",
+      "acceptanceCriteria": [
+        "Add `findBySendgridMessageId(msgId: string): Promise<EmailCampaignRecipient | null>` to `EmailCampaignRecipientsRepository` — SELECT WHERE sendgrid_message_id = ?",
+        "Add `markDelivered(id: string, ts: Date): Promise<void>` to `EmailCampaignRecipientsRepository` — `UPDATE ... SET status = 'delivered', delivered_at = $ts WHERE id = ? AND status = 'sent'` (forward-only guard: only advances from 'sent')",
+        "Add `markOpenedFromWebhook(id: string, ts: Date): Promise<void>` to `EmailCampaignRecipientsRepository` — `UPDATE ... SET status = 'opened', opened_at = COALESCE(opened_at, $ts) WHERE id = ? AND status IN ('sent', 'delivered')`",
+        "Add `markClickedFromWebhook(id: string, ts: Date): Promise<void>` to `EmailCampaignRecipientsRepository` — `UPDATE ... SET status = 'clicked', clicked_at = COALESCE(clicked_at, $ts) WHERE id = ? AND status IN ('sent', 'delivered', 'opened')`",
+        "Add `markBouncedFromWebhook(id: string, ts: Date): Promise<void>` to `EmailCampaignRecipientsRepository` — `UPDATE ... SET status = 'bounced', bounced_at = $ts WHERE id = ? AND status NOT IN ('bounced', 'spam_reported', 'unsubscribed', 'failed')`",
+        "Add `markUnsubscribed(id: string): Promise<void>` to `EmailCampaignRecipientsRepository` — `UPDATE ... SET status = 'unsubscribed' WHERE id = ? AND status NOT IN ('unsubscribed', 'bounced')`",
+        "Add `markSpamReported(id: string): Promise<void>` to `EmailCampaignRecipientsRepository` — `UPDATE ... SET status = 'spam_reported' WHERE id = ? AND status NOT IN ('spam_reported', 'bounced', 'unsubscribed')`",
+        "Create `apps/platform/email/src/repositories/email-recipient-clicks-repository.ts`: export `EmailRecipientClicksRepository` class taking `Knex` in constructor; method `insert(recipientId: string, url: string): Promise<void>` — INSERT INTO email_recipient_clicks (id, recipient_id, url, clicked_at) VALUES (uuid, $recipientId, $url, now())",
+        "Create `apps/platform/email/src/repositories/email-send-clicks-repository.ts`: export `EmailSendClicksRepository` class taking `Knex` in constructor; method `insert(sendId: string, url: string): Promise<void>` — INSERT INTO email_send_clicks (id, send_id, url, clicked_at) VALUES (uuid, $sendId, $url, now())",
+        "Add `findBySendgridMessageId(msgId: string): Promise<EmailSend | null>` to `EmailSendsRepository` — SELECT WHERE sendgrid_message_id = ?",
+        "Add `markDelivered(id: string, ts: Date): Promise<void>` to `EmailSendsRepository` — `UPDATE ... SET status = 'delivered', delivered_at = $ts WHERE id = ? AND status = 'sent'`",
+        "Add `markOpened(id: string, ts: Date): Promise<void>` to `EmailSendsRepository` — `UPDATE ... SET status = 'opened', opened_at = COALESCE(opened_at, $ts) WHERE id = ? AND status IN ('sent', 'delivered')`",
+        "Add `markClicked(id: string, ts: Date): Promise<void>` to `EmailSendsRepository` — `UPDATE ... SET status = 'clicked', clicked_at = COALESCE(clicked_at, $ts) WHERE id = ? AND status IN ('sent', 'delivered', 'opened')`",
+        "Add `markBouncedFromWebhook(id: string, ts: Date): Promise<void>` to `EmailSendsRepository` — `UPDATE ... SET status = 'bounced', bounced_at = $ts WHERE id = ? AND status NOT IN ('bounced', 'failed')`",
+        "Add `markUnsubscribed(id: string): Promise<void>` to `EmailSendsRepository` — `UPDATE ... SET status = 'unsubscribed' WHERE id = ? AND status NOT IN ('unsubscribed', 'bounced', 'failed')`",
+        "Add `markSpamReported(id: string): Promise<void>` to `EmailSendsRepository` — `UPDATE ... SET status = 'bounced', bounced_at = now() WHERE id = ? AND status NOT IN ('bounced', 'unsubscribed', 'failed')` (spamreport on transactional → bounced per spec)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "SendGrid ECDSA webhook signature verifier service",
+      "description": "As a developer, I need a service that verifies SendGrid's ECDSA webhook signatures using a public key from AWS Secrets Manager, so the webhook endpoint rejects tampered or forged requests.",
+      "acceptanceCriteria": [
+        "Add `@aws-sdk/client-secrets-manager` to `apps/platform/email/package.json` dependencies if not already present",
+        "Add `SENDGRID_WEBHOOK_SIGNING_KEY_SECRET_ARN` required string env var to `src/env.ts` validation",
+        "Create `apps/platform/email/src/services/sendgrid-signature-verifier.ts`: export `SendgridSignatureVerifier` class with constructor taking `secretArn: string`",
+        "`SendgridSignatureVerifier` must lazily fetch the ECDSA public key from AWS Secrets Manager on first use and cache it in-instance (no re-fetch on subsequent calls)",
+        "Export method `verify(opts: { rawBody: string; signature: string; timestamp: string }): Promise<boolean>` — verify using Node.js built-in `crypto.createVerify('SHA256').update(rawBody + timestamp).verify(publicKey, signature, 'base64')` pattern per SendGrid ECDSA spec; return `false` (never throw) on any verification error",
+        "The `signature` and `timestamp` values come from request headers `X-Twilio-Email-Event-Webhook-Signature` and `X-Twilio-Email-Event-Webhook-Timestamp`",
+        "Unit tests in `apps/platform/email/src/services/sendgrid-signature-verifier.test.ts` using `vi.mock('@aws-sdk/client-secrets-manager')`: (a) valid signature → returns true; (b) invalid signature → returns false; (c) Secrets Manager throws → returns false; (d) second call reuses cached key (SecretsManager `send` called exactly once across two verify calls)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Webhook processor service — event routing, DB updates, click tracking, EventBridge publishing",
+      "description": "As a developer, I need a webhook processor service that accepts a parsed batch of SendGrid events, looks up the source row (campaign recipient or transactional send) by sendgrid_message_id, applies forward-only DB status updates, inserts click rows, and publishes the appropriate EventBridge events.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/services/webhook-processor.ts`: export `WebhookProcessor` class with constructor taking `(db: Knex, eventBus: EventBus)`",
+        "Define local TypeScript interface `SendgridEvent` with fields: `event: string`, `sg_message_id: string`, `email: string`, `timestamp: number`, `url?: string`, `type?: string` (for bounce sub-type), plus any additional passthrough fields as `[key: string]: unknown`",
+        "Export method `processEvent(event: SendgridEvent): Promise<void>` — processes one event; `processBatch(events: SendgridEvent[]): Promise<void>` — calls `processEvent` for each, catches and logs individual errors without throwing (one bad event must not abort the batch)",
+        "Lookup order: first call `recipientsRepo.findBySendgridMessageId(event.sg_message_id)`; if found → campaign recipient path; if null → call `sendsRepo.findBySendgridMessageId(event.sg_message_id)`; if still null → log and return (no-op, acceptable data loss per spec)",
+        "Campaign recipient event handling per `event.event`:",
+        "  `'delivered'` → `recipientsRepo.markDelivered(id, ts)`, publish `email.delivered` with `{ email_id: recipient.id, to_email: recipient.to_email, location_id: job.location_id, entity_type?, entity_id?, campaign_job_id: recipient.job_id }`; fetch job via `jobsRepo.findById(recipient.job_id)` for location/entity fields",
+        "  `'open'` → `recipientsRepo.markOpenedFromWebhook(id, ts)`, publish `email.opened` with same shape as delivered",
+        "  `'click'` → `recipientsRepo.markClickedFromWebhook(id, ts)`, insert `recipientClicksRepo.insert(recipient.id, event.url!)`, publish `email.clicked` adding `url: event.url` to payload",
+        "  `'bounce'` with `event.type === 'bounce'` (hard) → `recipientsRepo.markBouncedFromWebhook(id, ts)`, publish `email.bounced` with `{ email_id: recipient.id, to_address: recipient.to_email, location_id, bounce_type: 'hard', campaign_job_id: recipient.job_id }` — note: `to_address` not `to_email` per spec Q7",
+        "  `'bounce'` with `event.type === 'blocked'` → no-op (no DB update, no event published)",
+        "  `'deferred'` → no-op",
+        "  `'spamreport'` → `recipientsRepo.markSpamReported(id)`, publish `email.spam_reported` with `{ to_email: recipient.to_email, location_id }`",
+        "  `'unsubscribe'` or `'group_unsubscribe'` → `recipientsRepo.markUnsubscribed(id)`, publish `email.unsubscribed` with `{ to_email: recipient.to_email, location_id }`",
+        "Transactional send event handling per `event.event`:",
+        "  `'delivered'` → `sendsRepo.markDelivered(id, ts)`, publish `email.delivered` with `{ email_id: send.id, to_email: send.to_email, location_id: send.location_id, entity_type?, entity_id? }`",
+        "  `'open'` → `sendsRepo.markOpened(id, ts)`, publish `email.opened` with same shape",
+        "  `'click'` → `sendsRepo.markClicked(id, ts)`, insert `sendClicksRepo.insert(send.id, event.url!)`, publish `email.clicked` adding `url: event.url`",
+        "  `'bounce'` with `event.type === 'bounce'` → `sendsRepo.markBouncedFromWebhook(id, ts)`, publish `email.bounced` with `{ email_id: send.id, to_address: send.to_email, location_id: send.location_id, bounce_type: 'hard' }`",
+        "  `'bounce'` with `event.type === 'blocked'` → no-op",
+        "  `'deferred'` → no-op",
+        "  `'spamreport'` → `sendsRepo.markSpamReported(id)`, publish `email.spam_reported` with `{ to_email: send.to_email, location_id: send.location_id }` — status becomes 'bounced' per spec",
+        "  `'unsubscribe'` or `'group_unsubscribe'` → `sendsRepo.markUnsubscribed(id)`, publish `email.unsubscribed` with `{ to_email: send.to_email, location_id: send.location_id }`",
+        "For campaign recipient events that need `location_id`/`entity_type`/`entity_id`, fetch the parent `email_campaign_jobs` row using `jobsRepo.findById(recipient.job_id)` once per event (not per batch)",
+        "Unit tests in `apps/platform/email/src/services/webhook-processor.test.ts` using `vi.mock` for all repos and eventBus: (a) `sg_message_id` not found in either repo → no DB calls, no events; (b) campaign recipient `delivered` → markDelivered called, email.delivered published; (c) campaign recipient `open` → markOpenedFromWebhook called, email.opened published; (d) campaign recipient `click` → markClickedFromWebhook + recipientClicksRepo.insert + email.clicked with url; (e) campaign recipient hard bounce → markBouncedFromWebhook + email.bounced with to_address; (f) campaign recipient `bounce` blocked → no-op; (g) campaign recipient `spamreport` → markSpamReported + email.spam_reported; (h) campaign recipient `unsubscribe` → markUnsubscribed + email.unsubscribed; (i) transactional `click` → markClicked + sendClicksRepo.insert + email.clicked; (j) transactional `spamreport` → markSpamReported (status=bounced), email.spam_reported; (k) processBatch with one failing event → other events still processed (error isolation); (l) `deferred` event → complete no-op",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "POST /webhooks/sendgrid route — signature verification, batch dispatch, always-200",
+      "description": "As a developer, I need the POST /webhooks/sendgrid Fastify route that verifies the ECDSA signature, parses the event batch, dispatches to WebhookProcessor, and always returns 200 so SendGrid does not retry.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/routes/webhooks.ts`: export `webhookRoutes` Fastify plugin",
+        "Route `POST /webhooks/sendgrid` must capture the raw request body as a `Buffer` or `string` for ECDSA signature verification — configure `addContentTypeParser('application/json', ...)` within the plugin to capture raw body alongside parsed JSON, or use `preParsing` hook; both the raw body string and parsed array must be available in the handler",
+        "Handler steps: (1) extract `X-Twilio-Email-Event-Webhook-Signature` and `X-Twilio-Email-Event-Webhook-Timestamp` headers; (2) call `verifier.verify({ rawBody, signature, timestamp })`; (3) if verification fails → log warning and return `403 { error: 'invalid_signature' }` (do NOT return 200 on failed auth — SendGrid retries only on 4xx/5xx for delivery events, but the spec requires rejecting forged requests); (4) parse body as `SendgridEvent[]`; (5) call `processor.processBatch(events)` — do NOT await in a way that blocks the response: fire-and-forget is acceptable since `processBatch` handles its own error isolation; (6) return `200 { received: events.length }`",
+        "Instantiate `SendgridSignatureVerifier(env.SENDGRID_WEBHOOK_SIGNING_KEY_SECRET_ARN)` and `WebhookProcessor(app.db, app.eventBus)` inside the plugin (not at module level) so they use the already-validated env and registered decorators",
+        "Register `webhookRoutes` in `buildApp()` — mount at root prefix (no `/emails` prefix) so the full path is `/webhooks/sendgrid`",
+        "Unit tests in `apps/platform/email/src/routes/webhooks.test.ts` using `app.inject()` and `vi.mock` for `SendgridSignatureVerifier` and `WebhookProcessor`: (a) valid signature → 200 with `received` count; (b) invalid signature (verifier returns false) → 403; (c) missing signature headers → verifier receives empty strings → behaves per verifier (returns false → 403); (d) valid signature with 3-event batch → processBatch called once with array of 3 events; (e) verifier throws unexpectedly → handler catches, returns 500",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "project": "Ortho CRM — Email Service",
+  "branchName": "ralph/email-service-phase-2",
+  "description": "Email Service Phase 2 — EmailSendsRepository, BullMQ transactional-send queue wired into Fastify, POST /emails/send route with dedup and domain check, and Transactional Send Worker with SendGrid integration, exponential backoff, crash recovery guard, and email.sent/email.failed event publishing",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "EmailSendsRepository — typed Knex repository for email_sends",
+      "description": "As a developer, I need a typed Knex repository for the email_sends table so the route handler and worker have a clean, type-safe interface for creating and updating send records.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/repositories/email-sends-repository.ts`",
+        "Export TypeBox `EmailSendSchema` with all `email_sends` columns: `id` (string/uuid), `dedup_key` (nullable string), `location_id` (string), `domain_id` (nullable string), `entity_type` (nullable string), `entity_id` (nullable string), `to_email` (string), `subject` (string), `sendgrid_message_id` (nullable string), `status` (string), `attempt` (integer/number), `error` (nullable string), `created_at` (string), `sent_at` (nullable string), `delivered_at` (nullable string), `opened_at` (nullable string), `clicked_at` (nullable string), `bounced_at` (nullable string); export inferred `EmailSend` type",
+        "Export `EmailSendsRepository` class taking `Knex` instance in constructor with methods:",
+        "`findById(id: string): Promise<EmailSend | null>` — select by primary key; used by worker crash recovery guard to check `sendgrid_message_id`",
+        "`findByDedupKey(dedupKey: string): Promise<EmailSend | null>` — select where `dedup_key = dedupKey`",
+        "`create(data: { dedup_key: string; location_id: string; domain_id: string; to_email: string; subject: string; entity_type?: string | null; entity_id?: string | null }): Promise<EmailSend>` — insert into `email_sends` with `returning('*')`, status defaults to 'queued' via DB default",
+        "`markSent(id: string, sendgridMessageId: string): Promise<void>` — update `status = 'sent'`, `sendgrid_message_id = sendgridMessageId`, `sent_at = now()` WHERE `id = id`",
+        "`markFailed(id: string, errorMessage: string): Promise<void>` — update `status = 'failed'`, `error = errorMessage` WHERE `id = id`",
+        "`incrementAttempt(id: string): Promise<void>` — update `attempt = attempt + 1` WHERE `id = id` (use raw: `knex('email_sends').where({ id }).increment('attempt', 1)`)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "BullMQ + Redis setup wired into Fastify app lifecycle",
+      "description": "As a developer, I need BullMQ queues and an IORedis connection set up and wired into the Fastify app lifecycle so the route handler can enqueue transactional-send jobs and the connection is cleanly shut down on SIGTERM.",
+      "acceptanceCriteria": [
+        "Add `bullmq` and `ioredis` to `apps/platform/email/package.json` dependencies",
+        "Create `apps/platform/email/src/queue.ts`: export `createConnection(redisUrl: string): IORedis` using `new IORedis(redisUrl, { maxRetriesPerRequest: null })` (the `maxRetriesPerRequest: null` setting is required by BullMQ); export `createQueues(connection: IORedis): { transactionalSend: Queue }` that creates one BullMQ `Queue` named `'transactional-send'` with the provided connection",
+        "Update `apps/platform/email/src/types.d.ts` module augmentation: add `queues: { transactionalSend: Queue }` to `FastifyInstance` interface (import `Queue` from `'bullmq'`)",
+        "Update `buildApp` signature in `apps/platform/email/src/app.ts` to `buildApp(db: Knex, eventBus: EventBus, queues: { transactionalSend: Queue }): Promise<FastifyInstance>`",
+        "In `buildApp()`: add `app.decorate('queues', queues)` after existing decorators; extend the existing `onClose` hook to also call `await queues.transactionalSend.close()`",
+        "Update `apps/platform/email/src/index.ts`: create Redis connection with `createConnection(env.REDIS_URL)`, create queues with `createQueues(connection)`, pass `queues` as third argument to `buildApp()`; in the SIGTERM handler, add `await connection.quit()` after `app.close()`",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "POST /emails/send route — domain check, dedup, enqueue",
+      "description": "As a caller (Automation Engine, Nurturing Engine), I want to send a transactional email by POSTing pre-rendered HTML so the Email Service validates the domain, deduplicates via dedup_key, and enqueues the send job.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/routes/sends.ts`: export `sendRoutes` Fastify plugin",
+        "TypeBox body schema `SendEmailBodySchema`: `dedup_key: Type.String()`, `location_id: Type.String()`, `to: Type.String()`, `subject: Type.String()`, `html: Type.String()`, `text: Type.String()`, `entity_type: Type.Optional(Type.String())`, `entity_id: Type.Optional(Type.String())`",
+        "Route `POST /emails/send` flow: (1) resolve domain via `new DomainResolver(new DomainRepository(app.db)).resolve(body.location_id)` — catch `DomainNotConfiguredError` and return `422 { error: 'domain_not_configured', location_id: body.location_id }`, catch `DomainNotVerifiedError` and return `422 { error: 'domain_not_verified', location_id: body.location_id }`",
+        "(2) Check dedup: call `repo.findByDedupKey(body.dedup_key)` — if a row exists, return `200 { email_id: existing.id, status: existing.status }` immediately without re-enqueuing",
+        "(3) Insert: call `repo.create({ dedup_key: body.dedup_key, location_id: body.location_id, domain_id: domain.id, to_email: body.to, subject: body.subject, entity_type: body.entity_type ?? null, entity_id: body.entity_id ?? null })`",
+        "(4) Enqueue: call `app.queues.transactionalSend.add('send', { emailSendId: send.id, to: body.to, subject: body.subject, html: body.html, text: body.text }, { attempts: 5, backoff: { type: 'custom' } })` — the HTML/text content is stored in the BullMQ job payload in Redis, not in the DB",
+        "(5) Return `200 { email_id: send.id, status: 'queued' }`",
+        "Register `sendRoutes` in `buildApp()` in `src/app.ts` with prefix `/emails`",
+        "Unit tests in `apps/platform/email/src/routes/sends.test.ts` using `app.inject()`, mock `DomainResolver` (via `vi.mock`), and mock `EmailSendsRepository`: (a) `DomainNotConfiguredError` → `422 { error: 'domain_not_configured' }`; (b) `DomainNotVerifiedError` → `422 { error: 'domain_not_verified' }`; (c) duplicate `dedup_key` (repo returns existing row) → `200` with existing `email_id` and no queue.add call; (d) success → `200 { email_id, status: 'queued' }` and `queue.add` called once",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Transactional Send Worker — SendGrid, retry, crash recovery, events",
+      "description": "As a developer, I need a BullMQ worker that processes transactional-send jobs by calling SendGrid, handling retries with exponential backoff, guarding against crash-recovery double-sends, and publishing email.sent / email.failed events to EventBridge.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/email/src/workers/transactional-send-worker.ts`",
+        "Export `createTransactionalSendWorker(connection: IORedis, db: Knex, eventBus: EventBus): Worker` — instantiates `EmailSendsRepository`, `DomainRepository` internally; creates and returns a BullMQ `Worker` on queue `'transactional-send'`",
+        "BullMQ Worker options: `{ connection, concurrency: 5, settings: { backoffStrategy: (attemptsMade: number) => { const delays = [5000, 30000, 120_000, 600_000]; return delays[attemptsMade - 1] ?? 600_000; } } }`",
+        "Job data type (local interface): `{ emailSendId: string; to: string; subject: string; html: string; text: string }`",
+        "Processor steps: (1) Fetch row: `repo.findById(job.data.emailSendId)` — if not found, return early (no-op); (2) **Crash recovery guard**: if `send.sendgrid_message_id !== null`, return early without calling SendGrid — prevents double-send if worker crashed after SendGrid responded but before DB update; (3) Call `repo.incrementAttempt(send.id)`; (4) Fetch domain: `domainRepo.findById(send.domain_id!)` for `from_email` / `from_name`; (5) POST to `https://api.sendgrid.com/v3/mail/send` using native `fetch` with header `Authorization: Bearer ${env.SENDGRID_API_KEY}` and JSON body `{ personalizations: [{ to: [{ email: job.data.to }] }], from: { email: domain.from_email, name: domain.from_name }, subject: job.data.subject, content: [{ type: 'text/html', value: job.data.html }, { type: 'text/plain', value: job.data.text }] }`; (6) On HTTP 202: extract `X-Message-Id` response header as `sendgridMessageId`; call `repo.markSent(send.id, sendgridMessageId ?? '')`; publish `email.sent` event; return; (7) On non-202 response: throw `new Error(`SendGrid responded with ${response.status}`)` to trigger BullMQ retry",
+        "`email.sent` event shape: `eventBus.publish({ event_type: 'email.sent', entity_type: send.entity_type ?? undefined, entity_id: send.entity_id ?? undefined, payload: { email_id: send.id, to_email: send.to_email, location_id: send.location_id, sendgrid_message_id: sendgridMessageId } })`",
+        "Register `worker.on('failed', async (job, err) => {...})` handler: if `job` is defined AND `job.attemptsMade >= (job.opts.attempts ?? 1)` (all retries exhausted): call `repo.markFailed(job.data.emailSendId, err.message)` and publish `email.failed` event: `{ event_type: 'email.failed', entity_type: send?.entity_type ?? undefined, entity_id: send?.entity_id ?? undefined, payload: { email_id: job.data.emailSendId, to_email: job.data.to, error: err.message } }` (fetch `send` row again to get entity fields if needed)",
+        "Register worker in `apps/platform/email/src/index.ts`: after `await app.listen(...)`, call `createTransactionalSendWorker(connection, db, app.eventBus)` and store the reference; in the SIGTERM handler, call `await worker.close()` before `app.close()`",
+        "Unit tests in `apps/platform/email/src/workers/transactional-send-worker.test.ts` using `vi.mock` for `fetch` and mock repo/eventBus: (a) crash recovery guard — row with `sendgrid_message_id` already set → processor returns without calling fetch; (b) SendGrid 202 → `markSent` called with message ID, `email.sent` published; (c) SendGrid 500 → processor throws (triggers retry); (d) `worker.on('failed')` with `attemptsMade >= attempts` → `markFailed` called, `email.failed` published",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

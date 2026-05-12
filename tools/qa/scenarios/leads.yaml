@@ -1,0 +1,90 @@
+# Lead Service — CRUD, activity timeline, duplicate detection.
+
+include:
+  - auth.yaml
+  - identity.yaml
+
+scenarios:
+
+  - id: lead-create
+    name: "Leads: create"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "QA"
+          last_name: "Test"
+          phone: "+15056444803"
+          email: "qa.test@orthocrm-test.invalid"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id", "first_name"]
+        extract:
+          lead_id: "$.id"
+
+  - id: lead-get
+    name: "Leads: get by id"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads/{{lead_id}}
+        expect:
+          status: 200
+          body_contains: ["id", "first_name", "last_name"]
+
+  - id: lead-list
+    name: "Leads: list with pagination"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads?limit=10
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]
+
+  - id: lead-update
+    name: "Leads: update"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      - type: http
+        method: PATCH
+        path: /v1/leads/{{lead_id}}
+        body:
+          first_name: "UpdatedQA"
+        expect:
+          status: 200
+          body_contains: ["id"]
+
+  - id: lead-activities
+    name: "Leads: get activity timeline"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads/{{lead_id}}/activities
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]
+
+  - id: lead-duplicates-list
+    name: "Leads: list duplicate pairs"
+    service: crm-api-gateway
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads/duplicates
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]

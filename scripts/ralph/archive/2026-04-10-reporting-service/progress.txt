@@ -1,0 +1,222 @@
+## 2026-04-10 - US-016
+- Implemented integration tests for all HTTP routes and the generate-report BullMQ worker
+- Files created: test/integration/helpers.ts, test/integration/dashboard.test.ts, test/integration/report-configs.test.ts, test/integration/schedules.test.ts, test/integration/runs.test.ts, test/integration/config.test.ts, test/integration/generate-report-job.test.ts
+- All 50 existing unit tests still pass; 51 integration tests skip gracefully without DB/Redis (correct behavior for local dev); typecheck clean
+- **Learnings for future iterations:**
+  - Module-level singletons (db.js, schedule-manager.ts) in the reporting service must be handled via vi.mock in each test file — mock env.js with `DATABASE_URL: process.env['DATABASE_URL'] ?? 'fallback'` so db.js gets the real test DB URL; do NOT mock db.js itself for integration tests
+  - Schedule-manager mock is required in ALL route test files because healthRoutes imports `queueRedis` from schedule-manager — if not mocked, it creates a real Redis connection at module load time
+  - For generate-report-job tests, do NOT mock schedule-manager (need real Redis); use `HAS_REDIS` guard alongside `HAS_DB`; call `reportingQueue.obliterate({ force: true })` in beforeAll to flush stale queue state
+  - `waitForJob(runId, 'completed'|'failed')` pattern: attach 'completed'/'failed' listeners BEFORE enqueuing to avoid missing the event, use a setTimeout guard to prevent test hangs
+  - For BullMQ failure tests, use `attempts: 1` (override GENERATE_REPORT_JOB_OPTIONS) to avoid exponential backoff delays in tests
+  - `afterEach` must be explicitly imported from vitest — it is NOT available globally even inside describe blocks (caused a ReferenceError on first run)
+  - The `buildTestApp()` helper sets a JWKS-aware fetch mock; test files that need additional fetch behavior (e.g., runs download presigned URL) should replace globalThis.fetch with their own implementation that also handles JWKS
+  - For the download redirect test: Fastify inject does NOT follow 302 redirects — check `res.statusCode === 302` and `res.headers['location']`
+  - `vi.hoisted()` is required for mock handles that are referenced inside vi.mock() factories AND also need to be accessible outside (e.g., mockQueueAdd, mockRegisterSchedule)
+---
+
+## 2026-04-10 - US-015
+- Implemented unit tests for all four pure-logic modules (analytics-client, metrics-calculator, pdf-generator, csv-generator, schedule-manager)
+- Files created: test/unit/analytics-client.test.ts, test/unit/metrics-calculator.test.ts, test/unit/pdf-generator.test.ts, test/unit/csv-generator.test.ts, test/unit/schedule-manager.test.ts
+- All 50 tests pass; typecheck clean
+- **Learnings for future iterations:**
+  - `vi.hoisted()` is required for variables referenced inside `vi.mock` factory functions — the factory is hoisted before imports but plain `const` declarations are not; wrap mock fn instances in `vi.hoisted(() => vi.fn())`
+  - Unhandled rejection warning with fake timers: when a promise rejects inside `vi.advanceTimersByTimeAsync()`, attach the rejection handler BEFORE advancing (`const assertion = expect(promise).rejects.toThrow(...)`, then `await vi.advanceTimersByTimeAsync(N)`, then `await assertion`)
+  - For modules that create Redis/Queue connections at module-init (schedule-manager), mock both `bullmq` and `ioredis` AND `env.js` with `vi.mock` before importing the module under test — all three must be mocked or the module throws at load time
+  - `vi.resetAllMocks()` removes all mock implementations (including "once" overrides); re-apply defaults in beforeEach after calling it; prefer this over `vi.clearAllMocks()` when tests add `mockRejectedValueOnce` / `mockResolvedValueOnce` to avoid state leaking between tests
+  - `import type` from mocked modules is safe and does not trigger mock factory execution — use it for ReportSchedule, Knex, etc. in test helpers
+  - csv-generator tests need no mocks — fast-csv is a pure Node.js transform stream that works in the test process without any setup
+  - tsconfig `include: ["src/**/*"]` means `tsc --noEmit` never typechecks test files; tests are transpiled by Vitest only
+---
+
+## 2026-04-10 - US-014
+- Implemented schedules, runs, revenue config, and health routes
+- Files created: apps/crm/reporting/src/routes/schedules.ts, routes/runs.ts, routes/config.ts, routes/health.ts
+- Files updated: apps/crm/reporting/src/index.ts (registered all four route plugins), src/services/schedule-manager.ts (exported queueRedis)
+- **Learnings for future iterations:**
+  - Fastify 5 `reply.redirect()` signature is `(url: string, statusCode?: number)` — URL comes FIRST, status code second (opposite of Fastify 4)
+  - `queueRedis` exported from schedule-manager.ts can be reused for `/ready` Redis PING — no extra connection needed
+  - Health routes (`/health`, `/ready`) must be registered OUTSIDE the auth scope plugin — they are public and unauthenticated
+  - Schedules DELETE per spec means `setActive(false)` + `removeSchedule()`, NOT `deleteById()` — the row is kept for audit trail
+  - For runs ownership check: `canAccessRun` checks (1) marketing_manager+, (2) triggered_by === userId, (3) location overlap with config.parameters.location_ids — `parameters` is `Record<string, unknown>` so cast location_ids via `Array.isArray()` check
+  - When retrieving schedules for a caller, query configs by `created_by` first, then fan out to `findByReportConfigId` per config — no direct join needed given expected low cardinality
+---
+
+## 2026-04-10 - US-013
+- Implemented report-configs CRUD routes and on-demand generate endpoint
+- Files created: apps/crm/reporting/src/routes/report-configs.ts
+- Files updated: apps/crm/reporting/src/index.ts (registered reportConfigRoutes)
+- **Learnings for future iterations:**
+  - Ownership check pattern: `existing.created_by !== req.user!.sub && !isManagerRole(req.user!.role)` → 403
+  - Manager roles set: `{ marketing_manager, super_admin }` — use a `Set` for O(1) lookup
+  - Location scope guard (`checkLocationScope`) needed only for call_center_agent/manager; marketing roles bypass it; returns null (OK) or an error payload for the caller to `reply.code(403).send()`
+  - `generate` endpoint: create run row first, then enqueue BullMQ job; spread `GENERATE_REPORT_JOB_OPTIONS` into `queue.add()`; `recipient_emails` is null for on-demand triggers (no schedule)
+  - TypeBox `Type.Optional(Type.String())` for optional query params; access with `req.query as { type?: string; all?: string }`
+  - `all=true` query string arrives as the string `'true'` (not boolean) — compare with `q.all === 'true'`
+---
+
+## 2026-04-10 - US-012
+- Implemented period validation helper, dashboard route, and all four metrics routes
+- Files created: apps/crm/reporting/src/services/period.ts
+- Files created: apps/crm/reporting/src/routes/dashboard.ts
+- Files created: apps/crm/reporting/src/routes/metrics/channel-performance.ts
+- Files created: apps/crm/reporting/src/routes/metrics/location-comparison.ts
+- Files created: apps/crm/reporting/src/routes/metrics/coordinator-performance.ts
+- Files created: apps/crm/reporting/src/routes/metrics/campaign-analytics.ts
+- Files updated: apps/crm/reporting/src/index.ts (route registration)
+- **Learnings for future iterations:**
+  - `resolveLocationIds` exported from routes/dashboard.ts is the shared location-scoping helper — import it in all metrics routes; do NOT redefine it
+  - Location scoping rules: call_center_agent + call_center_manager → always use req.user.locations (JWT), ignore query param; marketing_staff/manager/super_admin → use query param if provided, otherwise undefined (all locations)
+  - coordinator-performance: call_center_agent's coordinator_id is ALWAYS overwritten with req.user.sub — caller cannot override it; other roles pass through query param
+  - location-comparison: per-location metrics require one getMetrics call per location_id (with a single-element location_ids array); marketing roles additionally fire an all-locations call (location_ids: undefined) in the same Promise.all for network_average; scoped roles return network_average: null with no extra call
+  - period.ts parsePeriod() returns ResolvedPeriod | PeriodError — use isPeriodError() guard to distinguish; converts YYYY-MM to concrete from/to dates before passing to analytics
+  - Route functions take only `(app: FastifyInstance)` — no opts object needed since they use module-level singletons (metrics-cache, etc.)
+  - MetricsQueryParams schema uses `location_id` (singular) as the query param name even though it repeats; handlers normalize to array with `Array.isArray()` check
+---
+
+## 2026-04-10 - US-011
+- Implemented src/jobs/generate-report.ts (BullMQ Worker + GENERATE_REPORT_JOB_OPTIONS) and full src/index.ts
+- Files created: apps/crm/reporting/src/jobs/generate-report.ts
+- Files updated: apps/crm/reporting/src/index.ts
+- **Learnings for future iterations:**
+  - GenerateReportJob is exported from report-renderer.ts and re-exported from generate-report.ts — routes/routes import from generate-report.ts, not report-renderer.ts
+  - GENERATE_REPORT_JOB_OPTIONS exported from generate-report.ts holds `attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnFail: false` — spread into each `queue.add()` call from routes
+  - Worker `failed` event fires after each attempt (not just the last); use `job.attemptsMade >= (job.opts.attempts ?? 1)` to detect final failure only
+  - renderReport already marks run as failed on each failed attempt and rethrows — Worker `failed` event is a safety net for the final error message persistence
+  - index.ts imports './jobs/generate-report.js' as a side-effect-only import to start the Worker in the same process as the HTTP server
+  - reconcile(db) is called BEFORE app.listen() — no traffic is served until BullMQ schedules are reconciled with the DB
+  - Route registration slots left as comments in the authenticated scope — US-012/013/014 will add actual routes
+---
+
+## 2026-04-10 - US-010
+- Implemented email-sender.ts and report-renderer.ts
+- Files created: apps/crm/reporting/src/services/email-sender.ts, apps/crm/reporting/src/services/report-renderer.ts
+- **Learnings for future iterations:**
+  - Media Service `POST /media/internal/store` is multipart (not JSON); use `FormData` + `Blob`; `new Uint8Array(buffer)` is required to convert Node.js Buffer to a type-safe BlobPart (avoids SharedArrayBuffer TypeScript error)
+  - Media Service uses `Authorization: Bearer {INTERNAL_API_SECRET}` (same pattern as other internal routes)
+  - Media Service returns `{ file_id, urls: { original: '...' } }` — note `urls` is nested, not flat `url`
+  - Notification Service `POST /notifications/publish` requires `title` (string, required) in the body — the channel must have exactly 3 segments (`user:{id}:{type}`); spec's `user:{triggered_by}` is only 2 segments and would fail validation — use `user:{triggered_by}:reports`
+  - report-renderer.ts exports `GenerateReportJob` interface — US-011's generate-report.ts should import it from here rather than redefining
+  - Period resolution: `custom` → `${from}/${to}`, `last_30d` → `{today-30}/{today}`, `last_month` → first/last of previous calendar month; default fallback is last 30 days
+  - Notification publish failure is logged as warn (not thrown) — losing a notification should not fail the run
+  - The step-9 catch block wraps its own `updateStatus` in try/catch so an update failure doesn't swallow the original error
+---
+
+## 2026-04-09 - US-009
+- Implemented Handlebars templates, PDF generator, and CSV generator
+- Files created: templates/weekly-summary.hbs, templates/monthly-executive.hbs, templates/channel-deep-dive.hbs, templates/coordinator-productivity.hbs, templates/lead-source.hbs
+- Files created: apps/crm/reporting/src/services/pdf-generator.ts, apps/crm/reporting/src/services/csv-generator.ts
+- Updated: apps/crm/reporting/Dockerfile (added `COPY templates/ ./templates/`)
+- **Learnings for future iterations:**
+  - Templates live in `templates/` at the project root (not under `src/`); Dockerfile must explicitly `COPY templates/ ./templates/` after `COPY dist/`
+  - Path resolution uses `path.join(fileURLToPath(new URL('../..', import.meta.url)), 'templates')` — works for both `dist/services/` (compiled) and `src/services/` (tsx dev) because both are two levels deep from the project root
+  - All five templates compiled at module init with `readFileSync` — fails fast at startup if any template is missing (no lazy loading)
+  - Handlebars helpers (formatNumber, formatPct, formatSeconds, join, divOrNull) registered globally at module init in pdf-generator.ts
+  - pdf-generator exports `ReportType` union; csv-generator re-exports it so callers need only one import
+  - fast-csv v5: use `format({ headers: true, writeBOM: true })` to get a Transform stream; write rows with `.write()`, call `.end()`, collect with stream events
+  - `streamToBuffer` helper collects chunks; start collecting BEFORE writing rows (avoid missing early data events)
+  - CSV rows are `Record<string, unknown>` — fast-csv infers column names from the first row's keys
+  - channel_deep_dive CSV computes per-channel spend/cost inline using the same CHANNEL_TO_PLATFORM map as metrics-calculator
+---
+
+## 2026-04-09 - US-008
+- Implemented src/services/schedule-manager.ts: BullMQ schedule manager with cron derivation, register/remove/replace/reconcile
+- Files created: apps/crm/reporting/src/services/schedule-manager.ts
+- **Learnings for future iterations:**
+  - BullMQ `RepeatableJob.id` holds the jobId passed during `queue.add()` (optional/nullable); match by `j.id === jobId`, then call `queue.removeRepeatableByKey(j.key)`
+  - Queue and its Redis connection initialized at module level (singleton pattern) — same as analytics/identity services
+  - `reconcile()` uses `Set` of registered job IDs for O(1) lookup; safe to call on every deploy
+  - BullMQ `queue.add()` with `jobId` in repeatable options deduplicates by key — registering the same schedule twice is idempotent
+---
+
+## 2026-04-09 - US-007
+- Implemented src/services/metrics-cache.ts: LRU cache wrapping computeMetrics
+- Cache key: sha256(metric_family + '|' + period + '|' + sorted(location_ids).join(','))
+- Files created: apps/crm/reporting/src/services/metrics-cache.ts
+- **Learnings for future iterations:**
+  - metrics-cache exports `getMetrics(metric_family: string, params: MetricsParams)` — callers pass a discriminator string (e.g. 'dashboard') so the same cache instance is reusable for different metric contexts
+  - lru-cache v10+ uses `ttl` (not `maxAge`) and `LRUCache` named export (not default)
+  - No manual invalidation — TTL-only eviction keeps the implementation simple
+---
+
+## 2026-04-09 - US-006
+- Implemented src/db.ts (global knex connection, searchPath: crm_reporting) and src/services/metrics-calculator.ts
+- Files created: apps/crm/reporting/src/db.ts, apps/crm/reporting/src/services/metrics-calculator.ts
+- **Learnings for future iterations:**
+  - metrics-calculator imports `db` from `../db.js` (global singleton, same pattern as other crm services)
+  - computeMetrics(params) fans out all 6 analytics calls via Promise.all — fail-fast, no partial results
+  - Revenue config: when location_ids is empty/undefined (all-locations), load all configs; when specific IDs provided, findByLocationIds and populate missing_revenue_config for any not found
+  - avg_contract_value = null if ANY requested location is missing config → revenue_attributed and roas both null
+  - CHANNEL_TO_PLATFORM map exported: google_ads→google_ads, facebook→facebook_ads (for channel attribution in route handlers)
+  - raw AnalyticsRawData field on ComputedMetrics holds all six API responses so route handlers (channel-performance, location-comparison) can compute per-channel/per-location views without additional API calls
+  - divOrNull helper: returns null when denominator = 0, never 0
+---
+
+## 2026-04-09 - US-003
+- Created src/schemas/ with 5 TypeBox schema files: report-config.ts, schedule.ts, run.ts, revenue-config.ts, metrics.ts
+- Files created: src/schemas/report-config.ts, src/schemas/schedule.ts, src/schemas/run.ts, src/schemas/revenue-config.ts, src/schemas/metrics.ts
+- **Learnings for future iterations:**
+  - Schemas use `Type.Union([Type.String(), Type.Null()])` for nullable fields (TypeBox 0.34 pattern)
+  - `Type.Integer()` for integer fields, `Type.Number()` for decimals
+  - Shared internal schema objects (e.g., CoreKpis, LocationKpis) can be un-exported and reused within the same file
+  - PeriodParam regex: `^\d{4}-\d{2}$|^\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}$`
+---
+
+## 2026-04-09 - US-004
+- Implemented all four repository files in apps/crm/reporting/src/repositories/
+- Files created: report-configs.ts, schedules.ts, runs.ts, revenue-config.ts
+- **Learnings for future iterations:**
+  - Repositories use `const TABLE = 'crm_reporting.<table_name>'` (full schema-qualified name) for all Knex queries
+  - Returned row types are internal interfaces (e.g. `ReportConfig`) with `Date` for timestamps; JSON serialization handles conversion
+  - `parameters` JSONB column: insert with `JSON.stringify(body.parameters ?? {})`, Knex/pg deserializes to object on read
+  - `upsert` in revenue-config uses `.onConflict('location_id').merge(...)` Knex pattern
+  - `updateStatus` in runs.ts uses spread of conditional keys to avoid overwriting unrelated fields
+---
+
+## 2026-04-09 - US-005
+- Implemented src/services/analytics-client.ts with six endpoint methods
+- Files created: apps/crm/reporting/src/services/analytics-client.ts
+- **Learnings for future iterations:**
+  - Analytics client uses plain Node 24 `fetch` (no node-fetch) with `AbortController` for 10s timeout — new controller per attempt
+  - Retry logic: 1 retry (2 total attempts) with 500ms sleep before retry; only retries on `status >= 500` or network/timeout errors; 4xx passes through and throws from `getMetrics`
+  - `location_ids`: omit `location_id` param entirely when array is empty or undefined — use `params.location_ids && params.location_ids.length > 0` check
+  - Extra params forwarded generically via `Object.entries()` loop — handles future coordinator_id, campaign filters, etc.
+  - Auth header: `Authorization: Bearer ${env.ANALYTICS_API_KEY}` (not X-Internal-Api-Key — Analytics uses `ak_`-prefixed token)
+---
+
+## Codebase Patterns
+- Services use a global `src/db.ts` exporting a knex singleton (`export default knex`); metrics-calculator and other services import it directly — do not pass db as a parameter to service-level functions that wrap analytics/KPI computation
+- ROLE_PERMISSIONS in packages/@ortho/auth-middleware/src/permissions.ts is the single source of truth for all service permissions; add new `<service>:read` and `<service>:write` entries there for every new service
+- Permission naming convention: `<service>:read` and `<service>:write` (e.g., reporting:read, reporting:write)
+- `@ortho/db` does not exist as a package — use direct knex + pg pattern (same as referral/campaign services)
+- vitest.config.ts: omit `setupFiles` if no integration setup file exists yet; add it later in the integration test story
+- Migrations use `knex.schema.withSchema('crm_<service>').createTable(...)` for tables; use `knex.raw(...)` for CHECK constraints, custom indexes, and schema creation/drop
+- Foreign keys referencing across schemas use full `'crm_reporting.table_name'` string in `.inTable()`
+- `text[]` PostgreSQL arrays require `table.specificType('col', 'text[]')` in Knex — no native array method
+
+# Ralph Progress Log
+Started: Thu Apr  9 23:00:58 +03 2026
+---
+
+## 2026-04-09 - US-002
+- Created full scaffold for apps/crm/reporting service
+- Files created: package.json, tsconfig.json, Dockerfile, knexfile.ts, vitest.config.ts, src/env.ts, src/index.ts (stub), migrations/001-004 (schema + 4 tables)
+- Directory structure: src/{routes/metrics,services,repositories,jobs,schemas}/, migrations/, test/{unit,integration}/, templates/
+- **Learnings for future iterations:**
+  - `@ortho/db` package does not exist; use direct knex + pg (don't include it in package.json)
+  - `@fastify/cors` is a real dep to include; `ioredis` needed alongside bullmq
+  - Default port for reporting service is 3009 (per env.ts spec)
+  - `text[]` Postgres columns need `table.specificType('col', 'text[]')` in Knex migrations
+  - FK `.inTable()` for cross-schema refs requires full qualified name: `'crm_reporting.report_configs'`
+  - vitest.config.ts omits setupFiles until integration tests added in US-016
+  - src/index.ts stub needed so tsconfig include compiles something; replace fully in US-011
+---
+
+## 2026-04-09 - US-001
+- Added `reporting:read` to call_center_agent, call_center_manager, marketing_staff, marketing_manager, super_admin
+- Added `reporting:write` to marketing_manager, super_admin
+- Files changed: packages/@ortho/auth-middleware/src/permissions.ts
+- **Learnings for future iterations:**
+  - Permissions file is flat array per role — just append new permission strings
+  - Typecheck in auth-middleware runs `tsc --noEmit` and passes cleanly with just the permissions change
+  - Branch: ralph/reporting-service (created from feature/reporting)
+---

@@ -55,7 +55,7 @@ The Referral Service is a **product-layer service** (`apps/crm/referral`) that o
                     │  └─ notification.service.ts               │
                     │                                           │
                     │  workers/                                 │
-                    │  └─ event-worker.ts  (SQS / BullMQ)       │
+                    │  └─ event-worker.ts  (@ortho/event-bus)    │
                     │      handlers/                            │
                     │      ├─ lead-created.ts                   │
                     │      ├─ lead-stage-changed.ts             │
@@ -71,7 +71,7 @@ The Referral Service is a **product-layer service** (`apps/crm/referral`) that o
 ```
 
 **Key architectural properties:**
-- SQS worker pattern identical to Lead Service — EventBridge → SQS queue → BullMQ worker → typed handlers. Each handler runs atomically (state update in a single DB transaction).
+- Event worker pattern identical to Lead Service — `@ortho/event-bus` `.subscribe()` + `.start()` (EventBridgeDriver handles SQS polling internally). Each handler runs atomically (state update in a single DB transaction). No Redis, no BullMQ queue needed.
 - Public endpoints (link resolution, click redirect, doctor portal) are exposed without JWT via CRM API Gateway route configuration. Rate limiting for public endpoints is enforced at the CRM API Gateway layer — Referral Service does not implement per-IP rate limiting itself.
 - Referral Service calls Lead Service (`GET /leads/:id`) once at patient referrer creation time using an internal service API key — stores `phone` and `name` denormalized on the `referrers` row for all future SMS sends.
 - No Redis or BullMQ for scheduling — all processing is event-driven.
@@ -516,7 +516,7 @@ apps/crm/referral/
 
 ### Integration Tests (Vitest + real Postgres, Messaging Service + Lead Service mocked)
 
-- `lead-created` handler — `referrals` row created pinned to the specific link matching `referral_code`; fallback to active link when code not in DB; skip when `referrer_id` null; skip when no active/matching link found; idempotent on duplicate delivery
+- `lead-created` handler — `referrals` row created pinned to the specific link matching `referral_code`; code not in DB → log warn + skip, no referral row created; skip when `referrer_id` null; skip when no active/matching link found; idempotent on duplicate delivery
 - `lead-stage-changed` handler — status advances to `exam_scheduled`, `exam_scheduled_at` set; SMS sent with correct `dedup_key` for patient referrer; no SMS for doctor referrer; non-`exam_scheduled` stage skipped; `pipeline != 'new_patient'` skipped; missing referral record skipped; Messaging Service `dedup_key` prevents duplicate SMS on second delivery of same event
 - `lead-converted` handler (Branch A) — status `converted`; `reward_events` row created with `pending`; `referral.converted` published; SMS sent with `dedup_key`; idempotent on duplicate delivery
 - `lead-converted` handler (Branch B) — `referrers` + `referral_links` rows created; `referrer.created` published with `referral_link_url`; idempotent (second delivery skips); Lead Service call failure → dead-letters job
@@ -555,10 +555,7 @@ apps/crm/referral/
 
 ## 10. Pending Amendments Required
 
-1. **Lead Service spec** — add the following to the `leads` table DDL and `lead.created` event payload:
-   - `referrer_id` (uuid nullable) — already present in the `leads` table per Lead Service spec; confirm it is included in the `lead.created` payload
-   - `referrer_type` (varchar nullable) — add to `leads` table DDL and `lead.created` payload
-   - `referral_code` (varchar nullable) — add to `leads` table DDL and `lead.created` payload; stores the raw 8-char code from the form widget; immutable after creation
+1. ~~**Lead Service spec** — add `referrer_id`, `referrer_type`, and `referral_code` to the `leads` table DDL and `lead.created` event payload.~~ **Status: already implemented.** The Lead Service spec (§3.1 DDL and §5.1 event payload) already includes all three fields as optional nullable columns and payload fields. No changes required to the Lead Service spec.
 
 2. **Arch doc event table** — add:
    - `referral.converted`: publisher = Referral Service, subscribers = Lead Service + Analytics Service

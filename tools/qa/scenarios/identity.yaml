@@ -1,0 +1,162 @@
+# Identity Service — users, locations, API keys.
+# NOTE: POST /identity/locations requires super_admin role. The admin@example.com
+# user must have role=super_admin in the DB for location-create to pass.
+# Run: UPDATE platform_identity.users SET role='super_admin' WHERE email='admin@example.com';
+
+include:
+  - auth.yaml
+
+scenarios:
+
+  - id: identity-me
+    name: "Identity: get current user profile"
+    service: identity
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        service: identity
+        method: GET
+        path: /identity/me
+        expect:
+          status: 200
+          body_contains: ["id", "email"]
+        extract:
+          current_user_id: "$.id"
+
+  - id: user-list
+    name: "Users: list"
+    service: identity
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        service: identity
+        method: GET
+        path: /identity/users
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]
+
+  - id: location-create
+    name: "Locations: create"
+    service: identity
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/locations
+        body:
+          name: "QA Test Location"
+          address: "123 QA Street, Austin TX 78701"
+          phone: "+15551234567"
+          timezone: "America/Chicago"
+        expect:
+          status: 201
+          body_contains: ["id", "name"]
+        extract:
+          location_id: "$.id"
+
+  - id: location-list
+    name: "Locations: list"
+    service: identity
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        service: identity
+        method: GET
+        path: /identity/locations
+        expect:
+          status: 200
+          body_contains: ["locations"]
+
+  - id: location-get
+    name: "Locations: get by id"
+    service: identity
+    depends_on: [location-create]
+    steps:
+      - type: http
+        service: identity
+        method: GET
+        path: /identity/locations/{{location_id}}
+        expect:
+          status: 200
+          body_contains: ["id", "name"]
+
+  - id: location-update
+    name: "Locations: update"
+    service: identity
+    depends_on: [location-create]
+    steps:
+      - type: http
+        service: identity
+        method: PATCH
+        path: /identity/locations/{{location_id}}
+        body:
+          name: "QA Test Location (updated)"
+        expect:
+          status: 200
+          body_contains: ["id", "name"]
+
+  - id: user-create
+    name: "Users: create call center agent"
+    service: identity
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/users
+        body:
+          email: "qa.agent+1@orthocrm-test.invalid"
+          name: "QA Agent"
+          role: "call_center_agent"
+          password: "Password123!"
+          locations: ["{{location_id}}"]
+        expect:
+          status: 201
+          body_contains: ["id", "email"]
+        extract:
+          created_user_id: "$.id"
+
+  - id: api-key-create
+    name: "API Keys: create"
+    service: identity
+    depends_on: [auth-login]
+    steps:
+      - type: http
+        service: identity
+        method: POST
+        path: /identity/api-keys
+        body:
+          name: "QA Test Key"
+          permissions: ["leads:read", "leads:write"]
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          api_key_id: "$.id"
+
+  - id: api-key-list
+    name: "API Keys: list"
+    service: identity
+    depends_on: [api-key-create]
+    steps:
+      - type: http
+        service: identity
+        method: GET
+        path: /identity/api-keys
+        expect:
+          status: 200
+          body_contains: ["data"]
+
+  - id: api-key-revoke
+    name: "API Keys: revoke"
+    service: identity
+    depends_on: [api-key-create]
+    steps:
+      - type: http
+        service: identity
+        method: DELETE
+        path: /identity/api-keys/{{api_key_id}}
+        expect:
+          status: 204

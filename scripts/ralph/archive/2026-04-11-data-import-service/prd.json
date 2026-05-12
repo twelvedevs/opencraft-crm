@@ -1,0 +1,342 @@
+{
+  "project": "Ortho CRM — Data Import Service",
+  "branchName": "ralph/data-import-service",
+  "description": "Product-layer Data Import Service (apps/crm/import) — Ortho2 CSV upload, column auto-mapping, 5-tier match logic, validation preview, async BullMQ job processing (parse → execute → undo), 2-hour bulk undo, import log.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffold",
+      "description": "As a developer, I need the apps/crm/import service skeleton so that all subsequent stories have a working package to build on.",
+      "acceptanceCriteria": [
+        "apps/crm/import/ directory exists with standard service layout (src/, migrations/, test/unit/, test/integration/, Dockerfile, package.json, tsconfig.json)",
+        "package.json declares ESM ('type': 'module'), Node.js 24 engine, and all runtime deps: fastify@5, @fastify/multipart, bullmq, csv-parse, libphonenumber-js, @aws-sdk/client-s3, @aws-sdk/lib-storage, @sinclair/typebox@0.34, @ortho/auth-middleware, @ortho/db, @ortho/logger; devDeps: typescript@5, vitest@2, tsx, @types/node",
+        "tsconfig.json: strict mode, ESM module resolution (NodeNext), target ES2022",
+        "Dockerfile: multi-stage Node.js 24 build (builder + runner stages)",
+        ".env.example documents all 9 required env vars: DATABASE_URL, REDIS_URL, AWS_REGION, S3_BUCKET, PIPELINE_ENGINE_URL, LEAD_SERVICE_URL, IMPORT_SERVICE_API_KEY, IDENTITY_JWKS_URL, PORT",
+        "src/index.ts skeleton: imports createLogger from @ortho/logger, creates Knex instance from @ortho/db with searchPath 'crm_imports', creates Fastify 5 app with @ortho/auth-middleware authPlugin — compiles and exits cleanly (no routes or worker yet)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Database migrations — crm_imports schema",
+      "description": "As a developer, I need Knex migrations for the crm_imports schema so that all three tables exist with correct columns, constraints, and indexes.",
+      "acceptanceCriteria": [
+        "migrations/001_create_crm_imports_schema.ts creates the crm_imports schema if it does not exist",
+        "migrations/002_create_imports_table.ts creates the imports table with all columns from spec §5: id (uuid PK), location_id, import_type (CHECK constraint for 4 types), status (CHECK constraint for 9 values, default 'uploading'), uploaded_by, file_name, file_key, column_mapping (jsonb nullable), detected_headers (text[] nullable), row_count/matched_count/unmatched_count/ambiguous_count/executed_count/failed_count (int nullable), error_message, completed_at, undo_deadline, undone_at, created_at/updated_at (timestamptz NOT NULL DEFAULT now()); indexes on (location_id, created_at DESC), (uploaded_by), (status)",
+        "migrations/003_create_import_rows_table.ts creates import_rows with all columns: id (uuid PK), import_id (FK → imports), row_number (int NOT NULL), raw_data (jsonb NOT NULL), matched_lead_id (uuid nullable), match_tier (smallint nullable), candidate_ids (uuid[] nullable), status (CHECK for 8 values, default 'pending'), before_snapshot (jsonb nullable), error_message (varchar nullable), created_at/updated_at; UNIQUE(import_id, row_number); indexes on (import_id), (import_id, status)",
+        "migrations/004_create_column_mappings_table.ts creates column_mappings with import_type (varchar PRIMARY KEY, CHECK for 4 types), mapping (jsonb NOT NULL), updated_at (timestamptz NOT NULL DEFAULT now()), updated_by (uuid NOT NULL)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Repositories",
+      "description": "As a developer, I need typed repository classes for all three tables so that services have a clean DB access layer.",
+      "acceptanceCriteria": [
+        "src/repositories/import.repo.ts exports ImportRepository with constructor injection of Knex; methods: create(data): Promise<Import>, findById(id): Promise<Import | undefined>, update(id, fields): Promise<Import>, listByLocation(locationId, filters: { import_type?, status? }, cursor?: string, limit?: number): Promise<{ data: Import[], nextCursor: string | null }>; cursor is created_at DESC using last row's created_at as opaque string",
+        "src/repositories/import-row.repo.ts exports ImportRowRepository with Knex injection; methods: batchInsert(rows[]): Promise<void>, findByImportId(importId, status?: string, cursor?: number, limit?: number): Promise<{ data: ImportRow[], nextCursor: number | null }>, update(id, fields): Promise<ImportRow>, findMatchedByImportId(importId): Promise<ImportRow[]> (status='matched', ORDER BY row_number ASC), findExecutedByImportIdDesc(importId): Promise<ImportRow[]> (status='executed', ORDER BY row_number DESC), findByImportIdAndStatus(importId, statuses: string[]): Promise<ImportRow[]>",
+        "src/repositories/column-mapping.repo.ts exports ColumnMappingRepository with Knex injection; methods: findByType(importType): Promise<ColumnMapping | undefined>, upsert(importType, mapping, updatedBy): Promise<ColumnMapping>; upsert uses INSERT … ON CONFLICT (import_type) DO UPDATE",
+        "All method signatures typed using TypeBox inferred types or explicit interfaces; no `any`",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "HTTP clients — Pipeline Engine and Lead Service",
+      "description": "As a developer, I need typed fetch wrappers for Pipeline Engine and Lead Service so that the worker can make outbound service calls with correct auth and error handling.",
+      "acceptanceCriteria": [
+        "src/clients/pipeline-engine.ts exports PipelineEngineClient class; constructor reads PIPELINE_ENGINE_URL and IMPORT_SERVICE_API_KEY from env; all methods set Authorization: Bearer header; methods: getMemberships(leadId, pipeline, status): fetches GET /pipeline/memberships?lead_id&pipeline&status, returns membership array; createTransition(membershipId, body): POST /pipeline/memberships/:id/transition; convertMembership(membershipId, body): POST /pipeline/memberships/:id/convert; closeMembership(membershipId, body): POST /pipeline/memberships/:id/close; enrollMembership(body): POST /pipeline/memberships",
+        "src/clients/lead-service.ts exports LeadServiceClient class; constructor reads LEAD_SERVICE_URL and IMPORT_SERVICE_API_KEY; methods: searchLeads(params: { phones?: string[], emails?: string[], q?: string, location_id: string }): GET /leads with query params serialized as repeated phones[] / emails[]; createAppointment(leadId, body): POST /leads/:id/appointments; deleteAppointment(leadId, appointmentId): DELETE /leads/:id/appointments/:appointmentId",
+        "PipelineEngineError and LeadServiceError extend Error; constructor receives httpStatus: number and message; the error message includes the HTTP status code (e.g. 'PipelineEngineError: 404')",
+        "Any non-2xx response from Pipeline Engine throws PipelineEngineError; any non-2xx from Lead Service throws LeadServiceError",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Ortho2 header mapping + match service",
+      "description": "As a developer, I need the Ortho2 auto-detection map and 5-tier match logic so that CSV rows can be resolved to CRM lead records.",
+      "acceptanceCriteria": [
+        "src/mapping/ortho2-headers.ts exports ORTHO2_HEADERS: Record<string, string> mapping 9 known headers (PatFirst→first_name, PatLast→last_name, CellPhone→mobile_phone, HomePhone→home_phone, Email→email, Birthdate→date_of_birth, ApptDate→appointment_date, ApptTime→appointment_time, Status→ortho2_status); exports autoDetectMapping(csvHeaders: string[]): Record<string, string> that returns only recognized mappings",
+        "src/services/match.service.ts exports MatchService class; constructor takes PipelineEngineClient (not used directly) and LeadServiceClient",
+        "buildPhoneMap(leads) and buildEmailMap(leads) helpers construct Map<string, Lead[]> from prefetched lead arrays",
+        "normalizePhone(raw: string): string | null uses libphonenumber-js parsePhoneNumberFromString with default region 'US'; returns E.164 string or null on parse failure",
+        "matchRow(row: Record<string, string>, phoneMap: Map<string, Lead[]>, emailMap: Map<string, Lead[]>, leadServiceClient: LeadServiceClient, locationId: string): Promise<MatchResult>: runs Tier 1 (mobile phone E.164 → phoneMap lookup), Tier 2 (email → emailMap lookup), Tier 3 (GET /leads?q=first+last&location_id → filter by home phone E.164), Tier 4 (reuse Tier 3 name results → filter by DOB), Tier 5 (unmatched); returns { status, matchedLeadId?, matchTier?, candidateIds? }",
+        "Tier 3 name search result is cached in a local variable and passed to Tier 4 logic (no second API call); cache is scoped to the current row invocation only",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Undo service",
+      "description": "As a developer, I need the undo service so that each executed import row can be reversed by reading its before_snapshot.",
+      "acceptanceCriteria": [
+        "src/services/undo.service.ts exports UndoService class; constructor takes PipelineEngineClient and LeadServiceClient",
+        "undoRow(row: ImportRow, importRecord: Import): Promise<void> reads row.before_snapshot; dispatches to undoTransition or undoConversion based on snapshot.type; throws if snapshot.type is unknown",
+        "undoTransition(snapshot, triggeredBy): calls pipelineEngineClient.createTransition(snapshot.membership_id, { stage: snapshot.stage, override: true, triggered_by: triggeredBy, reason: 'import_undo' }); if snapshot.appointment_id is non-null → calls leadServiceClient.deleteAppointment(matched_lead_id, snapshot.appointment_id); if snapshot.appointment_id is null → no delete call",
+        "undoConversion(snapshot, importRecord, triggeredBy): step 1 — closeMembership(snapshot.post_import_membership_id, { triggered_by: triggeredBy, reason: 'import_undo' }); step 2 — enrollMembership({ lead_id: snapshot.pre_import_membership_id or derived, location_id: importRecord.location_id, pipeline: snapshot.pre_import_pipeline, stage: snapshot.pre_import_stage, triggered_by: triggeredBy, reason: 'import_undo' }); location_id comes from importRecord (not snapshot)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Import lifecycle service",
+      "description": "As a developer, I need the import lifecycle service so that routes can delegate business logic for create, confirm, cancel, and undo.",
+      "acceptanceCriteria": [
+        "src/services/import.service.ts exports ImportService class; constructor takes ImportRepository, ImportRowRepository, ColumnMappingRepository",
+        "createImport(data: { locationId, importType, uploadedBy, fileName, fileKey, importId }): creates import record with status 'uploading', sets file_key, returns created import",
+        "getImport(id): returns import; throws Fastify 404 error if not found",
+        "listImports(locationId, filters, cursor): delegates to import.repo.listByLocation, returns { data, nextCursor }",
+        "confirmImport(id, columnMapping, uploadedBy): (1) fetches import; (2) throws 409 if status !== 'preview_ready'; (3) calls columnMappingRepo.upsert(import.import_type, columnMapping, uploadedBy); (4) calls importRepo.update(id, { column_mapping: columnMapping }); returns updated import",
+        "cancelImport(id): fetches import; throws 409 if status !== 'preview_ready'; calls importRepo.update(id, { status: 'cancelled' }); returns updated import",
+        "initiateUndo(id): executes raw SQL UPDATE imports SET status = 'undoing' WHERE id = $1 AND status = 'completed' AND undo_deadline > now() via Knex; if rowCount === 0: SELECT status, undo_deadline WHERE id = $1; if undo_deadline <= now() → throw 422 with { error: 'undo_window_expired' }; if status != 'completed' → throw 409; if not found → throw 404; on success returns updated import",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "BullMQ worker — parse_match phase",
+      "description": "As a developer, I need the BullMQ worker with the parse_match phase so that uploaded CSVs are parsed and each row matched to a CRM lead asynchronously.",
+      "acceptanceCriteria": [
+        "src/workers/import-job.ts exports startWorker(queue, knex, s3Client, pipelineClient, leadClient, log) that creates a BullMQ Worker on queue 'import-jobs', concurrency 2, attempts 1, removeOnComplete true, removeOnFail false",
+        "Worker switches on job.data.phase: 'parse_match' | 'execute' | 'undo' (execute and undo phases added in subsequent stories)",
+        "parse_match phase: (1) UPDATE imports SET status = 'parsing'; (2) GetObjectCommand to fetch CSV from S3 key imports/{import_id}/raw.csv as readable stream; (3) pipe through csv-parse with { columns: true, skip_empty_lines: true }; (4) extract detected_headers (raw CSV header array from first record's keys); (5) load saved column_mapping from column_mappings table for import_type; merge with autoDetectMapping result (saved mapping overrides auto-detected keys); (6) collect all parsed rows into array; (7) batch prefetch — extract all mobile phones from rows (normalized to E.164), all emails; call leadServiceClient.searchLeads({ phones: [...], location_id }) and searchLeads({ emails: [...], location_id }); build phoneMap and emailMap; (8) for each row: call matchService.matchRow; build import_row insert object; (9) importRowRepo.batchInsert all rows; (10) UPDATE imports SET row_count, matched_count, unmatched_count, ambiguous_count, detected_headers, status = 'preview_ready'",
+        "Job-level failure: catch block calls importRepo.update(importId, { status: 'failed', error_message: err.message }); re-throws so BullMQ marks job failed",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "BullMQ worker — execute phase",
+      "description": "As a developer, I need the execute phase in the worker so that matched import rows trigger the correct Pipeline Engine transitions and conversions.",
+      "acceptanceCriteria": [
+        "execute phase: query import_rows WHERE import_id = $1 AND status = 'matched' ORDER BY row_number ASC",
+        "Crash recovery: rows with status = 'executing' (from a prior crashed run) are logged at warn level with { importId, rowId, rowNumber } and skipped — not re-executed",
+        "Sequential for loop (not Promise.all) over matched rows; dispatches per import_type to one of four handlers: executeActivePatients, executeCompletedPatients, executeScheduledAppointments, executeNoShows",
+        "executeActivePatients: (1) getMemberships(leadId, 'new_patient', 'active'); (2) no membership → mark row failed 'no_active_membership', continue; (3) atomic UPDATE import_rows SET before_snapshot = { type:'conversion', pre_import_membership_id, pre_import_pipeline:'new_patient', pre_import_stage: membership.stage, post_import_membership_id: null }, status = 'executing'; (4) if membership.stage === 'contract_signed' skip transition; else createTransition(membershipId, { stage:'contract_signed', override:true, triggered_by, reason:'import' }); (5) convertMembership(membershipId, { to_pipeline:'in_treatment', to_stage:'new_patient', triggered_by, reason:'converted', channel:'import' }); (6) UPDATE row SET before_snapshot.post_import_membership_id = response.id, status = 'executed'",
+        "executeCompletedPatients: same pattern but getMemberships('in_treatment'), transition to 'treatment_complete', convert to in_retention/active_retention",
+        "executeScheduledAppointments: getMemberships('new_patient'); if membership.stage === 'exam_scheduled' skip transition (no duplicate event); else createTransition to 'exam_scheduled'; createAppointment on Lead Service ({ appointment_type:'exam', scheduled_at, status:'scheduled', created_by:triggered_by }); write appointment_id into snapshot; set row executed",
+        "executeNoShows: getMemberships('new_patient'); if membership.stage !== 'exam_scheduled' → mark row failed 'unexpected_stage', continue; transition to 'contacted' with reason 'no_show'; set row executed",
+        "Per-row PipelineEngineError or LeadServiceError caught: update row { status:'failed', error_message:'pipeline_engine_error: <status>' or 'lead_service_error: <status>' }; continue loop",
+        "After loop: UPDATE imports SET executed_count, failed_count, status='completed', completed_at=now(), undo_deadline=now() + interval '2 hours'",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "BullMQ worker — undo phase",
+      "description": "As a developer, I need the undo phase in the worker so that an entire import can be reversed within the 2-hour window.",
+      "acceptanceCriteria": [
+        "undo phase: query import_rows WHERE import_id = $1 AND status = 'executed' ORDER BY row_number DESC",
+        "Rows with status = 'executing' are logged at warn level and skipped",
+        "Sequential for loop over executed rows; for each row: call undoService.undoRow(row, importRecord); on success update row { status:'undone' }; on error: log.error({ importId, rowId, err }, 'undo row failed'); update row { error_message: err.message }; row remains 'executed'; loop continues (best-effort)",
+        "After all rows: UPDATE imports SET status = 'undone', undone_at = now() — unconditional, regardless of partial row failures",
+        "BullMQ Worker 'failed' event handler added in startWorker: log.error({ jobId, importId: job.data.import_id, phase: job.data.phase, err: failedReason }, 'import job failed')",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Routes — POST /imports (upload) + GET /imports + GET /imports/:id",
+      "description": "As a coordinator, I want to upload a CSV and poll for import status so that I can track parse progress.",
+      "acceptanceCriteria": [
+        "src/routes/imports.ts registered as a Fastify plugin; requirePermission(['call_center_manager', 'marketing_manager']) and requireLocation() preHandlers applied to all three endpoints",
+        "POST /imports: accepts multipart/form-data with fields file (stream), import_type, location_id; generates import_id via crypto.randomUUID() before upload; streams CSV directly to S3 using @aws-sdk/lib-storage Upload with key imports/{import_id}/raw.csv (no buffering, no temp file); calls importService.createImport; enqueues BullMQ job { import_id, phase: 'parse_match' }; returns 201 with import object; TypeBox schema validates import_type (enum) and location_id (uuid string)",
+        "GET /imports: query params location_id (required), import_type (optional), status (optional), cursor (optional); returns { data: Import[], nextCursor: string | null }; TypeBox schema for query params",
+        "GET /imports/:id: `:id` constrained to UUID format in TypeBox schema; returns import object; 404 if not found",
+        "Error shape for all failures: { error: '<message>' }",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Route — GET /imports/:id/rows",
+      "description": "As a coordinator, I want to preview matched and unmatched rows before confirming so that I can decide whether to proceed.",
+      "acceptanceCriteria": [
+        "src/routes/rows.ts registered as Fastify plugin; requirePermission(['call_center_manager', 'marketing_manager']) preHandler applied",
+        "GET /imports/:id/rows: query params status (optional, one of: matched|unmatched|ambiguous|failed|pending), limit (default 50, max 200), cursor (integer row_number, optional); TypeBox schema validates all query params",
+        "Validates import exists and belongs to user's location (throws 403 otherwise)",
+        "Executes cursor-paginated SQL: SELECT * FROM import_rows WHERE import_id = $1 AND ($cursor::int IS NULL OR row_number > $cursor) AND ($status IS NULL OR status = $status) ORDER BY row_number ASC LIMIT $limit",
+        "Returns { data: ImportRow[], nextCursor: number | null }; nextCursor is the last row's row_number when data.length === limit; null when data.length < limit",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Routes — POST /imports/:id/confirm|cancel|undo",
+      "description": "As a coordinator, I want to confirm, cancel, or undo an import so that I control when CRM state is modified.",
+      "acceptanceCriteria": [
+        "src/routes/actions.ts registered as Fastify plugin; requirePermission(['call_center_manager', 'marketing_manager']) preHandler applied to all three endpoints",
+        "POST /imports/:id/confirm: body { column_mapping: object }; TypeBox schema; calls importService.confirmImport(id, body.column_mapping, req.user.sub); enqueues BullMQ job { import_id: id, phase: 'execute' }; returns 202 with updated import; 409 if wrong status",
+        "POST /imports/:id/cancel: no body; calls importService.cancelImport(id); returns 200 with updated import; 409 if status !== 'preview_ready'",
+        "POST /imports/:id/undo: no body; calls importService.initiateUndo(id); enqueues BullMQ job { import_id: id, phase: 'undo' }; returns 202 with updated import; 422 with { error: 'undo_window_expired' } past deadline; 409 if status not 'completed'; 404 if not found",
+        "Error shape for all failures: { error: '<message>' }",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Route — GET /imports/column-mappings/:type + wire src/index.ts",
+      "description": "As a coordinator, I want the saved column mapping pre-loaded on subsequent uploads and the service to start fully wired.",
+      "acceptanceCriteria": [
+        "src/routes/mappings.ts registered as Fastify plugin; requirePermission(['call_center_manager', 'marketing_manager']) preHandler; GET /imports/column-mappings/:type: TypeBox schema validates :type against 4 valid values; calls columnMappingRepo.findByType(type); returns { import_type, mapping, updated_at, updated_by }; 404 if none saved yet",
+        "src/index.ts fully wired: (1) createLogger('import'); (2) Knex with searchPath 'crm_imports'; (3) run @ortho/db runMigrations(knex) on startup; (4) S3Client, BullMQ Queue('import-jobs'), PipelineEngineClient, LeadServiceClient, all repos, MatchService, UndoService, ImportService instantiated; (5) Fastify app created with authPlugin; (6) route plugins registered in order: mappings first (to prevent 'column-mappings' matching :id), then imports, rows, actions; (7) startWorker(queue, knex, s3Client, ...) called; (8) Fastify listens on PORT; (9) SIGTERM handler: worker.close() → fastify.close() → knex.destroy() → process.exit(0)",
+        "All 9 env vars read with process.env at startup; missing required vars cause an explicit startup error (not a runtime crash)",
+        "Service starts cleanly with valid env vars (no thrown errors at startup)",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Unit tests — match service + ortho2-headers",
+      "description": "As a developer, I need unit tests for the match service and header mapping so that the core matching logic is verified in isolation.",
+      "acceptanceCriteria": [
+        "test/unit/match.service.test.ts: Tier 1 — single phone match returns { status:'matched', matchTier:1 }; two leads same phone returns { status:'ambiguous', candidateIds:[...] }; no phone match falls to Tier 2",
+        "Tier 2 — single email match returns { status:'matched', matchTier:2 }; no email match falls to Tier 3",
+        "Tier 3 — name search returns one lead with matching home phone → { status:'matched', matchTier:3 }; name search returns two leads both matching home phone → ambiguous",
+        "Tier 4 — reuses Tier 3 name cache; DOB match → { status:'matched', matchTier:4 }; no DOB match → falls to Tier 5; only ONE Lead Service API call made for Tiers 3+4 combined (verified with spy/mock)",
+        "Tier 5 — all tiers exhausted → { status:'unmatched' }",
+        "normalizePhone: '(555) 123-4567' → '+15551234567'; '555-123-4567' → '+15551234567'; '5551234567' → '+15551234567'; 'not-a-phone' → null",
+        "test/unit/ortho2-headers.test.ts: each of the 9 known Ortho2 headers maps to the correct CRM field; unknown header 'Foo' returns undefined from ORTHO2_HEADERS lookup; autoDetectMapping(['PatFirst','Foo','CellPhone']) returns { first_name: 'PatFirst', mobile_phone: 'CellPhone' } (excludes 'Foo')",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Unit tests — undo service + import service",
+      "description": "As a developer, I need unit tests for the undo and lifecycle services so that status guards and snapshot reversal logic are verified.",
+      "acceptanceCriteria": [
+        "test/unit/undo.service.test.ts: transition snapshot → createTransition called with { stage: snapshot.stage, override: true, reason: 'import_undo' }; deleteAppointment NOT called when appointment_id is null; deleteAppointment IS called when appointment_id is non-null",
+        "Conversion snapshot → closeMembership called first with post_import_membership_id; enrollMembership called second with { pipeline: snapshot.pre_import_pipeline, stage: snapshot.pre_import_stage }; location_id in enrollMembership body comes from importRecord.location_id (not from snapshot)",
+        "Unknown snapshot type → throws Error",
+        "test/unit/import.service.test.ts: confirmImport on import with status !== 'preview_ready' throws Fastify error with statusCode 409; cancelImport on non-preview_ready throws 409; initiateUndo when undo_deadline is in the past throws Fastify error with statusCode 422 and body { error: 'undo_window_expired' }; initiateUndo when status is 'undoing' throws 409",
+        "undo_deadline is computed in the SQL UPDATE (the SQL string passed to knex.raw contains 'now() + interval') — verified by inspecting the raw SQL with a Knex spy",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Integration tests — parse_match phase",
+      "description": "As a developer, I need integration tests for the parse phase against a real Postgres instance so that CSV parsing and match logic work end-to-end.",
+      "acceptanceCriteria": [
+        "test/integration/parse-phase.test.ts: uses real Postgres (from @ortho/testing); Lead Service HTTP calls mocked via msw (Node adapter) or nock intercepting fetch calls to LEAD_SERVICE_URL; S3 GetObjectCommand mocked to return a fixture CSV stream",
+        "Happy path (3-row CSV: row 1 phone match tier 1, row 2 email match tier 2, row 3 unmatched): after job runs, imports.status = 'preview_ready'; 3 import_rows created; matched_count = 2, unmatched_count = 1; row 1 status='matched' match_tier=1; row 2 status='matched' match_tier=2; row 3 status='unmatched' match_tier=null; detected_headers populated with raw CSV header names",
+        "All-unmatched CSV: imports.status = 'preview_ready', matched_count = 0, unmatched_count = N",
+        "S3 read failure (mocked GetObjectCommand throws): imports.status = 'failed', error_message is set; no import_rows created",
+        "Saved global column_mapping for import type is loaded and overrides auto-detected headers (seed a column_mappings row; verify the merged mapping is applied)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Integration tests — execute phase",
+      "description": "As a developer, I need integration tests for the execute phase so that Pipeline Engine interactions and per-row state transitions are correct.",
+      "acceptanceCriteria": [
+        "test/integration/execute-phase.test.ts: real Postgres; Pipeline Engine HTTP calls mocked via msw/nock intercepting fetch calls to PIPELINE_ENGINE_URL; Lead Service mocked for createAppointment",
+        "active_patients happy path: before_snapshot written to DB before first Pipeline Engine HTTP response (interceptor reads import_rows DB synchronously before returning mock response; asserts before_snapshot IS NOT NULL and status = 'executing'); createTransition called then convertMembership called in order; post_import_membership_id written to before_snapshot after convert; row status = 'executed'; import status = 'completed'; executed_count = 1",
+        "completed_patients happy path: getMemberships returns in_treatment membership; treatment_complete transition; in_retention convert; row executed",
+        "Partial failure: first row mock returns 404 from Pipeline Engine → row status='failed'; second row succeeds → row status='executed'; import.failed_count = 1, import.executed_count = 1, import.status = 'completed'",
+        "Crash recovery: seed one import_row with status = 'executing' (simulating a prior crash); run execute phase; that row is skipped (its status remains 'executing'); other matched rows are processed normally; warn log emitted for the stuck row",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Integration tests — undo phase + undo route deadline guard",
+      "description": "As a developer, I need integration tests for the undo phase and undo deadline enforcement so that reversals are correct and time-bounded.",
+      "acceptanceCriteria": [
+        "test/integration/undo.test.ts: real Postgres; Pipeline Engine and Lead Service mocked",
+        "Transition undo (scheduled_appointments snapshot): Pipeline Engine createTransition called with { stage: pre_import_stage, override: true, reason: 'import_undo' }; row status = 'undone'; import status = 'undone'; undone_at set",
+        "Transition undo with appointment_id: deleteAppointment called on Lead Service",
+        "Conversion undo (active_patients snapshot with post_import_membership_id set): closeMembership called first with post_import_membership_id; enrollMembership called second with correct pre_import_pipeline, pre_import_stage; location_id in enrollMembership = import.location_id",
+        "Partial undo failure: one row's closeMembership mock returns 500 → that row stays 'executed', error_message set; other rows complete; import.status still set to 'undone' (best-effort)",
+        "Rows with status = 'executing' skipped by undo; warn log emitted",
+        "Undo past deadline (undo_deadline = now() - 1 minute in seed data): POST /imports/:id/undo → HTTP 422 { error: 'undo_window_expired' }",
+        "Undo when status = 'undoing': POST /imports/:id/undo → HTTP 409",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Integration tests — routes + contract tests",
+      "description": "As a developer, I need route integration tests and contract tests so that the API surface and Pipeline Engine call contracts are verified.",
+      "acceptanceCriteria": [
+        "test/integration/routes.test.ts: real Postgres, S3 mocked (Upload helper stubbed), BullMQ Queue add mocked (assert job enqueued with correct payload); JWT signed with test key accepted by authPlugin",
+        "POST /imports: CSV upload streams to S3 (Upload mock invoked with correct key imports/{import_id}/raw.csv); import record created in DB with status='uploading'; BullMQ job enqueued { import_id, phase:'parse_match' }; 201 returned with import object",
+        "POST /imports/:id/confirm: column_mappings row upserted; second confirm on same import returns 409; BullMQ job enqueued { phase:'execute' }; returns 202",
+        "POST /imports/:id/cancel on preview_ready import → 200, status='cancelled'; POST /imports/:id/cancel on non-preview_ready → 409",
+        "GET /imports/:id/rows: with 10 seeded rows and limit=3, first page returns 3 rows and nextCursor=3; second page (cursor=3) returns next 3; last page returns remaining rows and nextCursor=null; status filter returns only rows matching that status",
+        "GET /imports/column-mappings/:type: returns saved mapping; 404 if none saved",
+        "test/integration/contract.test.ts: for active_patients execute phase — Pipeline Engine mock asserts every request body contains override: true and triggered_by is a non-null UUID string; every /convert call body contains channel: 'import'; before_snapshot IS NOT NULL and import_row.status = 'executing' at the moment the first Pipeline Engine mock responds (DB state read inside interceptor before response)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

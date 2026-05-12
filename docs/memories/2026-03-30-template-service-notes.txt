@@ -1,0 +1,252 @@
+[andrey@MacBook:~/dev/pre-sale/ortho]-» ./run.sh
+* Starting Phase 1
+Starting Ralph (Claude Code) - Max iterations: 20
+
+===============================================================
+  Ralph Iteration 1 of 20 (Claude Code)
+===============================================================
+US-001 complete. Remaining stories with `passes: false`: US-002, US-003, US-004.
+Iteration 1 complete. Continuing...
+
+===============================================================
+  Ralph Iteration 2 of 20 (Claude Code)
+===============================================================
+**US-002 complete.** Three migration files created:
+
+- `migrations/knexfile.ts` — pg config with `platform_templates` schema
+- `migrations/001_create_templates.ts` — templates table with CHECK constraints (channel, status) and 4 named indexes
+- `migrations/002_create_template_versions.ts` — template_versions table with FK cascade, unique constraint on (template_id, version), and index
+
+Typecheck passes. Still pending: **US-003** (Templates repository) and **US-004** (Auth plugin).
+Iteration 2 complete. Continuing...
+
+===============================================================
+  Ralph Iteration 3 of 20 (Claude Code)
+===============================================================
+**US-003 complete.** Implemented `src/repositories/templates.ts` with `TemplateRow`, `TemplateVersionRow` interfaces and `TemplatesRepo` class containing all 8 required methods. Typecheck passes.
+
+US-004 (Auth plugin) remains — another iteration will pick it up.
+Iteration 3 complete. Continuing...
+
+===============================================================
+  Ralph Iteration 4 of 20 (Claude Code)
+===============================================================
+All 4 stories pass.
+
+**US-004 complete:** Auth plugin implemented with:
+- `verifyJwt` — extracts Bearer token, verifies HS256 with jose, returns `JwtClaims`
+- `isServiceApiKey` — checks if token starts with `ak_`
+- `requireAuth` — preHandler accepting valid JWT or service API key
+- `requireRole` — preHandler requiring JWT with specific role (no API key bypass)
+- `app.requireAuth()` / `app.requireRole(role)` decorators bound to `jwtSecret`
+- 14 unit tests covering all specified cases, all passing
+
+<promise>COMPLETE</promise>
+
+Ralph completed all tasks!
+Completed at iteration 4 of 20
+* Phase 1 Finished
+* * * * * * * * * * * * * * * * * * * * * * * *
+* Starting Phase 2
+Phase 2 plan is written. Here's what was produced:
+
+**Archived:** `scripts/ralph/archive/2026-03-30-template-service-phase-1/` (prd.json + progress.txt)
+
+**New `scripts/ralph/prd.json`** — 3 stories on branch `ralph/template-service-phase-2`:
+
+| Story | Deliverable |
+|---|---|
+| **US-001** | Routes plugin scaffold + `POST /templates` — Fastify plugin with `marketing_staff` preHandler guard, TypeBox body validation, 409 on duplicate name |
+| **US-002** | `GET /templates` (paginated list with channel/status/sort/order/limit/offset) + `GET /templates/:id` (group row + `draft_content` + `active_content`) |
+| **US-003** | `PATCH /templates/:id` — three-branch versioning logic (in-place vs new draft row), content-length validation (SMS 1600 / email 10 000 / subject 500 / HTML 500 000), channel-immutable field filtering, disabled template support |
+
+Each story builds on the previous and all repository methods it needs are already implemented from Phase 1 (`create`, `list`, `findById`, `findVersionContent`, `updateVersionInPlace`, `insertNewVersion`, `updateTemplateGroup`).
+[ralph/template-service-phase-1 8e0ec74] preparing for Phase 2
+ 6 files changed, 3444 insertions(+), 107 deletions(-)
+ create mode 100644 apps/platform/template/package-lock.json
+ create mode 100644 scripts/ralph/.last-branch
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-1/prd.json
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-1/progress.txt
+Archiving previous run: ralph/template-service-phase-1
+   Archived to: /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-30-template-service-phase-1
+Starting Ralph (Claude Code) - Max iterations: 20
+
+===============================================================
+  Ralph Iteration 1 of 20 (Claude Code)
+===============================================================
+US-001 complete. Here's what was done:
+
+**US-001 — CRUD routes plugin scaffold + POST /templates**
+
+- Created `apps/platform/template/src/routes/templates.ts` as a Fastify plugin with:
+  - `preHandler` role guard for `marketing_staff` at plugin level
+  - `POST /templates` with TypeBox body schema (`name`, `channel`)
+  - `created_by` resolution: service API key → `null`, JWT → `claims.sub`
+  - pg `23505` unique violation → 409 response
+  - 201 response with the created template row
+- Registered the plugin in `app.ts` via `app.register(import('./routes/templates.js'))`
+- Typecheck and all 14 tests pass
+
+Two stories remain (`US-002` and `US-003`). The next iteration will pick up `US-002` (GET /templates list + GET /templates/:id).
+Iteration 1 complete. Continuing...
+
+===============================================================
+  Ralph Iteration 2 of 20 (Claude Code)
+===============================================================
+US-002 committed. US-003 (PATCH /templates/:id — draft versioning) is still `passes: false`. That's the next iteration's work.
+
+**Summary:**
+- US-001 was already implemented but `prd.json` wasn't updated — fixed that
+- US-002 implemented: `GET /templates` (paginated list with channel/status/sort/order/limit/offset filters) and `GET /templates/:id` (with draft + active content projection)
+- Typecheck and tests pass
+- Both US-001 and US-002 marked `passes: true` in prd.json
+Iteration 2 complete. Continuing...
+
+===============================================================
+  Ralph Iteration 3 of 20 (Claude Code)
+===============================================================
+All 3 stories now have `passes: true`.
+
+<promise>COMPLETE</promise>
+
+Ralph completed all tasks!
+Completed at iteration 3 of 20
+* Phase 2 Finished
+* * * * * * * * * * * * * * * * * * * * * * * *
+* Starting Phase 3
+Done. Here's what was done:
+
+**Archived:** `prd.json` + `progress.txt` from Phase 2 → `scripts/ralph/archive/2026-03-30-template-service-phase-2/`
+
+**Reset:** `progress.txt` with consolidated codebase patterns carried forward from Phase 2 learnings (including the per-route `requireRole` pattern that Phase 3 needs).
+
+**Written:** `scripts/ralph/prd.json` with 4 stories for Phase 3:
+
+| Story | What |
+|-------|------|
+| US-001 | `POST /templates/:id/activate` — repo method + route, `marketing_manager` per-route guard |
+| US-002 | `POST /templates/:id/disable` — repo method + route, `already disabled` 400, warning on never-activated |
+| US-003 | `POST /templates/:id/enable` — repo method + route, two 400 guards (no active_version, not disabled) |
+| US-004 | Unit tests — all 11 transition/auth scenarios via Fastify `inject()` with mocked repo |
+
+Key notes baked into story descriptions:
+- Per-route `marketing_manager` guard goes in route options (in addition to plugin-level `marketing_staff`) — no cache eviction yet (that's Phase 4)
+- `disable` warning check uses the pre-disable `active_version` value from `findById`
+- `enable` guard order: `active_version === null` first, then `status !== 'disabled'`
+[ralph/template-service-phase-2 f3c6ce7] preparing for Phase 3
+ 6 files changed, 194 insertions(+), 127 deletions(-)
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-2/prd.json
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-2/progress.txt
+Archiving previous run: ralph/template-service-phase-2
+   Archived to: /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-30-template-service-phase-2
+Starting Ralph (Claude Code) - Max iterations: 20
+
+===============================================================
+  Ralph Iteration 1 of 20 (Claude Code)
+===============================================================
+All 4 stories complete and passing.
+
+**Summary of this iteration:**
+
+- **US-001** — Added `activate()` repo method (uses `this.db.ref('current_version')` for column-to-column copy) + `POST /templates/:id/activate` with `marketing_manager` per-route guard
+- **US-002** — Added `disable()` repo method + `POST /templates/:id/disable` with 400 guard for already-disabled and warning when `active_version` was null
+- **US-003** — Added `enable()` repo method + `POST /templates/:id/enable` with guards for no active_version and not-disabled
+- **US-004** — Created `test/unit/templates-lifecycle.test.ts`: 12 inject()-level tests using `buildApp()` + `vi.mock` pattern; key gotcha: `marketing_manager` tokens need `['marketing_staff', 'marketing_manager']` since the plugin-level `marketing_staff` guard runs first
+
+<promise>COMPLETE</promise>
+
+Ralph completed all tasks!
+Completed at iteration 1 of 20
+* Phase 3 Finished
+* * * * * * * * * * * * * * * * * * * * * * * *
+* Starting Phase 4
+Done. Here's the Phase 4 plan written to `scripts/ralph/prd.json`:
+
+**4 stories in dependency order:**
+
+| Story | Deliverable | Key detail |
+|-------|-------------|------------|
+| **US-001** | `src/services/template-renderer.ts` + unit tests | Pure `renderString(template, context): RenderResult` — malformed detection first, dot-notation, case-insensitive, missing → empty string + warnings array. 10 test cases covering all §9.1 cases. |
+| **US-002** | `src/services/template-cache.ts` + unit tests | `LRUCache` singleton (max 500, TTL 30s), `templateCache.get/set/evict`. 4 tests including TTL via `vi.useFakeTimers()`. |
+| **US-003** | `repo.findActiveVersionContent` + `src/routes/render.ts` + wire into `app.ts` | Cache → DB → renderer pipeline. Auth via `requireAuth()` only (no role guard — service API keys pass through). Channel-appropriate response shape. UUID format fallback note included. |
+| **US-004** | Cache eviction in activate/disable handlers | `templateCache.evict(id)` after `repo.activate/disable`, placed after DB call succeeds. `enable` intentionally gets no cache interaction per spec. |
+
+Phase 3 archived to `scripts/ralph/archive/2026-03-30-template-service-phase-3/`.
+[ralph/template-service-phase-3 cfa7919] preparing for Phase 4
+ 5 files changed, 145 insertions(+), 61 deletions(-)
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-3/prd.json
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-3/progress.txt
+Archiving previous run: ralph/template-service-phase-3
+   Archived to: /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-30-template-service-phase-3
+Starting Ralph (Claude Code) - Max iterations: 20
+
+===============================================================
+  Ralph Iteration 1 of 20 (Claude Code)
+===============================================================
+US-001 complete. All 36 tests pass (10 new renderer tests + 26 existing).
+
+**US-001 — Template renderer service + unit tests** is done:
+- `src/services/template-renderer.ts`: pure `renderString()` function with malformed-tag detection, case-insensitive resolution, dot-notation traversal, and array-index blocking
+- `test/unit/template-renderer.test.ts`: 10 test cases covering all acceptance criteria
+
+3 stories remain (`passes: false`): US-002 (cache), US-003 (render route), US-004 (cache eviction wiring).
+Iteration 1 complete. Continuing...
+
+===============================================================
+  Ralph Iteration 2 of 20 (Claude Code)
+===============================================================
+All 4 stories are complete and passing. Summary:
+
+- **US-001** (template-renderer.ts) — was already committed; marked `passes: true`
+- **US-002** (template-cache.ts) — `createTemplateCache` factory + singleton + 4 unit tests. Key gotcha: lru-cache captures `performance` at import time, fake timers can't advance it — used real 100ms TTL timer for TTL test
+- **US-003** (render route) — `findActiveVersionContent` on repo + `POST /templates/render` with cache-first logic, SMS/email rendering, UUID validated via regex (no ajv-formats)
+- **US-004** (cache eviction) — `templateCache.evict(id)` wired into activate and disable handlers; enable intentionally left without eviction per spec
+
+40 tests passing, typecheck clean.
+
+<promise>COMPLETE</promise>
+
+Ralph completed all tasks!
+Completed at iteration 2 of 20
+* Phase 4 Finished
+* * * * * * * * * * * * * * * * * * * * * * * *
+* Starting Phase 5
+Done. Here's what was written:
+
+**Phase 4 archived** → `scripts/ralph/archive/2026-03-30-template-service-phase-4/`
+
+**New `prd.json`** — 4 stories for Phase 5:
+
+| Story | Title | What it builds |
+|-------|-------|----------------|
+| US-001 | Integration test helpers | `test/integration/helpers.ts` — Knex setup, JWT token factories (staff/manager), service API key helper, `resetSchema`, `truncateTables`, `createTestContext` |
+| US-002 | CRUD + lifecycle integration tests | `test/integration/templates-crud.test.ts` — all 21 scenarios: POST, GET list/single, PATCH (3 versioning branches + edge cases), activate/disable/enable, role guards |
+| US-003 | Render integration tests | `test/integration/render.test.ts` — active SMS/email renders, 404 cases, draft-vs-active isolation, activate/disable eviction, enable recovery, missing tags, malformed tags |
+| US-004 | Contract tests | `test/contract/render-contract.test.ts` — TypeBox `Value.Check` assertions on request + SMS/email/error response schemas |
+
+**Key decisions baked into the notes:**
+- JWT signing uses `new TextEncoder().encode(secret)` to match `src/plugins/auth.ts`
+- Cache isolation: import the `templateCache` singleton in render tests and call `evict()` between tests, or rely on unique UUIDs per test
+- `Value` from `@sinclair/typebox/value` for runtime schema checks in contract tests
+- Patterns from Phase 4 preserved in the new `progress.txt` header
+[ralph/template-service-phase-4 d62f6e0] preparing for Phase 5
+ 7 files changed, 305 insertions(+), 143 deletions(-)
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-4/prd.json
+ create mode 100644 scripts/ralph/archive/2026-03-30-template-service-phase-4/progress.txt
+Archiving previous run: ralph/template-service-phase-4
+   Archived to: /Users/andrey/dev/pre-sale/ortho/scripts/ralph/archive/2026-03-30-template-service-phase-4
+Starting Ralph (Claude Code) - Max iterations: 20
+
+===============================================================
+  Ralph Iteration 1 of 20 (Claude Code)
+===============================================================
+All 4 stories have `passes: true`.
+
+<promise>COMPLETE</promise>
+
+Ralph completed all tasks!
+Completed at iteration 1 of 20
+* Phase 5 Finished
+* * * * * * * * * * * * * * * * * * * * * * * *
+* * * * * * * *  ALL DONE  * * * * * * * * * * * *
+[andrey@MacBook:~/dev/pre-sale/ortho]-»

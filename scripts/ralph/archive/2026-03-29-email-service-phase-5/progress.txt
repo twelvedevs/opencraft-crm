@@ -1,0 +1,74 @@
+## 2026-03-29 - US-016
+- Created `apps/platform/email/infra/api-gateway-sendgrid-rule.ts` — AWS CDK construct `SendGridWebhookListenerRule`
+- Construct attaches a dedicated ALB listener rule for POST /webhooks/sendgrid at priority 10 (higher than main catch-all)
+- Conditions: path-pattern `/webhooks/sendgrid`, HTTP method POST, source-ip restricted to SendGrid CIDR allowlist (10 CIDRs documented with reference URL)
+- Exports `description` string noting the rule is separate from the main Email Service API listener
+- Comment in file explains forwarding to same ECS target group at higher listener rule priority
+- Typecheck passes (tsconfig covers `src/**/*` only; infra/ is not included — no CDK types needed in existing tsconfig)
+- **Learnings for future iterations:**
+  - CDK infra files placed outside `src/` are not covered by the service tsconfig — typecheck passes trivially; a separate `tsconfig.infra.json` + `aws-cdk-lib` devDep would be needed to actually typecheck CDK constructs
+  - ALB listener rules support combined conditions: `pathPatterns`, `httpRequestMethods`, and `sourceIps` — all must match for the rule to fire
+  - SendGrid IP ranges should be reviewed periodically; the reference URL is documented in the construct
+---
+
+## 2026-03-29 - US-015
+- Created `apps/platform/email/datadog/dashboard.json` with a valid Datadog dashboard API v1 JSON definition
+- Dashboard title: "Email Service — Platform"
+- 6 widgets: transactional-send queue depth, campaign-recipient queue depth, campaign send rate, webhook processing lag p95, spam check failure rate, email.failed dead-letter rate
+- Markers added for all alert thresholds per acceptance criteria (>1000, >50000, p95>30s, any occurrence)
+- Typecheck passes (tsconfig only includes `src/**/*`, JSON file unaffected)
+- **Learnings for future iterations:**
+  - Datadog dashboard JSON uses `layout_type: "ordered"` with explicit `x/y/width/height` per widget under `layout`
+  - Alert thresholds in dashboard widgets are represented as `markers` (not monitor configs) — the JSON definition captures the threshold visually
+  - `per_minute(query)` formula calculates rate from a counter in Datadog timeseries widgets
+  - `aws.events.matched_events` is the standard metric for counting matched EventBridge rules in Datadog
+---
+
+## Codebase Patterns
+- @ortho/logger package: thin pino wrapper; use `createLogger('service-name:component')` — returns a Logger instance with Datadog-compatible `status` field
+- Logger import: `import { createLogger } from '@ortho/logger';` then `const log = createLogger('email-service:component');` at module scope
+- Log levels: info for request entry/completion, debug for cache hits/misses, warn for business-rule drops, error for all catch blocks (pass full `err` object as first binding)
+- Pino log format: `log.info({ context_field: value }, 'message')` — first arg is bindings object, second is message string
+
+# Ralph Progress Log
+Started: Sun Mar 29 23:45:14 +03 2026
+---
+
+## 2026-03-29 - US-014
+- Fixed SIGTERM handler order in `src/index.ts`: `app.close()` first (stop HTTP), then workers drain, then `db.destroy()`, then `connection.quit()`
+- Added ECS stop timeout comment (>= 30s) above SIGTERM handler
+- All 76 tests pass; typecheck passes
+- **Learnings for future iterations:**
+  - The SIGTERM handler already existed but had wrong shutdown order — fastify must close before workers so no new requests are accepted during drain
+  - `db.destroy()` (Knex pool) must come after workers close, since workers use the DB
+  - The ECS stop timeout comment is a required acceptance criterion — easy to miss
+---
+
+## 2026-03-29 - US-013
+- Updated `src/types.d.ts` to add `redis: Redis` to `FastifyInstance`
+- Updated `src/app.ts` to accept `redis: Redis` as 4th param and decorate on app
+- Updated `src/routes/health.ts` to perform real DB (`SELECT 1`) and Redis (`PING`) checks; returns 200/503 with `checks` object
+- Updated `src/index.ts` to pass `connection` to `buildApp`
+- Created `src/routes/health.test.ts` with 3 unit tests (both pass, DB fails, Redis fails)
+- Updated `src/app.test.ts` and all 4 route test files to pass Redis stub to `buildApp`
+- All 76 tests pass
+- **Learnings for future iterations:**
+  - Adding a new param to `buildApp` requires updating all 5+ test files that call it — check with grep before committing
+  - The `Knex` stub in route tests was `{}` (empty object) — but health test needs `{ raw: vi.fn() }` so the DB check can be mocked; other route tests are fine with empty because they mock at the repository layer
+  - Fastify decorators typed in `types.d.ts` must match `app.decorate()` calls exactly or typecheck will catch the mismatch
+---
+
+## 2026-03-29 - US-012
+- Created `packages/@ortho/logger/` package: pino-based structured logger with Datadog-compatible `status` field, `createLogger(service)` factory
+- Added `@ortho/logger` dependency to `apps/platform/email/package.json`
+- Added `import { createLogger }` and `const log = createLogger('email-service:...')` to all 5 route handlers (sends, campaigns, spam-check, domains, webhooks)
+- Added logger to services: domain-resolver (cache hit/miss at debug), spam-checker (result at info), webhook-processor (routing decision at debug, dropped events at warn, batch errors at error)
+- Added logger to workers: transactional-send-worker (start/completion/failure at info/error), campaign-recipient-worker (start/completion/failure at info/error)
+- Replaced all `console.warn`/`console.error` in webhook-processor with `log.warn`/`log.error`
+- Files changed: packages/@ortho/logger/{package.json,tsconfig.json,src/index.ts}, apps/platform/email/package.json, all 5 route files, domain-resolver.ts, spam-checker.ts, webhook-processor.ts, transactional-send-worker.ts, campaign-recipient-worker.ts
+- **Learnings for future iterations:**
+  - @ortho/logger package was empty — needed to be created from scratch (pino dep, build step)
+  - Pino bindings go in first arg as object, message in second: `log.info({ field: val }, 'msg')`
+  - Pino `formatters.level` override adds `status` field Datadog expects alongside standard `level`
+  - All 73 existing tests pass with logging additions — no test changes needed
+---

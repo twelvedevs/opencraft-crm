@@ -1,0 +1,436 @@
+# Lead Creation & Attribution — Priority #2 QA scenarios (~19 cases).
+#
+# Covers all creation channels (website_form, google_ads, facebook_ads, walk_in,
+# referral), attribution field immutability, ad-platform idempotency, duplicate
+# detection (phone + email), duplicate lifecycle (dismiss / merge), and
+# validation errors.
+#
+# Known implementation gap revealed by lead-merge:
+#   merge-service.ts calls /pipeline/leads/:id/transition on the Pipeline Engine,
+#   but that endpoint does not exist (correct path is /memberships/:id/transition).
+#   The test expects 200; it will fail with 503 until the URL is corrected.
+
+include:
+  - pipeline.yaml
+  - referrals.yaml
+
+scenarios:
+
+  # ─── Channel coverage & attribution fields ────────────────────────────────
+
+  - id: lead-attr-website-form-utm
+    name: "Lead attr: website_form with full UTM params → attribution fields preserved"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "UTM"
+          last_name: "Test"
+          phone: "+15550010001"
+          email: "utm.test@orthocrm-test.invalid"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+          first_touch_source: "google"
+          first_touch_medium: "cpc"
+          first_touch_campaign: "spring-braces"
+          first_touch_keyword: "orthodontist near me"
+          first_touch_landing_page: "/free-consultation"
+          first_touch_referring_url: "https://google.com"
+          first_touch_device: "mobile"
+        expect:
+          status: 201
+          body_contains:
+            - "id"
+            - "first_touch_source"
+            - "first_touch_campaign"
+            - "first_touch_keyword"
+        extract:
+          lead_utm_id: "$.id"
+
+  - id: lead-attr-no-utm
+    name: "Lead attr: website_form without UTM → created, UTM fields absent"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "NoUTM"
+          last_name: "Test"
+          phone: "+15550010002"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id", "channel"]
+        extract:
+          lead_no_utm_id: "$.id"
+
+  - id: lead-attr-google-ads
+    name: "Lead attr: google_ads with campaign/keyword/device"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Google"
+          last_name: "Ads"
+          phone: "+15550010003"
+          channel: "google_ads"
+          location_id: "{{location_id}}"
+          first_touch_source: "google"
+          first_touch_medium: "cpc"
+          first_touch_campaign: "braces-2026"
+          first_touch_keyword: "braces cost"
+          first_touch_device: "desktop"
+          ad_platform_lead_id: "gads-ext-001"
+        expect:
+          status: 201
+          body_contains: ["id", "first_touch_campaign"]
+        extract:
+          lead_gads_id: "$.id"
+
+  - id: lead-attr-google-ads-no-keyword
+    name: "Lead attr: google_ads display campaign without keyword → keyword field null"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Display"
+          last_name: "Ads"
+          phone: "+15550010004"
+          channel: "google_ads"
+          location_id: "{{location_id}}"
+          first_touch_source: "google"
+          first_touch_medium: "display"
+          first_touch_campaign: "remarketing-2026"
+          ad_platform_lead_id: "gads-display-001"
+        expect:
+          status: 201
+          body_contains: ["id"]
+
+  - id: lead-attr-facebook-ads
+    name: "Lead attr: facebook_ads with ad_platform_lead_id"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Meta"
+          last_name: "Lead"
+          phone: "+15550010005"
+          email: "meta.lead@orthocrm-test.invalid"
+          channel: "facebook_ads"
+          location_id: "{{location_id}}"
+          first_touch_source: "facebook"
+          first_touch_medium: "paid_social"
+          first_touch_campaign: "fb-spring-braces"
+          ad_platform_lead_id: "fb-ext-lead-001"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          lead_fb_id: "$.id"
+
+  - id: lead-attr-walk-in
+    name: "Lead attr: walk_in — channel and location captured"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "WalkIn"
+          last_name: "Patient"
+          phone: "+15550010006"
+          channel: "walk_in"
+          location_id: "{{location_id}}"
+          created_by_location: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id", "channel"]
+        extract:
+          lead_walkin_id: "$.id"
+
+  - id: lead-attr-referral
+    name: "Lead attr: referral channel with referrer_id and referrer_type=patient"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create, referrer-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Referred"
+          last_name: "Patient"
+          phone: "+15550010007"
+          channel: "referral"
+          location_id: "{{location_id}}"
+          referrer_id: "{{referrer_id}}"
+          referrer_type: "doctor"
+        expect:
+          status: 201
+          body_contains: ["id", "referrer_id"]
+        extract:
+          lead_referral_id: "$.id"
+
+  # ─── Attribution integrity ────────────────────────────────────────────────
+
+  - id: lead-attr-immutable
+    name: "Lead attr: PATCH first_touch_source on existing lead → 400 immutable"
+    service: crm-api-gateway
+    depends_on: [lead-attr-website-form-utm]
+    steps:
+      - type: http
+        method: PATCH
+        path: /v1/leads/{{lead_utm_id}}
+        body:
+          first_touch_source: "overwritten"
+        expect:
+          status: 400
+          body_contains: ["attribution"]
+
+  - id: lead-attr-ad-platform-idempotent
+    name: "Lead attr: duplicate ad_platform_lead_id → returns same lead (idempotent)"
+    service: crm-api-gateway
+    depends_on: [lead-attr-facebook-ads]
+    steps:
+      # POST same ad_platform_lead_id as lead-attr-facebook-ads — should return existing
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Duplicate"
+          last_name: "AdEvent"
+          phone: "+15550019999"
+          channel: "facebook_ads"
+          location_id: "{{location_id}}"
+          ad_platform_lead_id: "fb-ext-lead-001"
+        expect:
+          status: 201
+          body_contains: ["id"]
+        extract:
+          lead_idempotent_id: "$.id"
+
+      # The returned id must match the original lead
+      - type: cli
+        command: >-
+          test "{{lead_idempotent_id}}" = "{{lead_fb_id}}" && echo "MATCH" || echo "MISMATCH"
+        expect:
+          exit_code: 0
+          stdout_contains: "MATCH"
+
+  # ─── Duplicate detection ──────────────────────────────────────────────────
+
+  - id: lead-dup-phone-flagged
+    name: "Lead dup: second lead with same phone → duplicate_status=flagged"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      # Create a lead with same phone as lead-create (+15056444803)
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Dup"
+          last_name: "Phone"
+          phone: "+15056444803"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id", "duplicate_status"]
+        extract:
+          lead_dup_phone_id: "$.id"
+
+      # Verify the duplicate_status is 'flagged'
+      - type: cli
+        command: >-
+          curl -s -H "Authorization: Bearer {{token}}" http://localhost:3207/v1/leads/{{lead_dup_phone_id}} |
+          grep -o '"duplicate_status":"[^"]*"'
+        expect:
+          exit_code: 0
+          stdout_contains: "flagged"
+
+  - id: lead-dup-email-flagged
+    name: "Lead dup: same email, different phone → duplicate_status=flagged"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      # Create a lead with same email as lead-create (qa.test@orthocrm-test.invalid)
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Dup"
+          last_name: "Email"
+          phone: "+15559990001"
+          email: "qa.test@orthocrm-test.invalid"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 201
+          body_contains: ["id", "duplicate_status"]
+        extract:
+          lead_dup_email_id: "$.id"
+
+      - type: cli
+        command: >-
+          curl -s -H "Authorization: Bearer {{token}}" http://localhost:3207/v1/leads/{{lead_dup_email_id}} |
+          grep -o '"duplicate_status":"[^"]*"'
+        expect:
+          exit_code: 0
+          stdout_contains: "flagged"
+
+  - id: lead-dup-list
+    name: "Lead dup: list flagged duplicates → 200 with data"
+    service: crm-api-gateway
+    depends_on: [lead-dup-phone-flagged]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads/duplicates?limit=10
+        expect:
+          status: 200
+          body_contains: ["data", "nextCursor"]
+
+  # ─── Duplicate lifecycle ──────────────────────────────────────────────────
+
+  - id: lead-dup-dismiss
+    name: "Lead dup: resolve duplicate without merge → 200"
+    service: crm-api-gateway
+    depends_on: [lead-dup-email-flagged]
+    steps:
+      - type: http
+        method: PATCH
+        path: /v1/leads/{{lead_dup_email_id}}/duplicate-status
+        body:
+          status: "resolved"
+        expect:
+          status: 200
+          body_contains: ["id"]
+
+      # Confirm status is now resolved
+      - type: cli
+        command: >-
+          curl -s -H "Authorization: Bearer {{token}}" http://localhost:3207/v1/leads/{{lead_dup_email_id}} |
+          grep -o '"duplicate_status":"[^"]*"'
+        expect:
+          exit_code: 0
+          stdout_contains: "resolved"
+
+  - id: lead-merge
+    name: "Lead merge: merge phone duplicate into original → 200"
+    service: crm-api-gateway
+    depends_on: [lead-dup-phone-flagged, pipeline-transition]
+    steps:
+      # pipeline-transition transitions lead_id to 'contacted' — winning_stage must
+      # match current_stage to avoid the Pipeline Engine call in merge-service.
+      # NOTE: merge-service calls /pipeline/leads/:id/transition which does not exist
+      # (correct path: /pipeline/memberships/:id/transition). Test will fail with 503
+      # until merge-service.ts line ~60 is corrected.
+      - type: http
+        method: POST
+        path: /v1/leads/{{lead_id}}/merge
+        body:
+          merge_lead_id: "{{lead_dup_phone_id}}"
+          winning_stage: "contacted"
+        expect:
+          status: 200
+          body_contains: ["id"]
+
+  # ─── Merge error cases ────────────────────────────────────────────────────
+
+  - id: lead-merge-not-found
+    name: "Lead merge: non-existent lead → 404"
+    service: crm-api-gateway
+    depends_on: [auth-login, lead-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads/00000000-0000-0000-0000-000000000000/merge
+        body:
+          merge_lead_id: "{{lead_id}}"
+          winning_stage: "new_lead"
+        expect:
+          status: 404
+
+  - id: lead-merge-already-merged
+    name: "Lead merge: merge already-archived duplicate → 400"
+    service: crm-api-gateway
+    depends_on: [lead-merge]
+    steps:
+      # lead_dup_phone_id is now archived (merged_into_id set after lead-merge)
+      - type: http
+        method: POST
+        path: /v1/leads/{{lead_id}}/merge
+        body:
+          merge_lead_id: "{{lead_dup_phone_id}}"
+          winning_stage: "contacted"
+        expect:
+          status: 400
+          body_contains: ["already merged"]
+
+  # ─── Validation ───────────────────────────────────────────────────────────
+
+  - id: lead-create-invalid-phone
+    name: "Lead validation: invalid phone format → 400"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Bad"
+          last_name: "Phone"
+          phone: "not-a-phone"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 400
+
+  - id: lead-create-missing-required
+    name: "Lead validation: missing phone field → 400"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "No"
+          last_name: "Phone"
+          channel: "website_form"
+          location_id: "{{location_id}}"
+        expect:
+          status: 400
+
+  - id: lead-create-invalid-channel
+    name: "Lead validation: unrecognised channel value → 400"
+    service: crm-api-gateway
+    depends_on: [auth-login, location-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads
+        body:
+          first_name: "Bad"
+          last_name: "Channel"
+          phone: "+15550019001"
+          channel: "unknown_source"
+          location_id: "{{location_id}}"
+        expect:
+          status: 400

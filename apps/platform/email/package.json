@@ -1,0 +1,40 @@
+{
+  "name": "@platform/email",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "migrate": "npx tsx node_modules/knex/bin/cli.js migrate:latest --knexfile knexfile.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@fastify/sensible": "^6.0.0",
+    "@ortho/event-bus": "file:../../../packages/@ortho/event-bus",
+    "@ortho/openapi": "file:../../../packages/@ortho/openapi",
+    "@ortho/fastify-logger": "file:../../../packages/@ortho/fastify-logger",
+    "@ortho/logger": "file:../../../packages/@ortho/logger",
+    "@sinclair/typebox": "^0.34.0",
+    "bullmq": "^5.0.0",
+    "fastify": "^5.0.0",
+    "ioredis": "^5.0.0",
+    "knex": "^3.0.0",
+    "pg": "^8.0.0"
+    
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}

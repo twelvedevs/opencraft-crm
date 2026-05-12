@@ -1,0 +1,259 @@
+{
+  "project": "Ortho CRM — Lead Service (Phase 3: Event Worker + 13 Handlers + @ortho/types)",
+  "branchName": "feature/lead-service-phase-3",
+  "description": "Lead Service Phase 3 — adds @ortho/types event type definitions, the event bus worker with all 13 subscribed event handlers, last_activity_at maintenance, and integration tests against a real DB + RedisStreamsDriver",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "@ortho/types/src/events.ts — add Lead Service published and subscribed event types",
+      "description": "As a developer, I need TypeScript types for all Lead Service events (published and subscribed) in the shared @ortho/types package, so that the event worker handlers and publisher can be type-safe without ad-hoc casts.",
+      "acceptanceCriteria": [
+        "packages/@ortho/types/src/events.ts: add LeadCreatedPayload { lead_id: string, location_id: string, channel: string, current_pipeline: string, current_stage: string | null, referrer_id?: string, referrer_type?: string, referral_code?: string } and LeadCreatedEvent { event_type: 'lead.created', entity_type: 'lead', entity_id: string, payload: LeadCreatedPayload }",
+        "Add LeadUpdatedPayload { lead_id: string, location_id: string, changed_fields: string[] } and LeadUpdatedEvent",
+        "Add LeadMergedPayload { surviving_lead_id: string, merged_lead_id: string, location_id: string } and LeadMergedEvent { entity_id: surviving_lead_id }",
+        "Add LeadArchivedPayload { lead_id: string, location_id: string } and LeadArchivedEvent",
+        "Add AppointmentUpdatedPayload { lead_id: string, appointment_id: string, appointment_type: string, scheduled_at: string, status: string, location_id: string } and AppointmentUpdatedEvent",
+        "Add LeadStageChangedPayload { lead_id: string, location_id: string, pipeline: string, stage_to: string, stage_from: string, reason: string, time_in_stage_seconds: number, response_time_seconds?: number }",
+        "Add LeadConvertedPayload { lead_id: string, location_id: string, channel: string }",
+        "Add OptOutReceivedPayload { phone_number: string, opted_out_at: string, source: string }",
+        "Add OptOutRemovedPayload { phone_number: string, removed_at: string }",
+        "Add EmailBouncedPayload { to_address: string, bounce_type: 'hard' | 'soft' }",
+        "Add MessageDeliveredPayload { message_id: string, twilio_sid: string | null, to_number: string, from_number: string, delivered_at: string }",
+        "Add MessageFailedPayload { message_id: string, twilio_sid: string | null, to_number: string, from_number: string, error_code: string | null, error_message: string | null }",
+        "Add InboundMessageReceivedPayload { message_id: string, from_number: string, to_number: string, body: string | null, media_urls: string[] | null, received_at: string, message_type: string }",
+        "Add ReferralConvertedPayload { lead_id: string, location_id: string, referrer_id: string, referrer_type: string }",
+        "Add SequenceStepCompletedPayload { entity_id: string, entity_type: string, sequence_id: string, step_id: string }",
+        "Add WorkflowTriggeredPayload { entity_id: string, entity_type: string, workflow_id: string }",
+        "All types are exported from packages/@ortho/types/src/events.ts; no existing types removed or modified",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "activity-repository.ts updates + event-worker.ts + index.ts worker lifecycle wiring",
+      "description": "As a developer, I need findLastInboundAt in the activity repository, last_activity_at maintenance on every activity insert, the event worker that wires all 13 subscriptions, and the index.ts lifecycle integration, so that the worker can start and stop cleanly alongside the HTTP server.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/repositories/activity-repository.ts: add findLastInboundAt(db: Knex, leadId: string): Promise<Date | null> — SELECT occurred_at FROM crm_leads.lead_activities WHERE lead_id = $leadId AND event_type = 'inbound_message.received' ORDER BY occurred_at DESC LIMIT 1; returns Date or null",
+        "apps/crm/lead/src/repositories/activity-repository.ts: update insertActivity — after the INSERT ... ON CONFLICT DO NOTHING, if the row was inserted (check xmax=0 or use INSERT ... RETURNING id to detect actual insert), UPDATE crm_leads.leads SET last_activity_at = GREATEST(COALESCE(last_activity_at, '1970-01-01'::timestamptz), $occurred_at), updated_at = now() WHERE id = $lead_id; use a single SQL statement pattern: INSERT INTO lead_activities (...) VALUES (...) ON CONFLICT (source_event_id) DO NOTHING RETURNING id — then if id is returned, run the UPDATE on leads",
+        "apps/crm/lead/src/workers/event-worker.ts created; exports createEventWorker(db: Knex): { start: () => Promise<void>, stop: () => Promise<void> }",
+        "event-worker.ts: const bus = createEventBus() from '@ortho/event-bus'; then bus.subscribe for all 13 event types in this order: 'ad_lead.received', 'lead.stage_changed', 'lead.archived', 'lead.converted', 'opt_out.received', 'opt_out.removed', 'email.bounced', 'message.delivered', 'message.failed', 'inbound_message.received', 'referral.converted', 'sequence.step_completed', 'workflow.triggered'",
+        "Each bus.subscribe call wraps handler with error catch: (event) => handler(event, db, bus?).catch(err => log.error({ err, event_id: event.event_id }, 'handler error')) — errors must not crash the process; log uses createLogger('crm-lead') imported from @ortho/logger",
+        "Only the ad_lead.received handler receives the bus as 3rd argument (for publishLeadCreated); all other handlers receive only (event, db)",
+        "event-worker.ts returns { start: () => bus.start(), stop: () => bus.stop() }",
+        "apps/crm/lead/src/index.ts updated: import createEventWorker; const worker = createEventWorker(db); await worker.start() called after app.listen(); SIGTERM handler updated to await worker.stop() before app.close()",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "handlers/ad-lead-received.ts — create lead from ad platform event with dedup",
+      "description": "As a developer, I need the ad_lead.received handler to create a lead from an Integration Hub event, applying the same idempotency and dedup logic as the HTTP POST /leads route, so that ad leads flow into the CRM without duplicates.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/ad-lead-received.ts created; exports handleAdLeadReceived(event: OrthoEvent, db: Knex, bus: EventBus): Promise<void>",
+        "Parse payload fields: ad_platform_lead_id = String(payload.external_lead_id ?? ''); location_id = String(payload.location_id ?? ''); platform = String(payload.platform ?? ''); full_name = String(payload.fields?.full_name ?? ''); phone_raw = String(payload.fields?.phone_number ?? ''); email = String(payload.fields?.email ?? '') or undefined if empty",
+        "Channel mapping: if platform.toLowerCase().includes('google') → 'google_ads'; if platform.toLowerCase().includes('facebook') || platform.toLowerCase().includes('meta') → 'facebook_ads'; else → 'google_ads'",
+        "Name parsing: split full_name on first space; first word → first_name, remainder → last_name; if no space, first_name = full_name, last_name = ''",
+        "Idempotency check: call leadRepository.findByAdPlatformLeadId(db, ad_platform_lead_id); if found → log debug 'ad lead already exists, skipping' and return (do NOT throw)",
+        "Phone normalization: try normalizePhone(phone_raw); on failure → createLogger('crm-lead').warn({ phone_raw }, 'ad_lead.received: invalid phone, skipping') and return",
+        "Dedup check (same logic as lead-service.ts createLead): findByPhone, findByEmail, determine duplicate_status and duplicate_of_id",
+        "DB transaction: (1) INSERT lead into crm_leads.leads with first_name, last_name, phone (E.164), email, channel, location_id, ad_platform_lead_id, contact_status='active', current_pipeline='none', score=0, duplicate_status, duplicate_of_id; (2) activityRepository.insertActivity (which also updates last_activity_at) with source_event_id = event.event_id ?? ('internal:lead.created:' + newLead.id), event_type='lead.created', actor_type='system', actor_id=null, payload={ channel, location_id }, occurred_at=now()",
+        "After transaction: call publishLeadCreated(bus, { lead_id, location_id, channel, current_pipeline: 'none', current_stage: null }) from events/publisher.ts",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "handlers/stage-changed.ts — update pipeline cache and recalculate score",
+      "description": "As a developer, I need the lead.stage_changed handler to update the denormalized current_pipeline and current_stage fields and recalculate the lead's priority score, so that the coordinator queue reflects the latest pipeline state.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/stage-changed.ts created; exports handleStageChanged(event: OrthoEvent, db: Knex): Promise<void>",
+        "Parse payload: lead_id = String(payload.lead_id), pipeline = String(payload.pipeline), stage_to = String(payload.stage_to), occurred_at = payload.occurred_at ? new Date(String(payload.occurred_at)) : new Date()",
+        "Look up lead via leadRepository.findById(db, lead_id); if not found → createLogger('crm-lead').warn({ lead_id }, 'stage_changed: lead not found, skipping') and return",
+        "DB transaction: (1) update lead: SET current_pipeline=$pipeline, current_stage=$stage_to, updated_at=now() WHERE id=$lead_id; (2) fetch lastInboundAt via activityRepository.findLastInboundAt(trx, lead_id); (3) recalculate score: newScore = calculateScore({ lead: { ...lead, current_pipeline: pipeline, current_stage: stage_to }, eventType: 'lead.stage_changed', lastInboundAt }); (4) UPDATE crm_leads.leads SET score=$newScore, updated_at=now() WHERE id=$lead_id; (5) activityRepository.insertActivity(trx, { lead_id, event_type: 'lead.stage_changed', actor_type: 'system', actor_id: null, payload: event.payload, occurred_at, source_event_id: event.event_id ?? ('fallback:stage_changed:' + lead_id + ':' + occurred_at.toISOString()) })",
+        "All 5 sub-steps run inside a single knex.transaction; if any step fails, transaction rolls back and error propagates to the worker error handler",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "handlers/lead-archived.ts — clear pipeline cache, recalculate score, idempotent timeline",
+      "description": "As a developer, I need the lead.archived handler to clear the denormalized pipeline fields, recalculate score, and write a timeline entry that is idempotent with the HTTP archive route's inline write, so that either origin produces exactly one timeline entry.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/lead-archived.ts created; exports handleLeadArchived(event: OrthoEvent, db: Knex): Promise<void>",
+        "Parse payload: lead_id = String(payload.lead_id); occurred_at = payload.occurred_at ? new Date(String(payload.occurred_at)) : new Date()",
+        "Look up lead via leadRepository.findById(db, lead_id); if not found → warn + return",
+        "DB transaction: (1) UPDATE crm_leads.leads SET current_pipeline=NULL, current_stage=NULL, updated_at=now() WHERE id=$lead_id; (2) fetch lastInboundAt; (3) newScore = calculateScore({ lead: { ...lead, current_pipeline: 'none', current_stage: null }, eventType: 'lead.archived', lastInboundAt }); (4) UPDATE crm_leads.leads SET score=$newScore WHERE id=$lead_id; (5) activityRepository.insertActivity(trx, { lead_id, event_type: 'lead.archived', actor_type: 'system', actor_id: null, payload: {}, occurred_at, source_event_id: 'internal:lead.archived:' + lead_id }) — the ON CONFLICT DO NOTHING on source_event_id silently skips if the HTTP route already wrote this entry",
+        "No error thrown when ON CONFLICT skips — the RETURNING id check in insertActivity simply returns null; last_activity_at is only updated if the row was actually inserted",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "handlers/lead-converted.ts — write timeline first, then clear pipeline cache",
+      "description": "As a developer, I need the lead.converted handler to write the timeline entry BEFORE updating the lead state, so that the conversion is recorded even if the subsequent lead.stage_changed event re-initialises the pipeline.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/lead-converted.ts created; exports handleLeadConverted(event: OrthoEvent, db: Knex): Promise<void>",
+        "Parse payload: lead_id = String(payload.lead_id); occurred_at = payload.occurred_at ? new Date(String(payload.occurred_at)) : new Date()",
+        "Look up lead via leadRepository.findById(db, lead_id); if not found → warn + return",
+        "DB transaction in this exact order: (1) activityRepository.insertActivity(trx, { lead_id, event_type: 'lead.converted', actor_type: 'system', actor_id: null, payload: event.payload, occurred_at, source_event_id: event.event_id ?? ('fallback:lead.converted:' + lead_id) }) — timeline entry written FIRST; (2) UPDATE crm_leads.leads SET current_pipeline='none', current_stage=NULL, updated_at=now() WHERE id=$lead_id — transient state; Pipeline Engine will immediately follow with lead.stage_changed to set the real pipeline/stage",
+        "No score recalculation — the subsequent lead.stage_changed handler will recalculate",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "handlers/opt-out-received.ts + handlers/opt-out-removed.ts — phone lookup, contact_status update",
+      "description": "As a developer, I need the opt_out.received and opt_out.removed handlers to resolve a lead by phone number, apply the correct contact_status transition, recalculate score, and write a timeline entry.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/opt-out-received.ts created; exports handleOptOutReceived(event: OrthoEvent, db: Knex): Promise<void>",
+        "opt-out-received: parse phone_number = String(payload.phone_number); normalize via normalizePhone; on normalization failure → warn + return; look up lead via leadRepository.findByPhone(db, normalizedPhone) — take first result (non-archived, non-merged); if none found → createLogger('crm-lead').warn({ phone: normalizedPhone }, 'opt_out.received: no lead found') and return",
+        "opt-out-received DB transaction: (1) newStatus = applyOptOut(lead.contact_status as ContactStatus); (2) UPDATE crm_leads.leads SET contact_status=$newStatus, updated_at=now() WHERE id=$lead_id; (3) fetch lastInboundAt; (4) newScore = calculateScore({ lead: { ...lead, contact_status: newStatus }, eventType: 'opt_out.received', lastInboundAt }); (5) UPDATE leads SET score=$newScore WHERE id=$lead_id; (6) insertActivity({ lead_id, event_type: 'opt_out.received', actor_type: 'system', payload: event.payload, occurred_at: payload.opted_out_at ? new Date(payload.opted_out_at) : new Date(), source_event_id: event.event_id ?? ('fallback:opt_out.received:' + lead_id) })",
+        "apps/crm/lead/src/workers/handlers/opt-out-removed.ts created; exports handleOptOutRemoved(event: OrthoEvent, db: Knex): Promise<void>",
+        "opt-out-removed: same phone normalization + lookup pattern; DB transaction: (1) newStatus = removeOptOut(lead.contact_status); (2) UPDATE contact_status; (3) recalculate score; (4) UPDATE score; (5) insertActivity with event_type='opt_out.removed', occurred_at from payload.removed_at",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "handlers/email-bounced.ts — email lookup, hard bounce contact_status update",
+      "description": "As a developer, I need the email.bounced handler to resolve a lead by email address, apply a hard bounce contact_status transition, and recalculate score — ignoring soft bounces entirely.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/email-bounced.ts created; exports handleEmailBounced(event: OrthoEvent, db: Knex): Promise<void>",
+        "Parse payload: to_address = String(payload.to_address); bounce_type = String(payload.bounce_type)",
+        "If bounce_type !== 'hard' → return immediately (soft bounces do NOT change contact_status or score)",
+        "Look up lead via leadRepository.findByEmail(db, to_address) — takes first result; if none found → createLogger('crm-lead').warn({ to_address }, 'email.bounced: no lead found') and return",
+        "DB transaction: (1) newStatus = applyHardBounce(lead.contact_status); (2) UPDATE crm_leads.leads SET contact_status=$newStatus, updated_at=now() WHERE id=$lead_id; (3) fetch lastInboundAt; (4) newScore = calculateScore({ lead: { ...lead, contact_status: newStatus }, eventType: 'email.bounced', lastInboundAt }); (5) UPDATE leads SET score=$newScore WHERE id=$lead_id; (6) insertActivity({ lead_id, event_type: 'email.bounced', actor_type: 'system', payload: event.payload, occurred_at: new Date(), source_event_id: event.event_id ?? ('fallback:email.bounced:' + lead_id) })",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "handlers/message-delivered.ts + handlers/message-failed.ts — phone lookup, timeline + score",
+      "description": "As a developer, I need handlers for message.delivered (recalculates score) and message.failed (timeline only) that resolve the lead via the to_number phone lookup pattern.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/message-delivered.ts created; exports handleMessageDelivered(event: OrthoEvent, db: Knex): Promise<void>",
+        "message-delivered: parse to_number = String(payload.to_number); normalize via normalizePhone; on failure → warn + return; look up lead via leadRepository.findByPhone(db, normalizedPhone); if not found → warn + return",
+        "message-delivered DB transaction: (1) fetch lastInboundAt; (2) newScore = calculateScore({ lead, eventType: 'message.delivered', lastInboundAt }); (3) UPDATE crm_leads.leads SET score=$newScore, updated_at=now() WHERE id=$lead_id; (4) insertActivity({ lead_id, event_type: 'message.delivered', actor_type: 'system', payload: event.payload, occurred_at: payload.delivered_at ? new Date(String(payload.delivered_at)) : new Date(), source_event_id: event.event_id ?? ('fallback:message.delivered:' + String(payload.message_id)) })",
+        "apps/crm/lead/src/workers/handlers/message-failed.ts created; exports handleMessageFailed(event: OrthoEvent, db: Knex): Promise<void>",
+        "message-failed: same to_number normalization + lead lookup; if not found → warn + return; DB transaction: insertActivity only — no score update, no state update; event_type='message.failed', source_event_id = event.event_id ?? ('fallback:message.failed:' + String(payload.message_id))",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "handlers/inbound-message-received.ts — from_number lookup, score recalculation with engagement boost",
+      "description": "As a developer, I need the inbound_message.received handler to resolve the lead via from_number (the lead's phone), recalculate score with the engagement boost, and write a timeline entry.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/inbound-message-received.ts created; exports handleInboundMessageReceived(event: OrthoEvent, db: Knex): Promise<void>",
+        "Parse from_number = String(payload.from_number); normalize via normalizePhone; on failure → warn + return",
+        "Look up lead via leadRepository.findByPhone(db, normalizedFromNumber); if not found → createLogger('crm-lead').warn({ from_number: normalizedFromNumber }, 'inbound_message.received: no lead found') and return",
+        "DB transaction: (1) occurred_at = payload.received_at ? new Date(String(payload.received_at)) : new Date(); (2) newScore = calculateScore({ lead, eventType: 'inbound_message.received', lastInboundAt: occurred_at }) — pass occurred_at as lastInboundAt so the just-received message itself satisfies the engagement factor; (3) UPDATE crm_leads.leads SET score=$newScore, updated_at=now() WHERE id=$lead_id; (4) insertActivity({ lead_id, event_type: 'inbound_message.received', actor_type: 'system', payload: event.payload, occurred_at, source_event_id: event.event_id ?? ('fallback:inbound_message.received:' + String(payload.message_id)) })",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "handlers/referral-converted.ts + sequence-step-completed.ts + workflow-triggered.ts — timeline only",
+      "description": "As a developer, I need three simple event handlers that write timeline entries without any state or score updates, so that the activity feed captures referral conversions, sequence progress, and workflow triggers.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/workers/handlers/referral-converted.ts created; exports handleReferralConverted(event: OrthoEvent, db: Knex): Promise<void>; parse lead_id = String(payload.lead_id); look up lead (warn + return if not found); DB transaction: insertActivity({ lead_id, event_type: 'referral.converted', actor_type: 'system', payload: event.payload, occurred_at: new Date(), source_event_id: event.event_id ?? ('fallback:referral.converted:' + lead_id) })",
+        "apps/crm/lead/src/workers/handlers/sequence-step-completed.ts created; exports handleSequenceStepCompleted(event: OrthoEvent, db: Knex): Promise<void>; parse entity_id = String(payload.entity_id); entity_type = String(payload.entity_type); if entity_type !== 'lead' → return (no-op — sequence may enroll non-lead entities); lead_id = entity_id; look up lead (warn + return if not found); DB transaction: insertActivity({ lead_id, event_type: 'sequence.step_completed', actor_type: 'automation', payload: event.payload, occurred_at: new Date(), source_event_id: event.event_id ?? ('fallback:sequence.step_completed:' + lead_id + ':' + String(payload.step_id)) })",
+        "apps/crm/lead/src/workers/handlers/workflow-triggered.ts created; exports handleWorkflowTriggered(event: OrthoEvent, db: Knex): Promise<void>; parse entity_id = String(payload.entity_id); entity_type = String(payload.entity_type); if entity_type !== 'lead' → return immediately (no log — non-lead entity_types are expected and not an error); lead_id = entity_id; look up lead (warn + return if not found); DB transaction: insertActivity({ lead_id, event_type: 'workflow.triggered', actor_type: 'automation', payload: event.payload, occurred_at: new Date(), source_event_id: event.event_id ?? ('fallback:workflow.triggered:' + lead_id + ':' + String(payload.workflow_id)) })",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Unit tests — complex handlers: ad-lead-received, stage-changed, lead-archived, lead-converted",
+      "description": "As a developer, I want unit tests for the four stateful handlers using mocked repositories and MockDriver, so that the create-lead flow, pipeline cache updates, idempotency key logic, and transaction ordering are verified in isolation.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/unit/handlers/ad-lead-received.test.ts: mock leadRepository (findByAdPlatformLeadId, findByPhone, findByEmail, createLead) and activityRepository (insertActivity) via vi.mock; mock publishLeadCreated; test: existing ad_platform_lead_id → returns early without insert; invalid phone → returns early without insert; valid payload creates lead, inserts activity, calls publishLeadCreated; google platform → channel='google_ads'; facebook platform → channel='facebook_ads'; phone match sets duplicate_status='flagged'; publishLeadCreated called with correct entity_type and entity_id",
+        "apps/crm/lead/test/unit/handlers/stage-changed.test.ts: mock leadRepository, activityRepository, calculateScore; test: lead not found → returns early; happy path updates current_pipeline+current_stage, calls calculateScore, updates score, inserts activity — all in correct order; verify calculateScore receives updated stage values (not stale ones)",
+        "apps/crm/lead/test/unit/handlers/lead-archived.test.ts: test: lead not found → returns early; happy path: clears current_pipeline/current_stage to null, recalculates score, inserts activity with source_event_id='internal:lead.archived:{lead_id}'; ON CONFLICT behavior: if insertActivity returns null (conflict), last_activity_at not updated — no error thrown",
+        "apps/crm/lead/test/unit/handlers/lead-converted.test.ts: test: lead not found → returns early; happy path: activity inserted BEFORE state update (verify call order via vi.fn() call tracking); current_pipeline set to 'none', current_stage set to null; no calculateScore call (score not recalculated on conversion)",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Unit tests — lookup handlers: opt-out, email-bounced, message handlers, referral, sequence, workflow",
+      "description": "As a developer, I want unit tests for the remaining nine handlers covering phone/email resolution, contact_status transitions, score recalculation, and skip conditions.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/unit/handlers/opt-out-received.test.ts: mock leadRepository, activityRepository, applyOptOut, calculateScore; test: invalid phone → returns early; no lead found → returns early; active lead → contact_status set to 'sms_opted_out'; email_invalid lead → contact_status set to 'fully_unreachable'; score recalculated with new status; activity inserted",
+        "apps/crm/lead/test/unit/handlers/opt-out-removed.test.ts: test: sms_opted_out → 'active'; fully_unreachable → 'email_invalid'",
+        "apps/crm/lead/test/unit/handlers/email-bounced.test.ts: test: soft bounce (bounce_type='soft') → returns early, no DB writes; hard bounce on active lead → contact_status='email_invalid'; hard bounce on sms_opted_out lead → contact_status='fully_unreachable'; no lead found → returns early",
+        "apps/crm/lead/test/unit/handlers/message-delivered.test.ts: test: invalid to_number → returns early; no lead found → returns early; happy path: score recalculated, activity inserted",
+        "apps/crm/lead/test/unit/handlers/message-failed.test.ts: test: no lead found → returns early; happy path: only activity inserted, score NOT updated",
+        "apps/crm/lead/test/unit/handlers/inbound-message-received.test.ts: test: invalid from_number → returns early; no lead found → returns early; happy path: calculateScore called with eventType='inbound_message.received', score updated, activity inserted",
+        "apps/crm/lead/test/unit/handlers/referral-converted.test.ts: test: lead not found → returns early; happy path inserts activity with event_type='referral.converted'",
+        "apps/crm/lead/test/unit/handlers/sequence-step-completed.test.ts: test: entity_type !== 'lead' → returns early without DB access; entity_type='lead' and lead found → inserts activity",
+        "apps/crm/lead/test/unit/handlers/workflow-triggered.test.ts: test: entity_type !== 'lead' → returns early silently (no warn log); entity_type='lead' and lead not found → warns and returns; happy path inserts activity",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Integration tests — event-worker.test.ts (RedisStreamsDriver + real DB)",
+      "description": "As a developer, I want end-to-end integration tests for the event worker running against a real PostgreSQL test database and RedisStreamsDriver, so that the at-least-once delivery, idempotency, and handler state mutations are verified with real infrastructure.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/integration/event-worker.test.ts created; uses describe.skipIf(!infraAvailable) pattern (same as messaging service integration tests) where infraAvailable checks DATABASE_URL and REDIS_URL env vars are set",
+        "Test helper: buildTestWorker() creates a RedisStreamsDriver, creates EventBus with that driver, registers all 13 subscriptions via createEventWorker internals or re-exports, calls bus.start(); also creates a separate publish bus (MockDriver or real Redis) to inject events; afterAll: bus.stop() + db migrations rollback",
+        "Test: ad_lead.received — publish event via test bus; assert lead row created in DB with correct channel; assert lead_activities row exists with event_type='lead.created'; assert leads.last_activity_at is set; publishing again with same external_lead_id → still only 1 lead row (idempotency)",
+        "Test: lead.stage_changed — insert a lead; publish lead.stage_changed event with pipeline='new_patient', stage_to='contacted'; assert lead.current_pipeline='new_patient', lead.current_stage='contacted', lead.score > 0; assert timeline entry inserted",
+        "Test: lead.archived — insert a lead; publish lead.archived event; assert lead.current_pipeline=null, lead.current_stage=null; assert timeline entry with source_event_id='internal:lead.archived:{id}'; publish again → assert only 1 timeline entry (ON CONFLICT idempotency)",
+        "Test: lead.archived after HTTP archive — insert a lead; manually insert timeline entry with source_event_id='internal:lead.archived:{id}'; publish lead.archived via worker; assert still only 1 timeline entry (idempotency across HTTP + worker paths)",
+        "Test: opt_out.received — insert active lead; publish event with lead's E.164 phone; assert contact_status='sms_opted_out'; assert timeline entry inserted; assert last_activity_at updated",
+        "Test: email.bounced soft bounce — insert lead; publish email.bounced with bounce_type='soft'; assert contact_status unchanged; assert NO timeline entry inserted",
+        "Test: email.bounced hard bounce — insert lead; publish with bounce_type='hard'; assert contact_status='email_invalid'; timeline entry inserted",
+        "Test: inbound_message.received — insert lead; publish with from_number=lead.phone; assert lead.score recalculated (> initial 0); assert timeline entry inserted",
+        "Test: workflow.triggered with entity_type='non-lead' — publish; assert no lead_activities rows created for any lead",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

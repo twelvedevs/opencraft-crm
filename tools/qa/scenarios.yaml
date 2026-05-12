@@ -1,0 +1,42 @@
+# QA Scenario Catalog — entry point
+#
+# Scenarios are split by domain under scenarios/. Each domain file is
+# self-contained (includes its own auth/identity deps) and can be run
+# standalone with:
+#   npx tsx runner.ts --file scenarios/<domain>.yaml
+#
+# Auth credentials: set TEST_EMAIL and TEST_PASSWORD env vars.
+# Defaults: admin@test.com / password
+#
+# Dependency graph (top-level):
+#   auth-login
+#   ├── location-create → location-get, location-update, lead-create, ...
+#   ├── location-list
+#   ├── identity-me
+#   ├── user-list, user-create
+#   ├── lead-list, lead-duplicates-list
+#   ├── conversation-list, conversation-inbox-settings-get
+#   ├── campaign-list, campaign-create → campaign-get, campaign-update
+#   ├── referrer-create → referral-link-create, referral-link-list, referrer-get, referrer-list
+#   ├── reporting-dashboard, reporting-channel-performance, ...
+#   ├── notification-list, notification-read-all (also depends on identity-me)
+#   ├── api-key-create → api-key-list, api-key-revoke
+#   └── lead-create → lead-get, lead-update, lead-activities
+#       ├── appointment-create → appointment-list, appointment-update
+#       └── pipeline-enroll → pipeline-membership-get, pipeline-transition → pipeline-history
+
+include:
+  - scenarios/health.yaml
+  - scenarios/auth.yaml
+  - scenarios/identity.yaml
+  - scenarios/leads.yaml
+  - scenarios/appointments.yaml
+  - scenarios/pipeline.yaml
+  - scenarios/conversations.yaml
+  - scenarios/campaigns.yaml
+  - scenarios/referrals.yaml
+  - scenarios/reporting.yaml
+  - scenarios/notifications.yaml
+  - scenarios/lead-attribution.yaml
+  - scenarios/new-patient-pipeline.yaml
+  - scenarios/rbac.yaml

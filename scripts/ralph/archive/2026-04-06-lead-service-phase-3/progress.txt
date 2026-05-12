@@ -1,0 +1,178 @@
+## Codebase Patterns
+- `insertActivity()` returns `string | null` (inserted id or null on conflict skip) and automatically updates `leads.last_activity_at` when a row is inserted
+- Event worker creates its own `EventBus` instance; `subscribe()` must be called before `start()`
+- Only `ad_lead.received` handler receives the `bus` as 3rd argument (for publishing `lead.created`); all other handlers receive `(event, db)` only
+- Event type naming: `{domain}.{action}` (e.g., `lead.created`, `opt_out.received`)
+- `CreateLeadData` requires ALL lead fields (except id/created_at/updated_at) — must explicitly set nullable fields to `null`
+- Handler functions needing `bus` require `as Handler` cast in event-worker.ts since `Handler` type has `bus?` optional
+- `calculateScore` expects `last_activity_at` as `Date | null` but `Lead.last_activity_at` is `string | null` — always convert with `new Date()` when passing to ScoreParams
+- Handler pattern for stateful updates: findById → db.transaction → update fields → findLastInboundAt → calculateScore → update score → insertActivity
+- Phone lookup handler pattern: normalizePhone (warn+return on fail) → findByPhone (warn+return if empty) → take `leads[0]` → db.transaction with status/score/activity updates
+- Cast `lead.contact_status as ContactStatus` when passing to applyOptOut/removeOptOut/applyHardBounce
+- Handler unit test mock pattern: vi.mock repos + score-calculator, mockTrx with `.raw`/`.fn`, db with `{ transaction: cb => cb(mockTrx) }`, use `callOrder[]` array for verifying execution order
+- Phone numbers in test fixtures must use valid area codes (e.g., `+12125551234`) — `normalizePhone` rejects 555 area codes
+
+# Ralph Progress Log
+Started: Mon Apr  6 14:06:40 UTC 2026
+---
+
+## 2026-04-06 14:08 - US-001
+- Added 16 event type interfaces (payloads + events) to `packages/@ortho/types/src/events.ts`
+- Published events: LeadCreated, LeadUpdated, LeadMerged, LeadArchived
+- Subscribed events: AppointmentUpdated, LeadStageChanged, LeadConverted, OptOutReceived, OptOutRemoved, EmailBounced, MessageDelivered, MessageFailed, InboundMessageReceived, ReferralConverted, SequenceStepCompleted, WorkflowTriggered
+- Files changed: `packages/@ortho/types/src/events.ts`
+- **Learnings for future iterations:**
+  - The @ortho/types package already had AdLeadReceived and AdSpendSynced event types — new types were appended without modifying existing ones
+  - Event type naming convention: `{domain}.{action}` (e.g., `lead.created`, `opt_out.received`)
+  - Payload interfaces follow `{EventName}Payload` naming convention
+---
+
+## 2026-04-06 14:16 - US-002
+- Added `findLastInboundAt(db, leadId)` to activity-repository.ts — queries for most recent `inbound_message.received` activity
+- Rewrote `insertActivity` to use `db.raw()` with `INSERT ... ON CONFLICT DO NOTHING RETURNING id`; when a row is actually inserted, runs a second UPDATE on `crm_leads.leads` to set `last_activity_at = GREATEST(COALESCE(last_activity_at, '1970-01-01'), occurred_at)`
+- Return type changed from `Promise<void>` to `Promise<string | null>` (inserted id or null on conflict skip)
+- Created `src/workers/event-worker.ts` with `createEventWorker(db)` — creates its own `EventBus` instance, subscribes to all 13 event types with error-catching wrappers, returns `{ start, stop }`
+- Updated `src/index.ts` to import and start the event worker after `app.listen()`, and stop it before `app.close()` on SIGTERM
+- Updated unit test for `insertActivity` to match new `db.raw()` implementation
+- Files changed: `src/repositories/activity-repository.ts`, `src/workers/event-worker.ts` (new), `src/index.ts`, `test/unit/repositories/activity-repository.test.ts`
+- **Learnings for future iterations:**
+  - `insertActivity` now returns `string | null` — callers that used `await insertActivity(...)` without capturing the return are fine, but future handlers can use the return to check if the row was actually inserted
+  - The event worker creates its OWN EventBus instance (separate from the app's publish bus) — `subscribe()` must be called before `start()` per EventBusImpl constraints
+  - Handlers in event-worker.ts are stubs (`noop`) — US-004 through US-011 will replace them with real implementations
+  - The `wrapHandler` pattern passes `bus` as 5th arg only for `ad_lead.received`; all other handlers get `undefined` for the bus parameter
+---
+
+## 2026-04-06 14:20 - US-003
+- Created `src/workers/handlers/ad-lead-received.ts` with full ad lead creation flow
+- Wired `handleAdLeadReceived` into event-worker.ts replacing `noop` for `ad_lead.received`
+- Handler implements: payload parsing, channel mapping (google/facebook/meta), name splitting, ad_platform_lead_id idempotency, phone normalization with early return, phone+email dedup (same logic as lead-service.ts), DB transaction (insert lead + activity), publishLeadCreated
+- Files changed: `src/workers/handlers/ad-lead-received.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - `handleAdLeadReceived` signature is `(event, db, bus)` — needs `as Handler` cast in event-worker.ts because `Handler` type has `bus?` optional but the real handler requires it
+  - `CreateLeadData` (used by `leadRepository.createLead`) requires ALL lead fields except `id`, `created_at`, `updated_at` — must provide all nullable fields explicitly as `null`
+  - Handler imports `normalizePhone` from `lead-service.ts` — reuses existing phone normalization
+  - Dedup logic is duplicated from lead-service.ts `createLead` — both use findByPhone + findByEmail → oldest match → duplicate_of_id pattern
+---
+
+## 2026-04-06 14:22 - US-004
+- Created `src/workers/handlers/stage-changed.ts` — updates current_pipeline/current_stage, recalculates score via calculateScore, inserts timeline activity
+- Wired `handleStageChanged` into event-worker.ts replacing `noop` for `lead.stage_changed`
+- Files changed: `src/workers/handlers/stage-changed.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - Handler pattern for stateful updates: look up lead → db.transaction → update fields → findLastInboundAt → calculateScore → update score → insertActivity
+  - `calculateScore` expects `last_activity_at` as `Date | null`, but the Lead type stores it as `string | null` — must convert with `new Date()` when spreading lead into ScoreParams
+  - Use `trx.raw()` for direct UPDATE statements inside transactions to avoid the Knex builder's returning behavior
+---
+
+## 2026-04-06 14:24 - US-005
+- Created `src/workers/handlers/lead-archived.ts` — clears current_pipeline/current_stage to NULL, recalculates score with pipeline='none', inserts idempotent timeline entry with source_event_id='internal:lead.archived:{lead_id}'
+- Wired `handleLeadArchived` into event-worker.ts replacing `noop` for `lead.archived`
+- Files changed: `src/workers/handlers/lead-archived.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - Idempotency across HTTP + worker paths: both use the same source_event_id pattern (`internal:lead.archived:{id}`), so ON CONFLICT DO NOTHING ensures exactly one timeline entry regardless of which path runs first
+  - When clearing pipeline state, pass `current_pipeline: 'none'` (not `null`) to `calculateScore` — the score calculator treats 'none' as a valid pipeline value
+  - The `payload: {}` pattern is used for archived events (no meaningful payload to store)
+---
+
+## 2026-04-06 14:26 - US-006
+- Created `src/workers/handlers/lead-converted.ts` — writes timeline entry BEFORE clearing pipeline cache
+- Wired `handleLeadConverted` into event-worker.ts replacing `noop` for `lead.converted`
+- Handler inserts activity first, then sets current_pipeline='none', current_stage=NULL — no score recalculation (subsequent lead.stage_changed handles that)
+- Files changed: `src/workers/handlers/lead-converted.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - lead.converted deliberately does NOT recalculate score — the Pipeline Engine immediately follows with lead.stage_changed which will recalculate
+  - Transaction ordering matters: activity insert before state update ensures the conversion is recorded even if subsequent events arrive quickly
+  - Uses `event.payload as Record<string, unknown>` to pass the full event payload to the timeline entry (unlike lead.archived which uses `{}`)
+---
+
+## 2026-04-06 14:27 - US-007
+- Created `src/workers/handlers/opt-out-received.ts` — normalizes phone, looks up lead via findByPhone, applies applyOptOut transition, recalculates score, inserts timeline activity
+- Created `src/workers/handlers/opt-out-removed.ts` — same pattern with removeOptOut transition and `payload.removed_at` for occurred_at
+- Wired both handlers into event-worker.ts replacing `noop` stubs
+- Files changed: `src/workers/handlers/opt-out-received.ts` (new), `src/workers/handlers/opt-out-removed.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - Phone lookup handlers follow pattern: normalizePhone → findByPhone → take first result → transaction (apply status change → recalculate score → insert activity)
+  - `contact_status` must be cast `as ContactStatus` when passing to applyOptOut/removeOptOut since the Lead type stores it as `string`
+  - `occurred_at` for opt-out events comes from `payload.opted_out_at` (received) or `payload.removed_at` (removed), not a generic `occurred_at` field
+---
+
+## 2026-04-06 14:28 - US-008
+- Created `src/workers/handlers/email-bounced.ts` — soft bounces return immediately; hard bounces look up lead by email via `findByEmail`, apply `applyHardBounce` transition, recalculate score, insert timeline activity
+- Wired `handleEmailBounced` into event-worker.ts replacing `noop` for `email.bounced`
+- Files changed: `src/workers/handlers/email-bounced.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - Email lookup handler uses `findByEmail` instead of `findByPhone` — same pattern otherwise (take first result, transaction with status/score/activity)
+  - `email.bounced` handler uses `new Date().toISOString()` for occurred_at (no timestamp in payload unlike opt-out events)
+  - Soft bounce early return happens BEFORE any DB lookups — efficient short-circuit
+---
+
+## 2026-04-06 14:30 - US-009
+- Created `src/workers/handlers/message-delivered.ts` — normalizes to_number phone, looks up lead via findByPhone, recalculates score, inserts timeline activity with occurred_at from payload.delivered_at
+- Created `src/workers/handlers/message-failed.ts` — same phone lookup pattern but only inserts timeline activity (no score update, no state update)
+- Wired both handlers into event-worker.ts replacing `noop` stubs
+- Files changed: `src/workers/handlers/message-delivered.ts` (new), `src/workers/handlers/message-failed.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - message-delivered follows the score-recalculation pattern (fetch lastInboundAt → calculateScore → update score → insertActivity)
+  - message-failed is the simplest handler pattern: phone lookup → insertActivity only (no state or score changes)
+  - Both handlers use `payload.message_id` in the fallback source_event_id (not lead_id), matching the AC pattern for message-related events
+---
+
+## 2026-04-06 14:32 - US-010
+- Created `src/workers/handlers/inbound-message-received.ts` — normalizes from_number phone, looks up lead via findByPhone, recalculates score passing `occurred_at` as `lastInboundAt` (engagement boost), inserts timeline activity
+- Wired `handleInboundMessageReceived` into event-worker.ts replacing `noop` for `inbound_message.received`
+- Files changed: `src/workers/handlers/inbound-message-received.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - Inbound message handler passes `occurred_at` (derived from `payload.received_at`) as `lastInboundAt` to `calculateScore` — this ensures the just-received message itself satisfies the engagement factor, rather than querying for the previous inbound
+  - Same phone lookup pattern as message-delivered/message-failed but uses `from_number` instead of `to_number` (the lead is the sender for inbound messages)
+  - Uses `payload.message_id` in fallback source_event_id, consistent with other message handlers
+---
+
+## 2026-04-06 16:10 - US-011
+- Created three timeline-only handlers: `referral-converted.ts`, `sequence-step-completed.ts`, `workflow-triggered.ts`
+- Wired all three into event-worker.ts, replacing the last `noop` stubs; removed the now-unused `noop` handler
+- All three follow the simplest handler pattern: look up lead → insertActivity (no state or score changes)
+- `sequence-step-completed` and `workflow-triggered` check `entity_type !== 'lead'` and return early (no-op) for non-lead entities
+- `sequence-step-completed` and `workflow-triggered` use `actor_type: 'automation'` while `referral-converted` uses `actor_type: 'system'`
+- Files changed: `src/workers/handlers/referral-converted.ts` (new), `src/workers/handlers/sequence-step-completed.ts` (new), `src/workers/handlers/workflow-triggered.ts` (new), `src/workers/event-worker.ts`
+- **Learnings for future iterations:**
+  - All 13 event handlers are now wired — `noop` stubs fully replaced
+  - Timeline-only handlers are the simplest pattern: findById → transaction → insertActivity
+  - `workflow.triggered` with non-lead entity_type returns silently (no warn log) per AC — this is expected behavior, not an error
+  - `sequence.step_completed` also returns silently for non-lead entities — consistent with workflow handler
+---
+
+## 2026-04-06 16:16 - US-012
+- Created unit tests for 4 complex handlers: ad-lead-received (8 tests), stage-changed (6 tests), lead-archived (6 tests), lead-converted (5 tests) — 25 tests total
+- Tests cover: idempotency (existing ad_platform_lead_id skips), invalid phone early return, lead-not-found early return, correct channel mapping (google/facebook/meta), duplicate_status flagging, score recalculation with updated values, transaction ordering (activity before state in lead-converted), ON CONFLICT skip tolerance, no calculateScore call in lead-converted
+- Files changed: `test/unit/handlers/ad-lead-received.test.ts` (new), `test/unit/handlers/stage-changed.test.ts` (new), `test/unit/handlers/lead-archived.test.ts` (new), `test/unit/handlers/lead-converted.test.ts` (new)
+- **Learnings for future iterations:**
+  - Mock pattern for handler tests: vi.mock repositories + score-calculator at top, create mockTrx with `.raw` and `.fn` properties, create db with `{ transaction: vi.fn().mockImplementation(cb => cb(mockTrx)) }`
+  - To test call order within transactions, use mock implementations that push to a shared `callOrder[]` array, then assert the array order
+  - `mockTrx.raw` is accessed as `(mockTrx as unknown as Record<string, unknown>).raw` due to TypeScript typing
+  - Handler tests don't need to mock `@ortho/logger` — the logger module works fine without mocking
+---
+
+## 2026-04-06 16:24 - US-013
+- Created unit tests for 9 lookup handlers: opt-out-received (6 tests), opt-out-removed (3 tests), email-bounced (5 tests), message-delivered (3 tests), message-failed (2 tests), inbound-message-received (4 tests), referral-converted (2 tests), sequence-step-completed (2 tests), workflow-triggered (3 tests) — 30 tests total
+- Tests cover: invalid phone early return, no lead found early return, soft bounce early return (email-bounced), contact_status transitions (active→sms_opted_out, email_invalid→fully_unreachable, sms_opted_out→active, fully_unreachable→email_invalid, active→email_invalid, sms_opted_out→fully_unreachable), score recalculation with updated status, activity-only handlers (message-failed), entity_type filtering (sequence/workflow), actor_type='automation' for sequence/workflow handlers
+- Files changed: `test/unit/handlers/opt-out-received.test.ts` (new), `test/unit/handlers/opt-out-removed.test.ts` (new), `test/unit/handlers/email-bounced.test.ts` (new), `test/unit/handlers/message-delivered.test.ts` (new), `test/unit/handlers/message-failed.test.ts` (new), `test/unit/handlers/inbound-message-received.test.ts` (new), `test/unit/handlers/referral-converted.test.ts` (new), `test/unit/handlers/sequence-step-completed.test.ts` (new), `test/unit/handlers/workflow-triggered.test.ts` (new)
+- **Learnings for future iterations:**
+  - Phone numbers in test fixtures must use valid area codes (e.g., `+12125551234` not `+15551234567`) — `normalizePhone` uses libphonenumber which rejects 555 area codes
+  - Contact status mocks: must mock the specific function from `contact-status.js` (e.g., `applyOptOut`, `removeOptOut`, `applyHardBounce`) — they are imported as named exports
+  - For handlers that only insert activity (no score/state update), assert `trx.raw` was NOT called to verify no score update
+  - Timeline-only handler tests (referral, sequence, workflow) are the simplest — just mock findById + insertActivity
+---
+
+## 2026-04-06 18:44 - US-014
+- Created integration test file `test/integration/event-worker.test.ts` with 11 tests covering all key event handler scenarios against a real DB
+- Tests use a custom `DispatchDriver` that dispatches events to handlers synchronously on publish (no Redis needed)
+- Test helper `buildTestWorker()` wires all 13 handlers with the same pattern as event-worker.ts, using a separate MockDriver-backed publish bus for ad_lead.received's publishLeadCreated
+- Tests: ad_lead.received (create + idempotency), lead.stage_changed (pipeline/stage/score), lead.archived (clear state + ON CONFLICT idempotency + cross-path idempotency with HTTP), opt_out.received (contact_status transition + activity), email.bounced soft (no-op), email.bounced hard (status change), inbound_message.received (score recalc), workflow.triggered non-lead (no activity)
+- Files changed: `test/integration/event-worker.test.ts` (new)
+- **Learnings for future iterations:**
+  - Integration tests for event workers can use a custom DispatchDriver (stores subscriptions on start, dispatches on publish) to avoid needing Redis while still testing full handler flows against a real DB
+  - The `describe.skipIf(!HAS_DB)` pattern from existing integration tests works well — tests are skipped when no real DB is available
+  - Worker integration tests wire handlers directly (importing from handler modules) rather than using `createEventWorker` which creates its own internal bus via `createEventBus()` factory
+  - For ad_lead.received, a separate MockDriver-backed publish bus is needed so we can assert `lead.created` events were published without a second dispatch loop
+  - `DispatchDriver.published` array and `MockDriver.published` array both need clearing in `beforeEach` to avoid cross-test contamination
+---

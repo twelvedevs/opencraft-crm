@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Channel Deep Dive Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+    h1 { color: #1a3c5e; border-bottom: 2px solid #1a3c5e; padding-bottom: 8px; }
+    h2 { color: #2c6e9e; margin-top: 24px; }
+    .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { background: #1a3c5e; color: #fff; padding: 10px 12px; text-align: left; font-size: 13px; }
+    td { padding: 9px 12px; border-bottom: 1px solid #e0e0e0; font-size: 13px; }
+    tr:nth-child(even) td { background: #f7f9fb; }
+    .summary-bar { display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap; }
+    .summary-item { background: #f0f4f8; border-radius: 6px; padding: 12px 20px; }
+    .summary-label { font-size: 12px; color: #666; }
+    .summary-value { font-size: 18px; font-weight: bold; color: #1a3c5e; }
+    .null-value { color: #aaa; font-style: italic; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Channel Deep Dive Report</h1>
+  <div class="meta">
+    <strong>Period:</strong> {{period}}&nbsp;&nbsp;
+    {{#if location_ids}}<strong>Locations:</strong> {{location_ids}}&nbsp;&nbsp;{{/if}}
+    {{#if channel}}<strong>Channel Filter:</strong> {{channel}}&nbsp;&nbsp;{{/if}}
+    <strong>Generated:</strong> {{generated_at}}
+  </div>
+
+  <div class="summary-bar">
+    <div class="summary-item">
+      <div class="summary-label">Cost per Lead</div>
+      <div class="summary-value">{{#if cost_per_lead}}${{formatNumber cost_per_lead}}{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Total Leads</div>
+      <div class="summary-value">{{raw.leads.total}}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Total Conversions</div>
+      <div class="summary-value">{{raw.conversions.total}}</div>
+    </div>
+  </div>
+
+  <h2>Leads by Channel</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Channel</th>
+        <th>Leads</th>
+        <th>Conversions</th>
+        <th>Ad Spend</th>
+        <th>Cost per Lead</th>
+        <th>Cost per Conversion</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each channels}}
+      <tr>
+        <td>{{name}}</td>
+        <td>{{leads}}</td>
+        <td>{{conversions}}</td>
+        <td>{{#if spend}}${{formatNumber spend}}{{else}}—{{/if}}</td>
+        <td>{{#if cost_per_lead}}${{formatNumber cost_per_lead}}{{else}}—{{/if}}</td>
+        <td>{{#if cost_per_conversion}}${{formatNumber cost_per_conversion}}{{else}}—{{/if}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <h2>Ad Spend by Platform</h2>
+  <table>
+    <thead>
+      <tr><th>Platform</th><th>Total Spend</th></tr>
+    </thead>
+    <tbody>
+      {{#each raw.adSpend.by_platform}}
+      <tr><td>{{platform}}</td><td>{{#if total_spend}}${{formatNumber total_spend}}{{else}}$0{{/if}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+</body>
+</html>

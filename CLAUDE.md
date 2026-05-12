@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. No implementation exists yet.
+This is a **pre-sale planning repository** for **Ortho CRM** — an orthodontic-specific CRM platform. All 21 services (12 platform + 8 CRM + 1 frontend) are implemented. New services are built using the Ralph autonomous agent loop (see below).
 
 ## Key Documents
 
@@ -64,17 +64,16 @@ ortho/
 │       └── web/         # React SPA
 ├── packages/
 │   ├── @ortho/types         # shared TS interfaces for events + API contracts
-│   ├── @ortho/event-bus     # typed EventBridge client
+│   ├── @ortho/event-bus     # typed EventBridge client (MockDriver available for tests)
 │   ├── @ortho/auth-middleware
-│   ├── @ortho/db            # Knex/Drizzle, migration runner
+│   ├── @ortho/interpolator  # template variable interpolation
 │   ├── @ortho/logger        # Pino, Datadog-compatible
-│   ├── @ortho/testing       # fixtures, mocks, factories
 │   ├── @platform/filter-engine  # shared pure-function filter evaluator (Automation + Audience engines)
-│   └── @platform/*-ui       # React component packages
+│   └── @platform/audience-ui    # Audience segment builder React component
 └── infra/               # IaC (AWS CDK or Terraform)
 ```
 
-Each service follows: `src/{routes,services,repositories,events}/` + `migrations/` + `test/` + `Dockerfile`
+Each service follows: `src/{routes,services,repositories,events,queue}/` + `migrations/` + `test/{unit,integration}/` + `Dockerfile`
 
 ### Communication Patterns
 
@@ -89,12 +88,81 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 3. Pipeline Engine only manages state — emits events; Automation Engine acts.
 4. Platform UIs (`@platform/*`) call their own service's API directly from the browser (not proxied through CRM API Gateway). Auth uses the same Identity Service JWT.
 
+## Local Development
+
+Infrastructure (Postgres, Redis, Supabase Auth, MailHog) runs via Docker Compose. Before first run, generate crypto keys:
+
+```bash
+./scripts/dev/gen-keys.sh   # writes .env from .env.example, generates JWT secrets
+./scripts/dev/up.sh          # start infrastructure only
+./scripts/dev/up-all.sh      # start infrastructure + all services
+./scripts/dev/down.sh        # stop everything
+./scripts/dev/reset.sh       # wipe volumes and restart
+./scripts/dev/logs.sh        # tail service logs
+```
+
+Each service reads from the root `.env` file. Copy `.env.example` → `.env` and fill in API credentials (Twilio, SendGrid, etc.) before running.
+
+## Development Commands
+
+Services are standalone — there is no root package.json or monorepo script runner. Run commands from inside the service directory (e.g. `apps/platform/automation/`):
+
+```bash
+npm run build        # tsc compile to dist/
+npm run dev          # tsx watch (hot reload)
+npm run typecheck    # tsc --noEmit
+npm run test         # vitest run (all tests, single pass)
+npm run test:watch   # vitest (interactive watch mode)
+```
+
+**Run a single test file:**
+```bash
+npx vitest run test/unit/condition-evaluator.test.ts
+```
+
+Tests live in `test/unit/` and `test/integration/` within each service.
+
+## Ralph Autonomous Agent Workflow
+
+Services are built via Ralph — an autonomous AI coding loop. The workflow for a new service:
+
+1. **Generate clarifying questions** (saved to `tasks/prd-questions-<feature>.md`), fill in answers.
+2. **Generate PRD** from answered questions (saved to `tasks/prd-<feature>.md`).
+3. **Convert PRD to `prd.json`** using the `ralph` skill — this is the task list Ralph executes.
+4. **Run Ralph:** `./scripts/ralph/ralph-cc.sh [max_iterations]`
+
+Ralph picks the highest-priority story where `passes: false`, implements it, runs `typecheck` + `test`, commits, marks the story done in `prd.json`, and repeats. Learnings are appended to `scripts/ralph/progress.txt`.
+
+The `run.sh` in the project root shows the pattern used for phased implementations (multiple `claude -p` invocations per phase).
+
+## QA Testing
+
+End-to-end QA scenarios (REST API level, ~170+ cases across 16 functional categories) are documented in:
+
+- `docs/development/testing/qa-scenarios.md` — authoritative scenario catalogue
+
+Execution tooling lives under `tools/qa/` — see README for the scenario runner + `/qa` Claude skill usage.
+
+**Test priority order** (highest first): RBAC/Access Control → Lead Creation & Attribution → New Patient Pipeline → Ortho2 CSV Import → Nurture Sequences → Shared Inbox → External Integration Failures → Analytics & Attribution → Deduplication → In Treatment Pipeline → Audit & Concurrency → In Retention → AI Communications → Email Campaigns → Referral Tracking → Multi-location
+
+## Developer Tools
+
+Standalone utilities live under `tools/` (not part of the service monorepo — each has its own `package.json`):
+
+| Tool | Purpose |
+|------|---------|
+| [tools/crm-cli](tools/crm-cli/README.md) | `crm` CLI for debugging leads, pipeline, conversations via the API Gateway |
+| [tools/qa](tools/qa/README.md) | Scenario-based QA runner + health checker; paired with the `/qa` Claude skill for a fix-retest loop against the running stack |
+
 ## Technology Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Frontend | React 18 + TypeScript, Tailwind CSS, React Query |
-| Backend | Node.js + TypeScript (Fastify) |
+| Backend | Node.js 24, TypeScript 5 (ESM — `"type": "module"`), Fastify 5 |
+| ORM / Migrations | Knex 3 + pg |
+| Schema validation | @sinclair/typebox 0.34 |
+| Testing | Vitest 2 |
 | Database | PostgreSQL (AWS RDS Multi-AZ) — shared cluster, one schema per service |
 | Auth | Supabase Auth / Auth0, RBAC, SSO with EHR |
 | SMS/Voice | Twilio |
@@ -124,3 +192,65 @@ Each service follows: `src/{routes,services,repositories,events}/` + `migrations
 - Multi-location native (34 locations)
 - Primary KPI: Cost per case start
 - EHR integration is future (Ortho2 CSV bridge is temporary)
+
+## Coding Principles
+
+Behavioral guidelines to reduce common LLM coding mistakes.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.

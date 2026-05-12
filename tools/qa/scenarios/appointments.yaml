@@ -1,0 +1,50 @@
+# Appointments — exam scheduling for a lead.
+
+include:
+  - leads.yaml
+
+scenarios:
+
+  - id: appointment-create
+    name: "Appointments: create for lead"
+    service: crm-api-gateway
+    depends_on: [lead-create]
+    steps:
+      - type: http
+        method: POST
+        path: /v1/leads/{{lead_id}}/appointments
+        body:
+          appointment_type: "exam"
+          scheduled_at: "2026-06-01T10:00:00Z"
+          notes: "QA test appointment"
+        expect:
+          status: 201
+          body_contains: ["id", "scheduled_at"]
+        extract:
+          appointment_id: "$.id"
+
+  - id: appointment-list
+    name: "Appointments: list for lead"
+    service: crm-api-gateway
+    depends_on: [appointment-create]
+    steps:
+      - type: http
+        method: GET
+        path: /v1/leads/{{lead_id}}/appointments
+        expect:
+          status: 200
+          body_contains: ["appointment_type"]
+
+  - id: appointment-update
+    name: "Appointments: update"
+    service: crm-api-gateway
+    depends_on: [appointment-create]
+    steps:
+      - type: http
+        method: PATCH
+        path: /v1/leads/{{lead_id}}/appointments/{{appointment_id}}
+        body:
+          notes: "Updated by QA runner"
+        expect:
+          status: 200
+          body_contains: ["id"]

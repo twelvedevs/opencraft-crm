@@ -1,0 +1,268 @@
+{
+  "title": "Email Service — Platform",
+  "description": "Observability dashboard for the Email Service platform component. Covers BullMQ queue depths, campaign send rate, webhook processing lag, spam check failure rate, and dead-letter event counts.",
+  "layout_type": "ordered",
+  "reflow_type": "fixed",
+  "template_variables": [
+    {
+      "name": "env",
+      "prefix": "env",
+      "available_values": ["production", "staging"],
+      "default": "production"
+    }
+  ],
+  "widgets": [
+    {
+      "definition": {
+        "title": "BullMQ — Transactional-Send Queue Depth",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1",
+                "alias": "Waiting jobs"
+              }
+            ],
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:bullmq.queue.waiting{queue:transactional-send,env:$env}"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "line"
+          }
+        ],
+        "markers": [
+          {
+            "value": "y = 1000",
+            "display_type": "error dashed",
+            "label": "Alert threshold (1 000 waiting > 5 min)"
+          }
+        ],
+        "yaxis": {
+          "min": "0"
+        }
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "definition": {
+        "title": "BullMQ — Campaign-Recipient Queue Depth",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1",
+                "alias": "Waiting jobs"
+              }
+            ],
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:bullmq.queue.waiting{queue:campaign-recipient,env:$env}"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "line"
+          }
+        ],
+        "markers": [
+          {
+            "value": "y = 50000",
+            "display_type": "error dashed",
+            "label": "Alert threshold (50 000 waiting > 10 min)"
+          }
+        ],
+        "yaxis": {
+          "min": "0"
+        }
+      },
+      "layout": {
+        "x": 6,
+        "y": 0,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "definition": {
+        "title": "Campaign Send Rate (emails/min)",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "per_minute(query1)",
+                "alias": "Emails sent / min"
+              }
+            ],
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:email_service.campaign.sent_count{env:$env}.as_count()"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "bars"
+          }
+        ],
+        "yaxis": {
+          "min": "0"
+        }
+      },
+      "layout": {
+        "x": 0,
+        "y": 3,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "definition": {
+        "title": "Webhook Processing Lag — p95 (seconds)",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1",
+                "alias": "p95 lag (s)"
+              }
+            ],
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "p95:email_service.webhook.processing_lag{env:$env}"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "line"
+          }
+        ],
+        "markers": [
+          {
+            "value": "y = 30",
+            "display_type": "error dashed",
+            "label": "Alert threshold p95 > 30 s"
+          }
+        ],
+        "yaxis": {
+          "min": "0"
+        }
+      },
+      "layout": {
+        "x": 6,
+        "y": 3,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "definition": {
+        "title": "Spam Check Failure Rate (%)",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "(query1 / query2) * 100",
+                "alias": "Spam block rate %"
+              }
+            ],
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:email_service.campaign.spam_check_failed{env:$env}.as_count()"
+              },
+              {
+                "name": "query2",
+                "data_source": "metrics",
+                "query": "sum:email_service.campaign.jobs_total{env:$env}.as_count()"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "line"
+          }
+        ],
+        "yaxis": {
+          "min": "0",
+          "max": "100"
+        }
+      },
+      "layout": {
+        "x": 0,
+        "y": 6,
+        "width": 6,
+        "height": 3
+      }
+    },
+    {
+      "definition": {
+        "title": "email.failed Dead-Letter Rate (EventBridge)",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "timeseries",
+        "requests": [
+          {
+            "formulas": [
+              {
+                "formula": "query1",
+                "alias": "email.failed events"
+              }
+            ],
+            "queries": [
+              {
+                "name": "query1",
+                "data_source": "metrics",
+                "query": "sum:aws.events.matched_events{rule:email-failed,env:$env}.as_count()"
+              }
+            ],
+            "response_format": "timeseries",
+            "display_type": "bars"
+          }
+        ],
+        "markers": [
+          {
+            "value": "y > 0",
+            "display_type": "error solid",
+            "label": "Alert on any occurrence"
+          }
+        ],
+        "yaxis": {
+          "min": "0"
+        }
+      },
+      "layout": {
+        "x": 6,
+        "y": 6,
+        "width": 6,
+        "height": 3
+      }
+    }
+  ],
+  "notify_list": [],
+  "tags": ["service:email-service", "team:platform"]
+}

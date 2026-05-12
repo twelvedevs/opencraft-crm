@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weekly Summary Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+    h1 { color: #1a3c5e; border-bottom: 2px solid #1a3c5e; padding-bottom: 8px; }
+    h2 { color: #2c6e9e; margin-top: 24px; }
+    .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { background: #1a3c5e; color: #fff; padding: 10px 12px; text-align: left; font-size: 13px; }
+    td { padding: 9px 12px; border-bottom: 1px solid #e0e0e0; font-size: 13px; }
+    tr:nth-child(even) td { background: #f7f9fb; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 12px; }
+    .kpi-card { background: #f0f4f8; border-radius: 6px; padding: 16px; }
+    .kpi-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+    .kpi-value { font-size: 22px; font-weight: bold; color: #1a3c5e; }
+    .null-value { color: #aaa; font-style: italic; }
+    .missing-config { background: #fff3cd; border: 1px solid #ffc107; padding: 8px 12px; border-radius: 4px; font-size: 12px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Weekly Summary Report</h1>
+  <div class="meta">
+    <strong>Period:</strong> {{period}}&nbsp;&nbsp;
+    {{#if location_ids}}<strong>Locations:</strong> {{location_ids}}&nbsp;&nbsp;{{/if}}
+    <strong>Generated:</strong> {{generated_at}}
+  </div>
+
+  <h2>Key Performance Indicators</h2>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Cost per Lead</div>
+      <div class="kpi-value">{{#if cost_per_lead}}${{formatNumber cost_per_lead}}{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Exam Conversion Rate</div>
+      <div class="kpi-value">{{#if exam_conversion_rate}}{{formatPct exam_conversion_rate}}%{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Exam Show Rate</div>
+      <div class="kpi-value">{{#if exam_show_rate}}{{formatPct exam_show_rate}}%{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Case Conversion Rate</div>
+      <div class="kpi-value">{{#if case_conversion_rate}}{{formatPct case_conversion_rate}}%{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Cost per Case Start</div>
+      <div class="kpi-value">{{#if cost_per_case_start}}${{formatNumber cost_per_case_start}}{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Revenue Attributed</div>
+      <div class="kpi-value">{{#if revenue_attributed}}${{formatNumber revenue_attributed}}{{else}}<span class="null-value">N/A</span>{{/if}}</div>
+    </div>
+  </div>
+
+  {{#if missing_revenue_config.length}}
+  <div class="missing-config">
+    <strong>Note:</strong> Revenue data unavailable for locations: {{join missing_revenue_config ", "}}
+  </div>
+  {{/if}}
+
+  <h2>Lead Activity</h2>
+  <table>
+    <thead>
+      <tr><th>Channel</th><th>Leads</th></tr>
+    </thead>
+    <tbody>
+      {{#each raw.leads.by_channel}}
+      <tr><td>{{channel}}</td><td>{{count}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <h2>Pipeline Summary</h2>
+  <table>
+    <thead>
+      <tr><th>Stage</th><th>Entries</th></tr>
+    </thead>
+    <tbody>
+      {{#each raw.pipeline.by_stage}}
+      <tr><td>{{stage}}</td><td>{{entries}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+</body>
+</html>

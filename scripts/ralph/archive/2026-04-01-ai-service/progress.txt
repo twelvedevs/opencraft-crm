@@ -1,0 +1,162 @@
+# Ralph Progress Log
+Started: Thu Apr  2 07:36:04 UTC 2026
+---
+
+## Codebase Patterns
+- Arize Phoenix npm package is `@arizeai/openinference-instrumentation-anthropic` (no dash in arizeai), NOT `@arize-ai/...`
+- All platform services use ESM (`"type": "module"`) with NodeNext module resolution
+- Logger: `import { createLogger } from '@ortho/logger'` — Pino-based, Datadog-compatible
+- Dockerfile pattern: node:24-alpine, COPY package*.json, npm ci --omit=dev, COPY dist/, CMD node dist/index.js
+- knexfile.ts uses `process.env['DATABASE_URL']` (bracket notation for strict TS)
+- Service package names: `@platform/<service-name>`
+- Run commands from inside the service directory (e.g. `apps/platform/ai/`)
+- Migration pattern: `CREATE SCHEMA IF NOT EXISTS`, then `knex.schema.withSchema()` for tables, `knex.raw()` for indexes with fully qualified names
+- pg Pool search_path: `new Pool({ connectionString, options: '-c search_path=platform_ai' })` — allows bare table names in queries
+- Repository pattern: `createXxxRepository(pool: Pool)` returns object with methods — use `createPool()` helper from completions.ts for pool creation
+- Cache pattern: `computeCacheKey()` uses SHA256 of sorted-key JSON; `createCompletionCache(repo)` wraps L1 (lru-cache) + L2 (Postgres repo)
+- Anthropic SDK error classes: import from `@anthropic-ai/sdk/error` — `RateLimitError` (429), `InternalServerError` (5xx), `APIError` (base). No `APIStatusError` exists.
+- OpenTelemetry: `trace.getTracer('ai-service')` from `@opentelemetry/api` for custom spans
+- Fastify decorators need `src/types.d.ts` with `declare module 'fastify' { interface FastifyInstance { ... } }` for type-safe access
+- env.ts pattern: `@sinclair/typebox` Value.Check + Value.Errors, PORT parsed with parseInt, defaults to 3000
+- Route plugins are async functions `(app: FastifyInstance) => Promise<void>` registered via `app.register()`
+- app.ts pattern: `buildApp(pool: Pool): Promise<FastifyInstance>` — registers sensible, decorates deps, registers routes
+
+## 2026-04-02 07:37 UTC - US-001
+- Scaffolded AI service project structure at apps/platform/ai/
+- Files created: package.json, tsconfig.json, knexfile.ts, Dockerfile, src/index.ts (placeholder)
+- Directories created: src/routes/, src/services/, src/repositories/, src/prompts/, migrations/, test/unit/, test/integration/
+- **Learnings for future iterations:**
+  - The Arize Phoenix instrumentation package is `@arizeai/openinference-instrumentation-anthropic` (no dash), the PRD had `@arize-ai/...` which doesn't exist on npm
+  - Current Node.js runtime is v20 but engine field says >=24 — engine warnings are expected
+  - Empty directories don't get committed to git; need at least a placeholder file in src/
+---
+
+## 2026-04-02 - US-002
+- Created migration `migrations/001_create_ai_completions.ts` with up() and down()
+- up() creates `platform_ai` schema, `ai_completions` table with uuid PK (gen_random_uuid), cache_key (unique), prompt_id, model, response_text, expires_at, created_at, and an index on expires_at
+- down() drops the table
+- Files changed: `apps/platform/ai/migrations/001_create_ai_completions.ts`
+- **Learnings for future iterations:**
+  - Migration pattern: create schema with `knex.raw('CREATE SCHEMA IF NOT EXISTS ...')`, then use `knex.schema.withSchema(...)` for table creation
+  - Indexes are created via `knex.raw()` with fully qualified table names (`platform_ai.ai_completions`)
+  - Use `table.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'))` for UUID PKs
+---
+
+## 2026-04-02 - US-003
+- Created `src/instrumentation.ts` with `registerInstrumentations` + `AnthropicInstrumentation`
+- Updated `src/index.ts` to import `./instrumentation.js` as the very first import
+- Files changed: `apps/platform/ai/src/instrumentation.ts`, `apps/platform/ai/src/index.ts`
+- **Learnings for future iterations:**
+  - `AnthropicInstrumentation` constructor takes an optional object with `instrumentationConfig`, `traceConfig`, and `tracerProvider` fields — no args needed for default setup
+  - The Arize package requires `@opentelemetry/api` as a peer dependency (already satisfied via `@opentelemetry/instrumentation`)
+  - Instrumentation is registered unconditionally — not gated on any env var per acceptance criteria
+---
+
+## 2026-04-02 - US-004
+- Created PromptDefinition interface in src/services/prompt-registry.ts with id, defaultModel, systemPrompt, userPromptTemplate, maxTokens, structured fields
+- Created all 9 prompt files under src/prompts/: smart-reply-draft, sequence-personalization, objection-handling, conversation-summary, follow-up-timing, lead-scoring-commentary, conversation-reply-drafts, conversation-objection-handling, conversation-agent-reply
+- Prompt registry exports Map<string, PromptDefinition> and getPrompt(id) helper
+- Files changed: src/services/prompt-registry.ts, 9 files in src/prompts/
+- **Learnings for future iterations:**
+  - Haiku prompts (7): smart-reply-draft, sequence-personalization, conversation-summary, follow-up-timing, lead-scoring-commentary, conversation-reply-drafts, conversation-agent-reply
+  - Sonnet prompts (2): objection-handling, conversation-objection-handling
+  - Only conversation-agent-reply has structured: true — its systemPrompt instructs Claude to always respond as JSON { text, escalate }
+  - Prompt files use `import type { PromptDefinition }` to import only the type
+---
+
+## 2026-04-02 - US-005
+- Created `src/services/context-injector.ts` with `injectContext(template, context)` pure function
+- Supports `{{key}}` merge tags with dot-notation up to 3 levels deep
+- Paths 4+ levels deep replaced with empty string + structured log warning
+- Missing keys replaced with empty string + structured log warning (no throws)
+- Non-string values call `.toString()` (numbers→'42', booleans→'true', objects→'[object Object]')
+- Files changed: `apps/platform/ai/src/services/context-injector.ts`
+- **Learnings for future iterations:**
+  - Logger pattern: `createLogger('ai-<module-name>')` for service-specific loggers
+  - Use `TAG_REGEX = /\{\{([^}]+)\}\}/g` for merge tag matching
+  - Context can be `Record<string, unknown>` or `unknown[]` — array contexts work with numeric string keys
+---
+
+## 2026-04-02 - US-006
+- Created `src/repositories/completions.ts` with `createCompletionsRepository(pool)` and `createPool(connectionString)` helper
+- Repository exports findByKey (SELECT with expires_at check), upsert (INSERT ON CONFLICT), deleteExpired (DELETE with 1 hour buffer)
+- Pool created with `options: '-c search_path=platform_ai'` so all queries use bare table names
+- Files changed: `apps/platform/ai/src/repositories/completions.ts`
+- **Learnings for future iterations:**
+  - pg Pool search_path is set via `options: '-c search_path=platform_ai'` in the Pool constructor
+  - Repository uses `Pool` import (not just type) because `createPool` is also exported
+  - `result.rows[0] ?? null` pattern for returning null on empty result sets
+---
+
+## 2026-04-02 - US-007
+- Created `src/services/completion-cache.ts` with two-layer cache (L1 lru-cache + L2 Postgres)
+- Exported `computeCacheKey(promptId, model, context)` — SHA256 of sorted-key JSON
+- Exported `createCompletionCache(repo)` with `get` and `set` methods
+- L1: lru-cache with max 500 entries, TTL 60s; L2: Postgres via repo with 5-min expiry
+- `set()` is synchronous — L2 writes and cleanup are fire-and-forget (`void` promises)
+- Files changed: `apps/platform/ai/src/services/completion-cache.ts`
+- **Learnings for future iterations:**
+  - `LRUCache` from `lru-cache` v11 is a named export (not default)
+  - Recursive key sorting needed for deterministic cache keys — `sortKeys()` helper handles arrays, objects, and primitives
+  - `set()` returns void (not Promise) since L2 writes are fire-and-forget per spec
+  - Import `CompletionsRepository` as type-only since it's only used for the parameter type
+---
+
+## 2026-04-02 - US-008
+- Created `src/services/claude-client.ts` with `createClaudeClient()` returning object with `complete()` method
+- Model alias resolution: 'haiku' → 'claude-haiku-4-5-20251001', 'sonnet' → 'claude-sonnet-4-6'
+- Custom OpenTelemetry span attributes (prompt_id, cached: false) set before each call
+- Error handling: RateLimitError, InternalServerError, and APIError all re-thrown as Error with .statusCode = 503
+- Exported `resolveModel()` function for reuse in route/test code
+- Files changed: `apps/platform/ai/src/services/claude-client.ts`
+- **Learnings for future iterations:**
+  - Anthropic SDK has no `APIStatusError` class — use `InternalServerError` (covers all 5xx including 529) and `APIError` as catch-all
+  - Error classes imported from `@anthropic-ai/sdk/error` (not top-level export)
+  - `@opentelemetry/api` is available as transitive dep from `@opentelemetry/instrumentation` — use `trace.getTracer()` for custom spans
+  - `resolveModel()` is exported separately so tests can verify model mapping without mocking the full client
+---
+
+## 2026-04-02 - US-009
+- Created Fastify server wiring: env.ts, app.ts, routes/health.ts, routes/complete.ts, types.d.ts, updated index.ts
+- env.ts: parses DATABASE_URL (required), PORT (optional, default 3000), ARIZE_PHOENIX_ENDPOINT (optional) via TypeBox
+- app.ts: buildApp(pool) creates Fastify instance, registers sensible plugin, decorates with pool/cache/client, registers routes
+- routes/health.ts: GET /health → 200 { status: 'ok' }
+- routes/complete.ts: POST /ai/complete with TypeBox validation, manual context type check, prompt lookup, model resolution, cache check, Claude call, error handling
+- types.d.ts: Fastify module augmentation for pool, completionCache, claudeClient decorators
+- index.ts: imports instrumentation first, then wires env → pool → buildApp → listen with SIGTERM handler
+- Files changed: src/env.ts, src/app.ts, src/routes/health.ts, src/routes/complete.ts, src/types.d.ts, src/index.ts
+- **Learnings for future iterations:**
+  - Fastify decorators require `declare module 'fastify'` augmentation in a `.d.ts` file for TypeScript to see them
+  - TypeBox `Type.Unknown()` allows any JSON value through — manual runtime checks needed for context validation
+  - Model validation handled by TypeBox Union of Literals — invalid model values rejected automatically by Fastify schema validation
+  - Route error handling: catch errors with statusCode property for known Claude 503s, re-throw unknown errors for Fastify's default handler
+---
+
+## 2026-04-02 - US-010
+- Created 4 unit test files: context-injector.test.ts, prompt-registry.test.ts, cache-key.test.ts, model-resolution.test.ts
+- 22 tests total, all passing
+- Files changed: test/unit/context-injector.test.ts, test/unit/prompt-registry.test.ts, test/unit/cache-key.test.ts, test/unit/model-resolution.test.ts
+- **Learnings for future iterations:**
+  - `@ortho/logger` must be mocked via `vi.mock()` in tests that import modules using it (context-injector); prompt-registry and cache modules don't need logger mock
+  - `computeCacheKey` is directly importable from completion-cache.ts — no need to mock anything for cache key tests
+  - `resolveModel` is exported separately from claude-client.ts for testability — no SDK mock needed for model resolution tests
+  - Vitest runs ESM fine with the existing tsconfig (NodeNext module resolution)
+- Integration tests: use `describe.skipIf(!process.env['DATABASE_URL'])` to skip when no Postgres; schema setup via raw SQL `pool.query()` (avoid adding knex as dependency)
+- Integration test mocking: `vi.mock('@anthropic-ai/sdk')` with `mockCreate = vi.fn()` for controlling SDK responses; mock error classes in `@anthropic-ai/sdk/error` with matching constructors for `instanceof` checks
+---
+
+## 2026-04-02 - US-011
+- Created `test/integration/complete.test.ts` with 19 integration tests covering full HTTP request lifecycle
+- Tests: health check, happy path, structured prompts, validation errors (missing/null/string/number context, missing prompt_id, invalid model), L1 cache hit, L2 cache hit (fresh app instance), expired L2 entries, Claude error handling (RateLimitError, InternalServerError 529/500), L2 write failure resilience, lazy cleanup of expired rows
+- Tests use real Postgres (DATABASE_URL) with `describe.skipIf(!canRunIntegration)` for environments without Postgres
+- Mocks: `@anthropic-ai/sdk` (mockCreate fn), `@anthropic-ai/sdk/error` (error classes with instanceof support), `@opentelemetry/api`, `@ortho/logger`, `@arizeai/openinference-instrumentation-anthropic`
+- Schema setup done via raw SQL (no knex dependency in tests) — `CREATE TABLE IF NOT EXISTS` pattern
+- Files changed: `apps/platform/ai/test/integration/complete.test.ts`
+- **Learnings for future iterations:**
+  - Integration tests that need Postgres should use `describe.skipIf(!process.env['DATABASE_URL'])` to skip gracefully in environments without DB
+  - `knex` is not a dependency of the AI service — use raw SQL via `pool.query()` for test schema setup
+  - When mocking `@anthropic-ai/sdk/error`, error classes must have constructors matching the real SDK for `instanceof` checks to work
+  - For L2 cache hit tests, create a fresh `buildApp()` instance (new L1 cache) while reusing the same pool (L2 persists)
+  - Fire-and-forget L2 writes need `await new Promise(r => setTimeout(r, 100))` before assertions to let async ops complete
+  - `vi.spyOn(pool, 'query').mockImplementation(...)` can selectively fail INSERT while allowing SELECT to pass through
+---

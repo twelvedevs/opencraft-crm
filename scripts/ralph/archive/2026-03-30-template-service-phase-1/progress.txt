@@ -1,0 +1,23 @@
+## Codebase Patterns
+- Email service uses `src/env.ts`; template service uses `src/config.ts` with named export `config`
+- All services use TypeBox `Type.Object` + `Value.Check` for env validation; extract first error path for message
+- `buildApp(db, ...)` factory pattern — app does NOT call listen; `index.ts` owns the listen call
+- Guard `app.listen()` with `NODE_ENV !== 'test'` to allow test imports without binding a port
+- `src/types.d.ts` augments `declare module 'fastify'` for typed decorators
+- tsconfig: `target ESNext`, `module NodeNext`, `moduleResolution NodeNext`, `strict true`
+- `lru-cache` and `jose` are in dependencies (not devDependencies) — they're runtime deps
+- All queries use qualified table names `${SCHEMA}.${TABLE}` (not `.withSchema()`) for consistency
+- `returning('*')` destructured as array: `const [row] = await ...returning('*')`
+- `db.fn.now()` used for `updated_at` default in `updateTemplateGroup` when not explicitly provided
+- `db.transaction(async (trx) => { ... })` pattern for multi-table inserts
+- `verifyJwt` and `requireRole`/`requireAuth` throw plain objects `{ statusCode, message }` (not httpErrors) — preHandlers catch and call `reply.status().send()` directly
+- `isServiceApiKey` returns true when token after `Bearer ` starts with `ak_`
+- `requireRole` never accepts API keys — always calls `verifyJwt`
+- `requireAuth` accepts either valid user JWT OR service API key
+- `app.decorate('requireAuth', () => ...)` binds jwtSecret so routes call `app.requireAuth()` without passing secret
+- vitest imports work with `.js` extension in ESM mode even for `.ts` source files
+- CHECK constraints use `knex.raw('ALTER TABLE ... ADD CONSTRAINT ...')` after table creation
+- Named indexes use `knex.raw('CREATE INDEX ... ON ...')` for exact name control
+- Cross-schema FK references in inTable use qualified name `'platform_templates.templates'`
+- Migration files NOT included in main tsconfig (rootDir is src/); run via tsx at runtime
+

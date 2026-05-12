@@ -1,0 +1,417 @@
+{
+  "project": "Ortho CRM — Integration Hub",
+  "branchName": "feature/integration-hub",
+  "description": "Platform-layer Integration Hub: OAuth credential management for Google Ads + Meta, webhook ingestion + signature verification, BullMQ ad-spend polling (4h repeatable), historical backfill, AES-256-GCM token encryption, stateless PKCE state, JWT auth plugin. Spec: docs/superpowers/specs/2026-04-02-integration-hub-updated-design.md",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Service scaffold — package.json, tsconfig.json, Dockerfile, env.ts",
+      "description": "As a developer, I need the integration-hub service directory wired up with correct dependencies, TypeScript config, and a typed env module so that subsequent stories can import from shared packages and compile cleanly.",
+      "acceptanceCriteria": [
+        "apps/platform/integration-hub/package.json exists with all dependencies from spec §13 (fastify, bullmq, pg, knex, ioredis, google-ads-api, fast-jwt, typebox, @ortho/* workspace refs, etc.)",
+        "tsconfig.json extends repo root, targets ESNext, module NodeNext, strict: true",
+        "Dockerfile: node:24-alpine, copies src + package files, runs tsc, CMD node dist/index.js",
+        "src/env.ts exports a validated env object for all variables in spec §14 (DATABASE_URL, REDIS_URL, PORT, NODE_ENV, EVENT_BUS_DRIVER, SECRETS_PROVIDER, JWT_MODE, OAUTH_STATE_SECRET, GOOGLE_ADS_*, META_*, LOG_LEVEL, etc.); throws on missing required vars",
+        "src/index.ts exists as a minimal placeholder (no-op, no server start)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add AdLeadReceivedEvent + AdSpendSyncedEvent to @ortho/types",
+      "description": "As a developer, I need shared TypeScript event types in @ortho/types so that Lead Service and Analytics Service can import them alongside Integration Hub's publishers.",
+      "acceptanceCriteria": [
+        "packages/@ortho/types/src/events.ts gains AdLeadReceivedPayload, AdLeadReceivedEvent, AdSpendRecord, AdSpendSyncedPayload, AdSpendSyncedEvent exactly as defined in spec §7",
+        "All new interfaces are exported from the package index",
+        "Typecheck passes across packages/@ortho/types"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Database migrations — all four platform_integrations tables",
+      "description": "As a developer, I need Knex migrations for integration_accounts, campaign_location_mappings, failed_webhooks, and backfill_jobs so that the service has its full schema from the start.",
+      "acceptanceCriteria": [
+        "migrations/001_create_integration_accounts.ts creates the integration_accounts table with all columns and constraints from spec §3.1 (uuid PK, platform, account_id, account_name, access_token, refresh_token, token_expires_at, status default 'active', last_error, last_polled_at, created_at, UNIQUE(platform, account_id))",
+        "migrations/002_create_campaign_location_mappings.ts creates campaign_location_mappings with FK to integration_accounts ON DELETE CASCADE, UNIQUE(account_id, campaign_id)",
+        "migrations/003_create_failed_webhooks.ts creates failed_webhooks (id, platform, raw_body, error, received_at)",
+        "migrations/004_create_backfill_jobs.ts creates backfill_jobs with FK to integration_accounts ON DELETE CASCADE (id, account_id, status default 'active', from_date, to_date, chunks_done default 0, chunks_total, error, created_at, updated_at)",
+        "Each migration file has an up() and down() function",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Repository — accounts.ts (integration_accounts CRUD)",
+      "description": "As a developer, I need a repository module for integration_accounts so that job workers and route handlers can load, create, update, and delete account records using raw pg Pool.",
+      "acceptanceCriteria": [
+        "src/repositories/accounts.ts uses raw pg PoolClient (not Knex) for all queries",
+        "Exports: findAll(client): Promise<IntegrationAccount[]>, findById(client, id): Promise<IntegrationAccount | null>, findActiveAccounts(client): Promise<IntegrationAccount[]> (status != 'error'), insert(client, data): Promise<IntegrationAccount>, updateTokens(client, id, tokens): Promise<void>, setError(client, id, error): Promise<void>, setLastPolled(client, id): Promise<void>, remove(client, id): Promise<void>",
+        "IntegrationAccount type is defined in src/connectors/interface.ts (or a shared types file); accounts.ts imports it",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Repositories — mappings.ts, failed-webhooks.ts, backfill-jobs.ts",
+      "description": "As a developer, I need repository modules for the three remaining tables so that job workers and route handlers have typed DB access.",
+      "acceptanceCriteria": [
+        "src/repositories/mappings.ts: findByAccountId(client, accountId): Promise<CampaignLocationMapping[]>, findByCampaignId(client, accountId, campaignId): Promise<CampaignLocationMapping | null>, replaceAll(client, accountId, mappings: {campaign_id, location_id}[]): Promise<void> (delete-then-insert in a transaction)",
+        "src/repositories/failed-webhooks.ts: insert(client, data: {platform, raw_body, error}): Promise<void>",
+        "src/repositories/backfill-jobs.ts: insert(client, data): Promise<BackfillJob>, findById(client, id): Promise<BackfillJob | null>, updateProgress(client, id, chunksDone): Promise<void>, setCompleted(client, id): Promise<void>, setFailed(client, id, error): Promise<void>",
+        "All use raw pg PoolClient",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Credential store — AES-256-GCM encrypt/decrypt",
+      "description": "As a developer, I need pure encrypt/decrypt functions using AES-256-GCM so that OAuth tokens are stored encrypted in the database and can be decrypted at runtime.",
+      "acceptanceCriteria": [
+        "src/services/credential-store.ts exports encrypt(plaintext: string, key: Buffer): string and decrypt(stored: string, key: Buffer): string",
+        "encrypt generates a fresh random 12-byte IV per call",
+        "Stored format is base64-encoded JSON { iv: '<hex>', ciphertext: '<hex>', tag: '<hex>' } as specified in spec §8",
+        "Auth tag is 16 bytes",
+        "decrypt throws a descriptive error if the stored string is malformed or decryption fails (wrong key / tampered ciphertext)",
+        "No token values are logged or exposed in error messages",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Secrets provider — SecretsProvider interface + AwsSecretsProvider + EnvSecretsProvider",
+      "description": "As a developer, I need a SecretsProvider abstraction so that production uses AWS Secrets Manager and local dev uses environment variables without code changes.",
+      "acceptanceCriteria": [
+        "src/services/secrets-provider.ts defines the SecretsProvider interface { getSecret(name: string): Promise<string> }",
+        "AwsSecretsProvider calls @aws-sdk/client-secrets-manager GetSecretValueCommand and returns the SecretString",
+        "EnvSecretsProvider returns process.env[name] and throws if the variable is undefined",
+        "createSecretsProvider() factory reads SECRETS_PROVIDER env var; returns AwsSecretsProvider if 'aws', EnvSecretsProvider if 'env', throws on unknown value",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "JWT auth Fastify plugin — static RS256 + JWKS modes",
+      "description": "As a developer, I need a Fastify preHandler plugin that validates Identity Service JWTs so that all non-webhook routes are protected.",
+      "acceptanceCriteria": [
+        "src/plugins/jwt-auth.ts exports jwtAuthPlugin as a fastify-plugin (fp) registering a preHandler hook",
+        "JWT_MODE=static: verifies RS256 signature using IDENTITY_SERVICE_PUBLIC_KEY (PEM); uses fast-jwt createVerifier",
+        "JWT_MODE=jwks: fetches JWKS from IDENTITY_SERVICE_JWKS_URL and verifies using matching kid; use fast-jwt with jwks-rsa or fast-jwt's createRemoteJWKSet equivalent",
+        "Both modes validate expiry; validate iss if JWT_ISSUER env is set; validate aud if JWT_AUDIENCE env is set",
+        "Invalid or expired token → reply.code(401).send({ error: 'Unauthorized' }); request does not proceed",
+        "Webhook routes (/integrations/webhooks/*) must NOT have this plugin applied (registered separately on non-webhook route scope)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "OAuth PKCE state — stateless sign + verify utilities",
+      "description": "As a developer, I need stateless PKCE state generation and verification functions so that the OAuth callback can verify the state parameter without server-side session storage.",
+      "acceptanceCriteria": [
+        "src/services/oauth-state.ts exports createState(secret: string): { state: string, codeVerifier: string } and verifyState(state: string, secret: string): { codeVerifier: string }",
+        "createState: generates 43-byte random codeVerifier (base64url), computes SHA-256 codeChallenge, encodes statePayload = base64url(JSON.stringify({ cv: codeVerifier, ts: Date.now() })), signs with HMAC-SHA256 using secret, returns state = statePayload + '.' + sig",
+        "verifyState: splits on '.', recomputes HMAC using timingSafeEqual for constant-time compare, throws if signature invalid, throws if ts older than 10 minutes, returns { codeVerifier } on success",
+        "codeChallenge is also returned from createState for use in the authorization URL",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Connector interface, shared types, and ConnectorRegistry",
+      "description": "As a developer, I need the Connector interface, shared domain types, and a registry so that route handlers and job workers can dispatch to the correct platform adapter.",
+      "acceptanceCriteria": [
+        "src/connectors/interface.ts defines and exports: Connector interface (platform, getAuthorizationUrl, exchangeCode, refreshTokens, fetchSpend, fetchSpendRange, verifyWebhook, parseLeadWebhook, verifyChallenge) exactly as in spec §2.2",
+        "interface.ts also exports: OAuthTokens { accessToken, refreshToken?, expiresAt? }, SpendRecord { campaign_id, campaign_name, spend, impressions, clicks }, LeadEvent { external_lead_id, campaign_id, ad_set_id?, ad_id?, form_id?, fields: Record<string, string> }, IntegrationAccount (matches DB row shape), CampaignLocationMapping",
+        "src/connectors/registry.ts exports ConnectorRegistry as Map<string, Connector> and getConnector(platform: string): Connector (throws 400-style error if not found)",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "GoogleAdsClient typed wrapper",
+      "description": "As a developer, I need a typed GoogleAdsClient class wrapping the google-ads-api npm package so that the Google Ads connector never calls the SDK directly.",
+      "acceptanceCriteria": [
+        "src/connectors/clients/google-ads-client.ts declares module-level constant GOOGLE_ADS_API_VERSION = 'v19'",
+        "Exports class GoogleAdsClient with constructor(accessToken: string, customerId: string)",
+        "searchCampaignPerformance(date: string): Promise<CampaignPerformanceRow[]> — queries GAQL for metrics.cost_micros, metrics.impressions, metrics.clicks, campaign.id, campaign.name for the given date; converts cost_micros to spend (divide by 1_000_000)",
+        "searchCampaignPerformanceRange(from: string, to: string): Promise<CampaignPerformanceRow[]> — same query with date range",
+        "CampaignPerformanceRow type exported: { campaign_id: string, campaign_name: string, spend: number, impressions: number, clicks: number, date: string }",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "MetaApiClient typed wrapper",
+      "description": "As a developer, I need a typed MetaApiClient class wrapping native fetch so that the Meta connector never calls fetch directly.",
+      "acceptanceCriteria": [
+        "src/connectors/clients/meta-api-client.ts declares module-level constant META_GRAPH_API_VERSION = 'v22.0'",
+        "Exports class MetaApiClient with constructor(accessToken: string, accountId: string)",
+        "getInsights(date: string): Promise<MetaInsightRow[]> — calls GET https://graph.facebook.com/{version}/act_{accountId}/insights with fields=spend,impressions,clicks,campaign_id,campaign_name&time_range={since,until} where since=until=date",
+        "getInsightsRange(from: string, to: string): Promise<MetaInsightRow[]> — same with time_range since=from, until=to",
+        "Throws a descriptive error on non-2xx responses, including the Meta error message if present",
+        "MetaInsightRow type exported: { campaign_id: string, campaign_name: string, spend: string, impressions: string, clicks: string, date_start: string }",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Google Ads connector — full implementation",
+      "description": "As a developer, I need GoogleAdsConnector implementing the Connector interface so that OAuth, spend polling, and webhook handling work end-to-end for Google Ads.",
+      "acceptanceCriteria": [
+        "src/connectors/google-ads.ts exports GoogleAdsConnector implementing Connector with platform = 'google_ads'",
+        "getAuthorizationUrl(codeChallenge, state): builds Google OAuth2 URL with client_id, redirect_uri, scope=https://www.googleapis.com/auth/adwords, access_type=offline, code_challenge, code_challenge_method=S256, state",
+        "exchangeCode(code, codeVerifier): POSTs to https://oauth2.googleapis.com/token, returns OAuthTokens with expiresAt computed from expires_in",
+        "refreshTokens(account): POSTs to https://oauth2.googleapis.com/token with grant_type=refresh_token; decrypts refresh_token from account; returns new OAuthTokens",
+        "fetchSpend(account, date): decrypts access_token; creates GoogleAdsClient(accessToken, customerId); calls searchCampaignPerformance(date); maps to SpendRecord[]",
+        "fetchSpendRange(account, from, to): same using searchCampaignPerformanceRange",
+        "verifyWebhook(headers, rawBody): compares X-Goog-Signature header (HMAC-SHA256 of rawBody) against GOOGLE_ADS_WEBHOOK_VERIFY_TOKEN from env; returns boolean",
+        "parseLeadWebhook(payload): parses Google Ads lead form webhook JSON to LeadEvent[]; returns [] for empty; throws on unrecognisable structure",
+        "verifyChallenge(query): checks query['hub.verify_token'] === GOOGLE_ADS_WEBHOOK_VERIFY_TOKEN; returns query['hub.challenge'] or null",
+        "Registered in ConnectorRegistry under 'google_ads'",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Meta connector — full implementation",
+      "description": "As a developer, I need MetaConnector implementing the Connector interface so that OAuth, spend polling, and webhook handling work end-to-end for Meta (Facebook Ads).",
+      "acceptanceCriteria": [
+        "src/connectors/meta.ts exports MetaConnector implementing Connector with platform = 'facebook_ads'",
+        "getAuthorizationUrl(codeChallenge, state): builds Meta OAuth dialog URL (https://www.facebook.com/dialog/oauth) with client_id, redirect_uri, scope=ads_read,leads_retrieval, code_challenge, code_challenge_method=S256, state",
+        "exchangeCode(code, codeVerifier): POSTs to https://graph.facebook.com/{version}/oauth/access_token; exchanges for long-lived token via /oauth/access_token?grant_type=fb_exchange_token; sets expiresAt = now + 60 days",
+        "refreshTokens(): throws Error('Meta tokens require manual reconnect') — no refresh flow",
+        "fetchSpend(account, date): decrypts access_token; creates MetaApiClient; calls getInsights(date); maps MetaInsightRow to SpendRecord[] (parse string spend/impressions/clicks to numbers)",
+        "fetchSpendRange(account, from, to): same using getInsightsRange",
+        "verifyWebhook(headers, rawBody): verifies X-Hub-Signature-256 header = 'sha256=' + HMAC-SHA256(rawBody, META_APP_SECRET); returns boolean",
+        "parseLeadWebhook(payload): parses Meta leadgen webhook (entry[].changes[].value with leadgen_id, page_id, form_id, ad_id, adset_id, campaign_id); returns LeadEvent[]",
+        "verifyChallenge(query): checks query['hub.verify_token'] === META_WEBHOOK_VERIFY_TOKEN; returns query['hub.challenge'] or null",
+        "Registered in ConnectorRegistry under 'facebook_ads'",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Event publisher — bus.publish() wrappers for ad_lead.received + ad_spend.synced",
+      "description": "As a developer, I need typed event publisher functions wrapping the @ortho/event-bus so that job workers can publish events without constructing payloads inline.",
+      "acceptanceCriteria": [
+        "src/services/event-publisher.ts exports publishAdLeadReceived(bus, payload: AdLeadReceivedPayload): Promise<void> and publishAdSpendSynced(bus, payload: AdSpendSyncedPayload): Promise<void>",
+        "Each function calls bus.publish() with the correct event_type string ('ad_lead.received' and 'ad_spend.synced')",
+        "Types imported from @ortho/types (AdLeadReceivedPayload, AdSpendSyncedPayload)",
+        "src/services/event-bus.ts (or inline in index.ts) exports createBus(): calls createEventBus() from @ortho/event-bus; does NOT call bus.start() (publish-only per spec §2.1); reads EVENT_BUS_CONSUMER_GROUP from env for RedisStreamsDriver compatibility",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "BullMQ job — poll-ad-spend worker",
+      "description": "As a developer, I need the poll-ad-spend repeatable job worker so that ad spend data is fetched from Google Ads and Meta every 4 hours and published as ad_spend.synced events.",
+      "acceptanceCriteria": [
+        "src/jobs/poll-ad-spend.ts exports createPollAdSpendWorker(pool, connectorRegistry, bus, log) returning a BullMQ Worker on queue 'integration-hub:poll-ad-spend'",
+        "Worker execution: load account by account_id from DB; decrypt tokens via credential-store; get connector from registry; call fetchSpend for today and yesterday; load campaign_location_mappings for the account; drop campaigns with no mapping; group remaining by location_id; call publishAdSpendSynced once per (platform, location_id, date) combination",
+        "On success: update last_polled_at, status='active', last_error=null",
+        "On failure: set status='error', last_error=err.message; log log.error({ account_id, platform, err }, 'poll-ad-spend failed')",
+        "src/services/poll-scheduler.ts exports upsertPollJob(pollQueue, accountId): Promise<void> calling pollQueue.upsertJobScheduler(`poll-ad-spend:${accountId}`, { every: 4 * 60 * 60 * 1000 }, { data: { account_id: accountId } })",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "BullMQ job — refresh-token worker",
+      "description": "As a developer, I need the refresh-token delayed job worker so that Google Ads OAuth tokens are refreshed 30 minutes before expiry without human intervention.",
+      "acceptanceCriteria": [
+        "src/jobs/refresh-token.ts exports createRefreshTokenWorker(pool, connectorRegistry, credentialEncryptionKey, bus, log) returning a BullMQ Worker on queue 'integration-hub:refresh-token'",
+        "Worker execution: load account by account_id; get connector; call connector.refreshTokens(account); encrypt new tokens; call updateTokens on accounts repository; enqueue next refresh-token delayed job (delay = token_expires_at - now - 30 minutes)",
+        "On failure: set status='error', last_error; log log.error({ account_id, platform, err }, 'refresh-token failed')",
+        "src/services/poll-scheduler.ts (or refresh-token.ts) exports scheduleTokenRefresh(refreshQueue, account): Promise<void> that adds a delayed job with ID refresh-token:{account.id} and appropriate delay",
+        "removeTokenRefreshJob(refreshQueue, accountId): Promise<void> calls queue.getJob then job?.remove()",
+        "Not called for Meta accounts (no refresh flow)",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "BullMQ job — process-lead-webhook worker",
+      "description": "As a developer, I need the process-lead-webhook one-off job worker so that parsed lead events are enriched with location_id and published as ad_lead.received events.",
+      "acceptanceCriteria": [
+        "src/jobs/process-lead-webhook.ts exports createProcessLeadWebhookWorker(pool, bus, log) returning a BullMQ Worker on queue 'integration-hub:process-lead-webhook'",
+        "Job data type: { platform: string, leadEvent: LeadEvent }",
+        "Worker execution: look up location_id from campaign_location_mappings using (platform, campaign_id) — set to null if not found; call publishAdLeadReceived with full payload including location_id",
+        "Job ID is set to '{platform}:{external_lead_id}' by the enqueuing route (deduplication for retried webhook deliveries — BullMQ silently rejects duplicate IDs)",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "BullMQ job — backfill-ad-spend worker",
+      "description": "As a developer, I need the backfill-ad-spend one-off job worker so that historical ad spend data can be imported in 7-day chunks with progress tracking.",
+      "acceptanceCriteria": [
+        "src/jobs/backfill-ad-spend.ts exports createBackfillAdSpendWorker(pool, connectorRegistry, bus, log) returning a BullMQ Worker on queue 'integration-hub:backfill-ad-spend'",
+        "Job data type: { account_id: string, backfill_job_id: string }",
+        "Worker execution: load backfill_job row; load account; get connector; divide from_date..to_date into 7-day chunks; for each chunk: call fetchSpendRange; load mappings; drop unmapped campaigns; group by location_id; publish one ad_spend.synced event per (location_id, date); update backfill_jobs chunks_done++",
+        "On complete: setCompleted(backfill_job_id)",
+        "On error: setFailed(backfill_job_id, err.message)",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Routes — OAuth (connect, callback, disconnect)",
+      "description": "As a developer, I need the OAuth route handlers so that users can connect ad accounts, receive tokens via callback, and disconnect accounts.",
+      "acceptanceCriteria": [
+        "src/routes/oauth.ts registers three routes under the JWT-protected scope: GET /integrations/connect/:platform, GET /integrations/oauth/:platform/callback, DELETE /integrations/accounts/:id",
+        "GET /connect/:platform: validates platform exists in ConnectorRegistry (400 if not); calls createState(); calls connector.getAuthorizationUrl(codeChallenge, state); reply.redirect(authUrl)",
+        "GET /oauth/:platform/callback: verifyState(query.state, OAUTH_STATE_SECRET) — 400 if invalid; calls connector.exchangeCode(query.code, codeVerifier); encrypts tokens; inserts integration_accounts row; calls upsertPollJob for the new account; if Google Ads calls scheduleTokenRefresh; reply.redirect to UI success URL (or return 200 JSON { account_id } if no REDIRECT_URI configured)",
+        "DELETE /accounts/:id: loads account (404 if not found); calls removeTokenRefreshJob; removes repeatable poll job via pollQueue.removeRepeatable or upsertJobScheduler with removeOnComplete; deletes account (cascade removes mappings); returns 204",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Routes — accounts (list, campaigns, mappings)",
+      "description": "As a developer, I need the account management route handlers so that the UI can list connected accounts, view campaigns, and configure location mappings.",
+      "acceptanceCriteria": [
+        "src/routes/accounts.ts registers three routes under JWT-protected scope: GET /integrations/accounts, GET /integrations/accounts/:id/campaigns, PUT /integrations/accounts/:id/mappings",
+        "GET /accounts: calls findAll from accounts repository; returns array of { id, platform, account_id, account_name, status, last_polled_at, last_error } (no token fields)",
+        "GET /accounts/:id/campaigns: loads account (404 if not found); decrypts access_token; creates connector client; calls a live API to fetch current campaigns (connector method or direct client call); loads existing mappings; merges: returns [{ campaign_id, campaign_name, location_id: existing mapping or null }]",
+        "PUT /accounts/:id/mappings: validates body { mappings: [{ campaign_id: string, location_id: string }] } with typebox; calls mappings repository replaceAll in a transaction; returns 200 { count: mappings.length }",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Routes — webhooks (POST ingest + GET verify)",
+      "description": "As a developer, I need the webhook route handlers so that Meta and Google Ads can push lead events and verify webhook subscriptions.",
+      "acceptanceCriteria": [
+        "src/routes/webhooks.ts registers two routes WITHOUT JWT auth: POST /integrations/webhooks/:platform, GET /integrations/webhooks/:platform/verify",
+        "POST /webhooks/:platform: get connector (400 if unknown platform); call connector.verifyWebhook(headers, rawBody) — rawBody must be the raw Buffer (use Fastify's addContentTypeParser or rawBody option); if signature invalid return 403 immediately; call connector.parseLeadWebhook(body); on parse error: insert to failed_webhooks, log warn, return 200; on success: for each LeadEvent enqueue process-lead-webhook job with ID {platform}:{external_lead_id}; return 200",
+        "GET /webhooks/:platform/verify: get connector (400 if unknown); call connector.verifyChallenge(query); if result is null return 403; return challenge string with status 200",
+        "Fastify's built-in body parsing must be bypassed for rawBody access; use a content type parser that captures rawBody as Buffer on the webhook route",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Routes — backfill (trigger + status)",
+      "description": "As a developer, I need the backfill route handlers so that operators can trigger historical ad spend imports and monitor their progress.",
+      "acceptanceCriteria": [
+        "src/routes/backfill.ts registers two routes under JWT-protected scope: POST /integrations/accounts/:id/backfill, GET /integrations/accounts/:id/backfill/:job_id",
+        "POST /accounts/:id/backfill: validates body { from: string, to: string } (YYYY-MM-DD format, max 24-month range — return 400 if exceeded); loads account (404 if not found); inserts backfill_jobs row with chunks_total computed (ceil((days+1)/7)); enqueues backfill-ad-spend BullMQ job passing { account_id, backfill_job_id: row.id }; returns 201 { job_id: row.id }",
+        "GET /accounts/:id/backfill/:job_id: reads from backfill_jobs (404 if not found or account_id mismatch); returns { job_id, status, progress: { chunks_done, chunks_total }, error? }",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Service entry point — index.ts, app.ts, startup reconciliation",
+      "description": "As a developer, I need the complete service wiring — Fastify app setup, plugin registration, DB pool, BullMQ queues/workers, event bus, and startup reconciliation — so that the integration-hub service starts correctly.",
+      "acceptanceCriteria": [
+        "src/app.ts creates and exports a buildApp() function: registers @fastify/sensible, @fastify/rate-limit (global defaults); registers jwtAuthPlugin on a scoped prefix (/integrations) excluding /webhooks routes; registers oauthRoutes, accountsRoutes, backfillRoutes under JWT scope; registers webhookRoutes outside JWT scope; registers GET /health returning { status: 'ok' }",
+        "src/index.ts: loads env; calls createSecretsProvider(); loads INTEGRATION_HUB_ENCRYPTION_KEY; creates pg Pool; creates ioredis client; creates BullMQ Queues (one per job type: integration-hub:poll-ad-spend, integration-hub:refresh-token, integration-hub:process-lead-webhook, integration-hub:backfill-ad-spend); creates bus via createEventBus() (no bus.start()); creates Workers via createPollAdSpendWorker etc.; populates ConnectorRegistry (GoogleAdsConnector, MetaConnector); startup reconciliation: loads active accounts, calls upsertPollJob for each; starts Fastify on PORT",
+        "Graceful shutdown: SIGTERM closes Fastify, closes workers, closes queues, closes pool",
+        "Log at startup: log.info('integration-hub started on port X')",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Unit tests — credential-store + oauth-state",
+      "description": "As a developer, I need unit tests for the cryptographic modules to verify correctness and catch regressions.",
+      "acceptanceCriteria": [
+        "test/unit/credential-store.test.ts: encrypt→decrypt round-trip produces original plaintext; two calls to encrypt with same plaintext produce different IVs (randomness); decrypting with wrong key throws; decrypting tampered ciphertext throws",
+        "test/unit/oauth-state.test.ts: createState returns a state string and codeVerifier; verifyState on unmodified state returns matching codeVerifier; verifyState on tampered signature throws; verifyState on state older than 10 minutes throws",
+        "Tests use vitest; no external dependencies mocked beyond Date.now() for expiry tests",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Unit tests — Google Ads connector + Meta connector",
+      "description": "As a developer, I need unit tests for the connector webhook methods to verify signature verification, payload parsing, and challenge handling.",
+      "acceptanceCriteria": [
+        "test/unit/google-ads-connector.test.ts: verifyWebhook returns true for valid HMAC signature, false for wrong secret; parseLeadWebhook returns correct LeadEvent[] for a well-formed payload fixture; parseLeadWebhook throws for unrecognisable structure; verifyChallenge returns challenge token when verify_token matches, null when it does not match",
+        "test/unit/meta-connector.test.ts: verifyWebhook returns true for valid X-Hub-Signature-256 (HMAC-SHA256 of rawBody using META_APP_SECRET), false for tampered body; parseLeadWebhook returns LeadEvent[] for valid Meta leadgen webhook fixture (with batched entry[].changes[]); parseLeadWebhook returns [] for empty changes; parseLeadWebhook throws for malformed structure; verifyChallenge returns challenge when verify_token matches, null otherwise",
+        "All tests use vitest; connector instantiated with test env values injected",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

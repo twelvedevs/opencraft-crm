@@ -1,0 +1,134 @@
+{
+  "project": "Ortho CRM — Messaging Service",
+  "branchName": "ralph/messaging-service",
+  "description": "Messaging Service — Platform-layer SMS/MMS gateway over Twilio. Phase 1: DB schema, repositories, number pool CRUD, health check, Fastify bootstrap. Phase 2: outbound send flow (opt-out check, dedup, number resolve, template render, Redis rate limiter, Twilio client, DB insert), opt-out routes, message query routes. Phase 3: Twilio inbound/status webhooks with HMAC-SHA1 validation, STOP/UNSTOP detection, EventBridge event publishing.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffold, DB schema, repositories, health check",
+      "description": "As a developer, I need the Messaging Service project structure, database schema, typed Knex repositories, and Fastify app bootstrap so that subsequent stories can build route handlers and services on a solid foundation.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/messaging/package.json`: name `@platform/messaging`, version `0.1.0`, type `module`, engines `{ node: '>=24' }`, scripts `{ build: 'tsc', dev: 'tsx watch src/index.ts', start: 'node dist/index.js', test: 'vitest run', typecheck: 'tsc --noEmit' }`, dependencies: `fastify ^5.0.0`, `@fastify/sensible ^6.0.0`, `@sinclair/typebox ^0.34.0`, `knex ^3.0.0`, `pg ^8.0.0`, `ioredis ^5.0.0`, `twilio ^5.0.0`, `@ortho/event-bus file:../../../packages/@ortho/event-bus`, `@ortho/logger file:../../../packages/@ortho/logger`; devDependencies: `typescript ^5.0.0`, `@types/node ^22.0.0`, `@types/pg ^8.0.0`, `tsx ^4.0.0`, `vitest ^2.0.0`",
+        "Create `apps/platform/messaging/tsconfig.json`: compilerOptions `{ target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, outDir: 'dist', rootDir: 'src', declaration: true, declarationMap: true, sourceMap: true, esModuleInterop: true, skipLibCheck: true }`, include `['src/**/*']`, exclude `['node_modules', 'dist']`",
+        "Create `apps/platform/messaging/src/env.ts`: TypeBox-validated env parsing for `DATABASE_URL` (string), `REDIS_URL` (string), `TWILIO_ACCOUNT_SID` (string), `TWILIO_AUTH_TOKEN` (string), `TWILIO_STATUS_CALLBACK_URL` (string), `EVENT_BUS_DRIVER` (string, union of 'eventbridge' | 'redis'), `PORT` (optional integer, default 3000). Follow the same pattern as the email service env.ts.",
+        "Create `apps/platform/messaging/src/db.ts`: export `createDb(databaseUrl: string)` returning Knex instance with `client: 'pg'`; re-export `Knex` type. Same pattern as email service.",
+        "Create `apps/platform/messaging/migrations/001_initial_schema.ts` (Knex migration): `messaging_numbers` table: `id` uuid PK default `gen_random_uuid()`, `location_id` uuid NOT NULL, `channel` text NOT NULL, `phone_number` text NOT NULL UNIQUE, `friendly_name` text nullable, `active` boolean NOT NULL default true, `rate_limit_mps` integer NOT NULL default 3, `created_at` timestamptz NOT NULL default now(), UNIQUE constraint on `(location_id, channel)`. `messaging_messages` table: `id` uuid PK default `gen_random_uuid()`, `direction` text NOT NULL, `to_number` text NOT NULL, `from_number` text NOT NULL, `body` text nullable, `media_urls` text[] (use `specificType('media_urls', 'text[]')`), `message_type` text NOT NULL default 'normal', `status` text NOT NULL, `twilio_sid` text UNIQUE nullable, `dedup_key` text UNIQUE nullable, `error_code` text nullable, `error_message` text nullable, `sent_at` timestamptz nullable, `delivered_at` timestamptz nullable, `received_at` timestamptz nullable, `created_at` timestamptz NOT NULL default now(). Add indexes: `(to_number, created_at DESC)`, `(from_number, created_at DESC)`, `(status, created_at DESC)`. `messaging_opt_outs` table: `phone_number` text PK, `opted_out_at` timestamptz NOT NULL default now(), `source` text NOT NULL. Down migration drops all three tables in reverse order.",
+        "Create `apps/platform/messaging/src/repositories/numbers.repo.ts`: TypeBox `NumberSchema` matching all `messaging_numbers` columns; export `Number` type. Export `NumbersRepository` class (constructor takes Knex): `findById(id)`, `findByLocationAndChannel(locationId, channel)` (returns first match where active=true), `findByPhoneNumber(phoneNumber)`, `findAll(filters?: { location_id?, channel?, active? })`, `create(data: { location_id, channel, phone_number, friendly_name?, rate_limit_mps? })` with returning('*'), `deactivate(id)` sets active=false, `delete(id)` hard delete",
+        "Create `apps/platform/messaging/src/repositories/messages.repo.ts`: TypeBox `MessageSchema` matching all `messaging_messages` columns; export `Message` type. Export `MessagesRepository` class (constructor takes Knex): `findById(id)`, `findByTwilioSid(twilioSid)`, `findByDedupKey(dedupKey)`, `create(data)` with returning('*'), `updateStatus(id, status, extra?: { twilio_sid?, error_code?, error_message?, delivered_at?, sent_at? })`, `list(filters: { to_number?, from_number?, status?, from_date?, to_date? }, cursor?: string, limit?: number)` — cursor-based pagination using keyset on `(created_at, id)`. Cursor is base64-encoded JSON `{ created_at, id }`. Returns `{ data, next_cursor, has_more }`.",
+        "Create `apps/platform/messaging/src/repositories/opt-outs.repo.ts`: TypeBox `OptOutSchema` matching all `messaging_opt_outs` columns; export `OptOut` type. Export `OptOutsRepository` class (constructor takes Knex): `findByPhone(phone)`, `create(phone, source)` with `ON CONFLICT (phone_number) DO NOTHING` (idempotent), `delete(phone)` hard delete, `isOptedOut(phone)` returns boolean",
+        "Create `apps/platform/messaging/src/types.d.ts`: Fastify module augmentation adding `db: Knex`, `eventBus: EventBus`, `redis: Redis` to FastifyInstance",
+        "Create `apps/platform/messaging/src/routes/health.ts`: `GET /health` returns `200 { status: 'ok' }` after checking db connectivity via `app.db.raw('SELECT 1')` and redis via `app.redis.ping()`. Returns `503 { status: 'error', checks }` if either fails. Same pattern as email service.",
+        "Create `apps/platform/messaging/src/app.ts`: `buildApp(db, eventBus, redis)` function — register `@fastify/sensible`, decorate with db/eventBus/redis, register `onReady` hook calling `eventBus.start()`, register `onClose` hook calling `eventBus.stop()`, register health routes. Return FastifyInstance.",
+        "Create `apps/platform/messaging/src/index.ts`: create db, eventBus, redis connection; call `buildApp`; listen on `env.PORT` host `0.0.0.0`; SIGTERM handler closes app, db, redis in order.",
+        "Run `npm install` from `apps/platform/messaging/`",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Follow email service patterns exactly for app.ts, index.ts, db.ts, env.ts, types.d.ts, health.ts. Use Redis import from 'ioredis'. The messaging service does NOT use BullMQ — no queues. Redis is only for rate limiting (added in US-003). createEventBus from @ortho/event-bus. Migrations use .ts extension and the standard Knex up/down pattern."
+    },
+    {
+      "id": "US-002",
+      "title": "Phone number pool CRUD routes + seed script",
+      "description": "As an admin, I need CRUD endpoints for managing the phone number pool so that location-to-number mappings can be provisioned and queried, and a seed script for dev/test data.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/messaging/src/routes/numbers.ts`: Fastify plugin `numberRoutes` with prefix `/numbers` (registered in app.ts)",
+        "Route `POST /numbers` — TypeBox body schema: `location_id` (string), `channel` (string), `phone_number` (string), `friendly_name` (optional string), `rate_limit_mps` (optional integer). Inserts via `NumbersRepository.create()`. Returns `201` with the created number record. Returns `409` if phone_number or location_id+channel already exists (catch unique constraint violation, Knex error code `23505`).",
+        "Route `DELETE /numbers/:id` — calls `NumbersRepository.delete(id)`. Returns `204` on success. Returns `404` if number not found (check with `findById` first).",
+        "Route `GET /numbers` — query params: `location_id` (optional), `channel` (optional), `active` (optional boolean). Calls `NumbersRepository.findAll(filters)`. Returns `200` with array.",
+        "Route `GET /numbers/resolve` — query params: `location_id` (required string), `channel` (required string). Calls `NumbersRepository.findByLocationAndChannel(location_id, channel)`. Returns `200 { phone_number }` on hit. Returns `422 { error: 'number_not_found' }` if no active number matches.",
+        "Register `numberRoutes` in `buildApp()` in `src/app.ts` with prefix `/numbers`",
+        "Create `apps/platform/messaging/seeds/dev-numbers.ts`: inserts 4 test numbers into `messaging_numbers` — two locations × two channels (google, sms_inbox). Use `ON CONFLICT DO NOTHING` for idempotent re-runs. Phone numbers use `+15550001001` through `+15550001004` format. Export a `seed(knex)` function following Knex seed convention.",
+        "Create `apps/platform/messaging/knexfile.ts`: Knex config pointing to `DATABASE_URL` env var, client 'pg', migrations directory './migrations', seeds directory './seeds'. Add `seed` script to package.json: `knex seed:run --knexfile knexfile.ts`.",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "No auth middleware on these routes for now — spec says auth is via @ortho/auth-middleware but that package integration is deferred. The /numbers/resolve endpoint is the internal resolution path used by the send flow in US-003. The knexfile.ts needs to handle ESM — use `export default { ... }` with type: 'module'."
+    },
+    {
+      "id": "US-003",
+      "title": "Outbound send flow — opt-out check, dedup, number resolve, template render, rate limiter, Twilio client",
+      "description": "As a caller (Automation Engine, Nurturing Engine, Conversation Service), I want to send an SMS via POST /messages/send so the service validates, deduplicates, resolves the from number, renders the template, rate-limits, calls Twilio, and records the message.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/messaging/src/services/template-renderer.ts`: export pure function `renderTemplate(template: string, context: Record<string, string>): string` — scans for `{{key}}` patterns, replaces with context values, missing keys render as empty string. No external dependencies.",
+        "Create `apps/platform/messaging/src/services/number-resolver.ts`: export class `NumberResolver` (constructor takes `NumbersRepository`). Method `resolve(params: { from_number?: string; location_id?: string; channel?: string }): Promise<{ phone_number: string; rate_limit_mps: number }>` — if `from_number` provided, look up in `messaging_numbers` by phone_number to get `rate_limit_mps` (return rate_limit_mps=3 default if not found in pool); if `location_id` + `channel` provided, call `NumbersRepository.findByLocationAndChannel()`; throw typed error `NumberNotFoundError` if no active number found.",
+        "Create `apps/platform/messaging/src/services/opt-out-registry.ts`: export class `OptOutRegistry` (constructor takes `OptOutsRepository`). Methods: `isOptedOut(phone: string): Promise<boolean>`, `register(phone: string, source: string): Promise<void>`, `remove(phone: string): Promise<boolean>` (returns true if row existed and was deleted).",
+        "Create `apps/platform/messaging/src/services/rate-limiter.lua`: Redis Lua token bucket script. Takes KEYS[1] = rate limit key, ARGV[1] = capacity (= rate_limit_mps), ARGV[2] = refill rate (= rate_limit_mps), ARGV[3] = current time in microseconds. Returns 1 if token consumed, 0 if throttled. Atomic check-and-consume.",
+        "Create `apps/platform/messaging/src/services/rate-limiter.ts`: export class `RateLimiter`. Constructor takes Redis instance. On construction, read the Lua script from `rate-limiter.lua` file. Provide `init()` async method that calls `redis.scriptLoad(luaScript)` to get the SHA. Method `tryConsume(fromNumber: string, rateLimitMps: number): Promise<{ allowed: boolean; retryAfter?: number }>` — calls `redis.evalsha(sha, 1, key, capacity, refillRate, now)`. Key format: `rate_limit:msg:{fromNumber}`. Returns `{ allowed: true }` or `{ allowed: false, retryAfter: 1 }`.",
+        "Create `apps/platform/messaging/src/services/twilio-client.ts`: define interface `TwilioClient` with method `sendMessage(params: { to: string; from: string; body: string; mediaUrl?: string; statusCallback?: string }): Promise<{ sid: string }>`. Export `createTwilioClient(accountSid: string, authToken: string): TwilioClient` — uses the `twilio` npm package `messages.create`. Export `createStubTwilioClient(): TwilioClient & { calls: Array<...>; setError(err?: Error): void }` — in-process stub that records calls, returns canned `{ sid: 'SM...' }` responses, can be configured to throw errors.",
+        "Create `apps/platform/messaging/src/services/send-message.ts`: export class `SendMessageService`. Constructor takes `OptOutRegistry`, `MessagesRepository`, `NumberResolver`, `RateLimiter`, `TwilioClient`, and `statusCallbackUrl: string`. Method `send(params: SendMessageParams): Promise<SendMessageResult>` implements the full pipeline from spec Section 5: (1) validate via TypeBox schema, (2) check opt-out → return `{ status: 'opted_out', code: 400 }`, (3) check dedup_key → return `{ status: 'duplicate', code: 200, message_id }`, (4) resolve from_number, (5) render body (if template+context, call renderTemplate; if body, use as-is), (6) check rate limiter → return `{ status: 'throttled', code: 429, retryAfter }`, (7) call TwilioClient.sendMessage → on error, insert message with status 'failed' and return `{ status: 'twilio_error', code: 502, ... }`, (8) insert message with status 'queued' and twilio_sid, (9) return `{ status: 'queued', code: 200, message_id }`.",
+        "Create `apps/platform/messaging/src/routes/messages.ts`: Fastify plugin `messageRoutes`. Route `POST /messages/send` — TypeBox body schema with `to` (string), `from_number` (optional string), `location_id` (optional string), `channel` (optional string), `template` (optional string), `context` (optional Record<string, string>), `body` (optional string), `media_url` (optional string), `dedup_key` (optional string). Instantiates `SendMessageService` with dependencies from app instance. Maps `SendMessageResult` to HTTP responses per spec Section 4.1. Route `GET /messages/:id` — fetch by id via `MessagesRepository.findById`, return 404 if not found. Route `GET /messages` — query params `to`, `from_number`, `status`, `from_date`, `to_date`, `cursor`, `limit` (default 50, max 100). Calls `MessagesRepository.list()`. Returns `{ data, next_cursor, has_more }`.",
+        "Register `messageRoutes` in `buildApp()` in `src/app.ts`",
+        "Wire up `RateLimiter.init()` in the Fastify `onReady` hook in `app.ts` so the Lua script is loaded before the first request",
+        "Create TwilioClient in `src/index.ts` using env vars; pass to `buildApp`. Add `twilioClient` to Fastify instance decoration and `types.d.ts`. Use `createStubTwilioClient()` when `NODE_ENV === 'test'` or add a `TWILIO_STUB` env flag.",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "The Messaging Service has NO BullMQ — sends are synchronous in the request path. The rate limiter Lua script must be loaded at startup via SCRIPT LOAD and called via evalsha. The TwilioClient interface enables DI for testing — the stub is co-located in the same file. For rate-limiter.lua, use fs.readFileSync with import.meta to resolve the path relative to the module. The statusCallback URL is passed to Twilio so it knows where to POST delivery status updates (handled in US-005)."
+    },
+    {
+      "id": "US-004",
+      "title": "Opt-out CRUD routes + message query routes",
+      "description": "As an admin, I need opt-out registry endpoints to manually manage opt-outs, and as a caller I need message query endpoints to look up message history.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/messaging/src/routes/opt-outs.ts`: Fastify plugin `optOutRoutes` with prefix `/opt-outs`",
+        "Route `GET /opt-outs/:phone` — calls `OptOutsRepository.findByPhone(phone)`. Returns `200 { opted_out: true, opted_out_at, source }` if found, or `200 { opted_out: false }` if not found.",
+        "Route `POST /opt-outs` — TypeBox body schema: `phone_number` (string), `source` (optional string, default 'admin'). Calls `OptOutRegistry.register(phone, source)`. Returns `201 { phone_number, opted_out_at, source }`.",
+        "Route `DELETE /opt-outs/:phone` — calls `OptOutRegistry.remove(phone)`. Returns `204` if deleted, `404` if phone was not opted out.",
+        "Register `optOutRoutes` in `buildApp()` in `src/app.ts` with prefix `/opt-outs`",
+        "Unit tests in `apps/platform/messaging/test/unit/template-renderer.test.ts`: (a) simple merge tag substitution `{{first_name}}` → 'Sara', (b) multiple tags in one template, (c) missing key renders as empty string, (d) no tags returns template unchanged, (e) empty template returns empty string, (f) pre-rendered body (no tags) passes through unchanged",
+        "Unit tests in `apps/platform/messaging/test/unit/number-resolver.test.ts`: (a) explicit `from_number` returns it with default rate_limit_mps, (b) `location_id`+`channel` lookup hit returns phone_number and rate_limit_mps from DB record, (c) `location_id`+`channel` lookup miss throws `NumberNotFoundError`, (d) inactive number not returned",
+        "Unit tests in `apps/platform/messaging/test/unit/twilio-webhook.test.ts` (placeholder for US-005 — skip if twilio-webhook.ts doesn't exist yet): mark as TODO",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "The number-resolver unit tests need a mock NumbersRepository — create a simple mock object with vi.fn() for each method. The template-renderer tests are pure function tests with no mocks needed. Opt-out routes have no auth for now (deferred @ortho/auth-middleware integration)."
+    },
+    {
+      "id": "US-005",
+      "title": "Twilio webhooks — inbound SMS + delivery status callbacks with HMAC-SHA1 validation",
+      "description": "As the Messaging Service, I need to receive Twilio inbound SMS and delivery status callbacks via webhooks, validate signatures, update message records, detect STOP/UNSTOP keywords, and manage opt-outs.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/messaging/src/services/twilio-webhook.ts`: export pure function `validateTwilioSignature(authToken: string, signature: string, url: string, params: Record<string, string>): boolean` — constructs data string per Twilio spec (URL + sorted params concatenated as key+value), computes HMAC-SHA1 with authToken, base64-encodes, compares to signature using `crypto.timingSafeEqual`. No Twilio SDK dependency.",
+        "Export constant `STOP_KEYWORDS: string[]` = `['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT']`",
+        "Export constant `UNSTOP_KEYWORDS: string[]` = `['UNSTOP', 'START']`",
+        "Export function `classifyInboundMessage(body: string): 'stop' | 'unstop' | 'normal'` — trims whitespace, uppercases, matches against STOP_KEYWORDS then UNSTOP_KEYWORDS, else 'normal'",
+        "Create `apps/platform/messaging/src/routes/webhooks.ts`: Fastify plugin `webhookRoutes`",
+        "Register a Fastify `preHandler` hook on both webhook routes that validates `X-Twilio-Signature` header using `validateTwilioSignature`. The auth token comes from `env.TWILIO_AUTH_TOKEN`. The URL is reconstructed from the request. Invalid signature → `403` with no side effects. Configure Fastify to parse `application/x-www-form-urlencoded` bodies on webhook routes (Twilio sends form-encoded POST bodies).",
+        "Route `POST /webhooks/twilio/inbound`: parse Twilio params (`From`, `To`, `Body`, `MediaUrl0`..`MediaUrl9`). Classify message via `classifyInboundMessage(Body)`. INSERT into `messaging_messages` with direction='inbound', status='received', message_type from classification, received_at=now(). If message_type='stop': insert opt-out via `OptOutsRepository.create(From, 'stop_reply')`. If message_type='unstop': check if opted out, if yes delete opt-out via `OptOutsRepository.delete(From)`. Return `200` with `Content-Type: text/xml` and empty TwiML `<Response></Response>`.",
+        "Route `POST /webhooks/twilio/status`: parse `MessageSid`, `MessageStatus`, `ErrorCode`, `ErrorMessage`. Lookup message by `twilio_sid` via `MessagesRepository.findByTwilioSid(MessageSid)`. If not found, log warning and return `200`. Map Twilio status: `delivered` → update status + delivered_at; `failed`/`undelivered` → update status + error_code + error_message; `queued`/`sending`/`sent` → update status only. Return `200`.",
+        "Register `webhookRoutes` in `buildApp()` in `src/app.ts`",
+        "Unit tests in `apps/platform/messaging/test/unit/twilio-webhook.test.ts`: (a) valid HMAC-SHA1 signature passes, (b) tampered payload rejects, (c) missing signature rejects, (d) STOP keyword detection (all 6 variants), (e) UNSTOP/START detection, (f) case-insensitive matching, (g) whitespace-trimmed matching, (h) normal message classification",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Twilio sends webhook bodies as application/x-www-form-urlencoded. Fastify needs @fastify/formbody or manual content-type parser registered. Add @fastify/formbody to package.json dependencies. The HMAC-SHA1 validation uses Node crypto module (import { createHmac, timingSafeEqual } from 'node:crypto'). Media URLs come as MediaUrl0, MediaUrl1, etc. — collect into an array. The empty TwiML response prevents Twilio from sending an auto-reply."
+    },
+    {
+      "id": "US-006",
+      "title": "EventBridge event publishing for all five events",
+      "description": "As downstream subscribers, I need the Messaging Service to publish inbound_message.received, message.delivered, message.failed, opt_out.received, and opt_out.removed events to EventBridge so other services can react to messaging state changes.",
+      "acceptanceCriteria": [
+        "Create `apps/platform/messaging/src/events/publisher.ts`: export typed publish helper functions using `@ortho/event-bus` EventBus instance: `publishInboundMessageReceived(eventBus, payload: { message_id, from_number, to_number, body, media_urls, received_at, message_type })`, `publishMessageDelivered(eventBus, payload: { message_id, twilio_sid, to_number, from_number, location_id, delivered_at })`, `publishMessageFailed(eventBus, payload: { message_id, twilio_sid, to_number, from_number, location_id, error_code, error_message })`, `publishOptOutReceived(eventBus, payload: { phone_number, opted_out_at, source, location_id })`, `publishOptOutRemoved(eventBus, payload: { phone_number, removed_at })`",
+        "For `message.delivered` and `message.failed` events: resolve `location_id` by looking up `from_number` in `messaging_numbers` via `NumbersRepository.findByPhoneNumber(from_number)`. If number not in pool, set `location_id: null`.",
+        "For `opt_out.received` events from STOP replies: resolve `location_id` from `to_number` (the practice's Twilio number). Manually registered opt-outs set `location_id: null`.",
+        "Update `POST /webhooks/twilio/inbound` route to publish `inbound_message.received` event after DB insert. Also publish `opt_out.received` on STOP detection and `opt_out.removed` on UNSTOP detection (only if opt-out row actually existed).",
+        "Update `POST /webhooks/twilio/status` route to publish `message.delivered` event on 'delivered' status and `message.failed` event on 'failed'/'undelivered' status. Intermediate statuses (queued/sending/sent) update DB only — no event.",
+        "EventBridge publish failures after successful DB insert are non-critical: log error via `@ortho/logger` but do NOT return error status to Twilio (webhook still returns 200). Wrap publish calls in try/catch.",
+        "Integration tests in `apps/platform/messaging/test/integration/send-flow.test.ts` using real Postgres + real Redis + Twilio stub: (a) happy path — POST /messages/send with location_id+channel resolves number, renders template, Twilio stub called, message inserted with status 'queued', returns 200. (b) dedup — same dedup_key twice, second returns 200 with original message_id, Twilio stub called exactly once. (c) opted-out number → 400, Twilio stub never called. (d) rate limit exceeded → 429 with Retry-After header. (e) number resolve failure → 422. (f) Twilio error → message inserted with status 'failed', returns 502 with error details.",
+        "Integration tests in `apps/platform/messaging/test/integration/webhooks.test.ts` using real Postgres + MockDriver event bus: (a) status callback delivered → DB status updated + delivered_at set, `message.delivered` event published. (b) status callback failed → DB status + error fields updated, `message.failed` event published. (c) invalid Twilio signature → 403, no DB writes, no events. (d) inbound STOP → message inserted (direction=inbound, message_type=stop), opt-out created, `opt_out.received` published, `inbound_message.received` published. (e) inbound UNSTOP (was opted out) → message inserted, opt-out removed, `opt_out.removed` published, `inbound_message.received` published. (f) inbound UNSTOP (was NOT opted out) → message inserted, no `opt_out.removed` event, `inbound_message.received` published. (g) inbound normal → message inserted, `inbound_message.received` published with message_type 'normal'. (h) status callback intermediate (sent) → DB updated, no EventBridge event.",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Use @ortho/event-bus MockDriver in integration tests to verify event publishing — check eventBus.publishedEvents or similar API from the package. Integration tests need Docker Compose Postgres and Redis running (project-level docker-compose.yml). The test setup should run migrations before tests and clean tables between tests. For the send-flow integration tests, inject the stub Twilio client. For webhook integration tests, generate valid HMAC-SHA1 signatures using a known auth token."
+    }
+  ]
+}

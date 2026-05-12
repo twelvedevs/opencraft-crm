@@ -1,0 +1,219 @@
+## 2026-03-30 - US-014
+- What was implemented: Full integration test suite (9 test files + helpers) covering publish→SSE fan-out, read-sync, read-all, history, replay, auth, rate-limit, redis-failure, and cleanup. Also added vitest.config.ts (singleFork sequential execution) and fixed stream.ts to call reply.raw.flushHeaders() after writeHead.
+- Files changed:
+  - apps/platform/notification/test/integration/helpers.ts (new — TestContext factory, SseCollector, JWT helpers, schema reset utilities)
+  - apps/platform/notification/test/integration/publish-stream.test.ts (new)
+  - apps/platform/notification/test/integration/read-sync.test.ts (new)
+  - apps/platform/notification/test/integration/read-all.test.ts (new)
+  - apps/platform/notification/test/integration/history.test.ts (new)
+  - apps/platform/notification/test/integration/replay.test.ts (new)
+  - apps/platform/notification/test/integration/auth.test.ts (new)
+  - apps/platform/notification/test/integration/rate-limit.test.ts (new)
+  - apps/platform/notification/test/integration/redis-failure.test.ts (new)
+  - apps/platform/notification/test/integration/cleanup.test.ts (new)
+  - apps/platform/notification/vitest.config.ts (new — singleFork: true for sequential test execution)
+  - apps/platform/notification/src/routes/stream.ts (added reply.raw.flushHeaders() after writeHead)
+- **Learnings for future iterations:**
+  - SSE route MUST call `reply.raw.flushHeaders()` after `reply.raw.writeHead()` — without it, Node.js HTTP buffers headers and never sends them until the first write(); SSE clients hang indefinitely waiting for headers, causing test timeouts
+  - `vitest.config.ts` with `pool: 'forks', poolOptions.forks.singleFork: true` is required for integration tests that share a Postgres schema — parallel execution causes races (one file drops the schema while another is using it)
+  - Replayed notifications (via findMissed/Last-Event-ID) use field `id` (raw NotificationRow), NOT `notification_id` (which is the Redis pub/sub payload field name); tests must distinguish these two formats
+  - `reply.raw.flushHeaders()` sends headers immediately without waiting for a write(); equivalent to `writeHead() + flush` in one step
+  - Use `resetSchema(db)` in beforeAll (drops + recreates) and `truncateTables(db)` in beforeEach — this gives each test file a clean slate without requiring per-file migration management
+  - Rate limiter tests: pre-seed the Redis counter with `redis.set(rateKey, '100', 'EX', 60)` to simulate a full window, then make the 101st request via inject — much faster than making 101 actual requests
+  - SseCollector must connect via REAL HTTP (not app.inject) since SSE uses reply.hijack() which writes to the raw TCP socket; inject uses a mock socket that doesn't support streaming
+  - For redis-failure tests, `vi.spyOn(redis, 'publish').mockRejectedValueOnce(err)` simulates Redis PUBLISH failure while still allowing BullMQ Queue operations (ZADD/XADD) to work on the same Redis connection
+---
+
+## 2026-03-30 - US-013
+- What was implemented: BullMQ cleanup worker that runs daily at 2:00 AM UTC to delete expired notifications; wired into index.ts alongside the publish-retry worker
+- Files changed:
+  - apps/platform/notification/src/queue/cleanup.worker.ts (new file)
+  - apps/platform/notification/src/index.ts (import + start cleanup worker in non-test block)
+- **Learnings for future iterations:**
+  - Repeatable BullMQ jobs use `queue.add(name, {}, { repeat: { pattern: cron } })` — BullMQ deduplicates by internal repeat key (queue + name + pattern), so calling this from multiple ECS tasks is safe
+  - The Queue needs its own non-blocking ioredis connection (separate from the Worker's `maxRetriesPerRequest: null` connection)
+  - `queue.add()` returns a Promise — use `.catch()` to handle registration errors without blocking startup
+  - Pass `repo` directly to `createCleanupWorker` — unlike publish-retry which only needs Redis, cleanup needs the DB repo to call `deleteExpired()`
+---
+
+## 2026-03-30 - US-012
+- What was implemented: BullMQ publish-retry worker that retries Redis PUBLISH after failure; wired into index.ts to start alongside the Fastify server
+- Files changed:
+  - apps/platform/notification/src/queue/publish-retry.worker.ts (new file)
+  - apps/platform/notification/src/index.ts (import + start worker in non-test block)
+- **Learnings for future iterations:**
+  - BullMQ Worker connections require `maxRetriesPerRequest: null` on the ioredis client — without it, BullMQ throws an error about the connection not being in blocking mode
+  - Use TWO separate ioredis connections inside the worker: one passed to `Worker({ connection: workerRedis })` for BullMQ's blocking operations, and a second `publishRedis` for the actual Redis PUBLISH command
+  - The `PublishRetryJobData` type is already exported from `publisher.ts` — import it as a type to avoid creating duplicates
+  - Worker retry config (attempts, backoff) is set on the job at enqueue time in `publisher.ts` — the Worker itself just processes and throws on failure; BullMQ handles the retry scheduling automatically
+  - Worker `failed` event handler receives `(job | undefined, err)` — guard against `job` being undefined
+---
+
+## 2026-03-30 - US-011
+- What was implemented: POST /notifications/:id/read and POST /notifications/read-all endpoints with user JWT auth, channel validation, markRead/markAllRead repo calls, Redis PUBLISH to notif:user:{userId}:reads for cross-tab read sync
+- Files changed:
+  - apps/platform/notification/src/routes/notifications.ts (added two POST routes)
+  - apps/platform/notification/src/index.ts (lifted redis to outer scope, passed redis to notificationsRoute)
+- **Learnings for future iterations:**
+  - `redis` was `const` inside the `if (NODE_ENV !== 'test')` block — had to lift it to outer `let redis: Redis | undefined` scope so it could be passed to route registrations outside the block
+  - `POST /notifications/read-all` must be registered BEFORE `POST /notifications/:id/read` — otherwise Fastify matches `/read-all` as id=`read-all` on the param route
+  - `originating_connection_id` comes from `X-Connection-ID` request header (optional); passed through in Redis PUBLISH payload for SseManager to exclude echo
+  - `markRead` returns boolean (false = not found/expired) → 404; `markAllRead` returns `{ ids, count }` → 200 `{ marked: count }`
+---
+
+## 2026-03-30 - US-010
+- What was implemented: GET /notifications history endpoint with user JWT auth, channel pattern/access validation, query param parsing, and NotificationsRepo.findHistory integration
+- Files changed:
+  - apps/platform/notification/src/routes/notifications.ts (new file)
+  - apps/platform/notification/src/index.ts (registered notificationsRoute)
+- **Learnings for future iterations:**
+  - `X-Total-Count` header set via `reply.header('X-Total-Count', String(totalUnread))` — comes from `findHistory.totalUnread` (always reflects full unread count regardless of pagination)
+  - Notification rows mapped from `id` → `notification_id` for the API response to match spec field names
+  - `unread` boolean query param: check `=== 'true' || === '1'` since query params are always strings
+  - `limit` query param: parseInt + clamp to MAX_LIMIT (100), default 50
+  - `parseUserJwt` helper returns a Promise or null (not async) — avoid double-awaiting; better to inline the jwtVerify call directly in the handler
+  - notificationsRoute registered in index.ts guarded by `if (repo)` — same pattern as streamRoute
+---
+
+## 2026-03-30 - US-009
+- What was implemented: GET /notifications/stream SSE route with user JWT auth, channel validation, missed notification replay, SseManager registration, and 30s keepalive
+- Files changed:
+  - apps/platform/notification/src/routes/stream.ts (new file)
+  - apps/platform/notification/src/index.ts (added streamRoute registration, exposed repo variable)
+- **Learnings for future iterations:**
+  - Fastify SSE pattern: call `reply.hijack()` before writing headers, then `reply.raw.writeHead(200, {...})` for headers and `reply.raw.write(...)` for SSE events; await a Promise that resolves on `reply.raw.on('close', ...)` to keep connection open
+  - `reply.hijack()` tells Fastify not to manage the response — required for long-lived streaming connections
+  - Error responses (401/403/400) must be returned BEFORE calling `reply.hijack()` since hijack takes over the raw socket
+  - `last-event-id` header is used for missed notification replay — `findMissed({ channels, afterSeq: lastEventId, limit: 200 })`
+  - `replay-truncated` event format: `{ replayed: <count>, first_seq: <seq of first replayed row> }` — sent before the 200 replay events when truncated
+  - `request.headers['last-event-id']` (lowercase) — Node.js HTTP headers are always lowercase
+  - Connection ID assigned as randomUUID() before hijacking; sent as `X-Connection-ID` response header
+  - SseConnection `id` and `connectionId` fields are both the same connectionId UUID (from the SseConnection interface)
+---
+
+## 2026-03-30 - US-008
+- What was implemented: POST /notifications/publish route with HMAC JWT auth, TypeBox body validation, channel validation, rate limiting, and publisher wiring
+- Files changed:
+  - apps/platform/notification/src/routes/publish.ts (new file)
+  - apps/platform/notification/src/index.ts (updated to wire Publisher, RateLimiter, SseManager, register publishRoute)
+- **Learnings for future iterations:**
+  - `jose` import: `import { jwtVerify } from 'jose'`; secret key: `createSecretKey(Buffer.from(secret, 'utf-8'))` from Node crypto; `jwtVerify(token, secretKey, { algorithms: ['HS256'] })` for HMAC HS256
+  - `ioredis` must be imported as named export: `import { Redis } from 'ioredis'` — default import (`import Redis from 'ioredis'`) causes TS2351 "no construct signatures" error
+  - Route registration pattern: export `async function routeName(fastify: FastifyInstance, opts: RouteOptions)` and call `app.register(routeName, opts)` in index.ts
+  - TypeBox payload object with `additionalProperties: true`: `Type.Object({}, { additionalProperties: true })` — necessary for open-ended payload objects
+  - In index.ts, conditional route registration (when `NODE_ENV !== 'test'`) keeps unit tests simple since they import services directly, not index.ts
+---
+
+## 2026-03-30 - US-007
+- What was implemented: SseManager class — in-memory connection maps with Redis PSUBSCRIBE fan-out, per-user connection eviction, read-sync routing, and keepalive support
+- Files changed:
+  - apps/platform/notification/src/services/sse-manager.ts (new file)
+  - apps/platform/notification/test/unit/sse-manager.test.ts (new file, 15 tests)
+- **Learnings for future iterations:**
+  - `redis.psubscribe('notif:*', cb)` + `redis.on('pmessage', handler)` is the ioredis pattern for pattern subscriptions; handler receives `(pattern, channel, message)`
+  - Fan-out to `notif:channel:{channel}` uses `channelMap: Map<string, Set<SseConnection>>`; the channel name is `redisChannel.slice('notif:channel:'.length)` — preserves colons in the channel string (e.g. `location:loc1:sms`)
+  - Read-sync routing uses regex `/^notif:user:(.+):reads$/` to extract userId from Redis channel name
+  - `event: read-all` vs `event: read` distinguished by presence of `notification_ids` key in the parsed message
+  - Originating connection excluded by comparing `conn.connectionId === data.originating_connection_id`
+  - Per-user connection limit: userMap stores ordered array (insertion order = oldest first); on 11th registration, send `event: connection-limit` + `reply.raw.end()` + deregister oldest BEFORE registering new
+  - SSE write format: `event: {name}\ndata: {json}\n\n`; keepalive is `: keepalive\n\n` (comment line)
+  - Unit test pattern for PSUBSCRIBE: capture `pmessage` handler via `redis.on` mock; expose as `triggerRedis(pattern, channel, message)` helper
+---
+
+## 2026-03-30 - US-006
+- What was implemented: Publisher service that writes to DB and fans out to Redis pub/sub with BullMQ fallback
+- Files changed:
+  - apps/platform/notification/src/services/publisher.ts (new file)
+  - apps/platform/notification/test/unit/publisher.test.ts (new file, 7 tests)
+- **Learnings for future iterations:**
+  - Publisher constructs BullMQ Queue internally with `connection: redis` — the same ioredis instance is passed to BullMQ
+  - Redis publish key format: `notif:channel:{channel}`; BullMQ queue name: `publish-retry`
+  - DB insert uses `randomUUID()` from Node crypto for the notification ID; `expires_at = now() + 7 days`
+  - Redis failure is silently swallowed — enqueue BullMQ job and return `{ notification_id }` normally; DB insert is never rolled back
+  - Mocking BullMQ in vitest: `vi.mock('bullmq', ...)` with `Queue` as a constructor mock; grab `Queue.mock.results[n].value.add` to assert on job enqueuing
+---
+
+## 2026-03-30 - US-005
+- What was implemented: Per-channel sliding-window rate limiter using Redis Lua script
+- Files changed:
+  - apps/platform/notification/src/services/rate-limiter.ts (new file)
+  - apps/platform/notification/test/unit/rate-limiter.test.ts (new file, 8 tests)
+- **Learnings for future iterations:**
+  - Lua script atomically INCRs key and sets EXPIRE only when count==1 (first call in window); subsequent calls skip EXPIRE to avoid resetting the window
+  - `redis.eval(LUA_SCRIPT, 1, key)` returns `[count, ttl]` as a tuple — cast to `[number, number]` in TypeScript
+  - The Lua script uses KEYS[1] (not a string literal) so Redis Cluster can route correctly
+  - Rate limit: 100 req / 60s window; key format: `ratelimit:channel:{channel}`
+  - Mocking ioredis in vitest: pass `{ eval: vi.fn() }` cast as `unknown as Redis`; mockResolvedValueOnce([count, ttl]) covers the full flow
+---
+
+## 2026-03-30 - US-003
+- What was implemented: NotificationsRepo class with full DB access layer
+- Files changed:
+  - apps/platform/notification/src/repositories/notifications.repo.ts (new file)
+- **Learnings for future iterations:**
+  - `andOnVal('column', value)` in Knex joinClause correctly binds a value to a JOIN ON condition — used for per-user LEFT JOIN on notification_reads
+  - Cursor pagination: encode `{created_at, id}` as base64 JSON; decode and apply `(created_at < cursor OR (created_at = cursor AND id < cursor_id))` for DESC order
+  - `totalUnread` is a separate COUNT query (no limit/before/unread filter) run in parallel with the main query
+  - `findMissed` adds `read: false` to rows since missed notifications by definition are unread from the client's perspective
+  - `onConflict(['user_id', 'notification_id']).ignore()` for idempotent upserts in notification_reads
+---
+
+## 2026-03-30 - US-004
+- What was implemented: Channel validator service with pattern enforcement and JWT-based access control
+- Files changed:
+  - apps/platform/notification/src/services/channel-validator.ts (new file)
+  - apps/platform/notification/test/unit/channel-validator.test.ts (new file, 17 tests)
+- **Learnings for future iterations:**
+  - Accepted patterns: `location:{id}:{type}`, `user:{id}:{type}`, `global:system` — all others rejected
+  - Empty segment detection: split on `:` and check `parts.some(p => p === '')` catches trailing colons, double colons, etc.
+  - `global:system` is exact-match only — `global:other` and `global:system:extra` are both invalid
+  - `validateChannelAccess` checks `locations` array for `location:*`, `sub` equality for `user:*`, and always returns true for `global:*`
+---
+
+## Codebase Patterns
+- Platform services use ESM (`"type": "module"`) with NodeNext module resolution — always use `.js` extensions in imports
+- tsconfig follows automation service pattern: target ES2022, NodeNext, strict, outDir dist/, rootDir src/
+- Fastify app is exported from index.ts; server only starts when NODE_ENV !== 'test' (allows testing without binding port)
+- config.ts uses requireEnv() helper that throws on missing required vars; PORT has default 3006
+- BullMQ and ioredis are separate dependencies (ioredis used for pub/sub, BullMQ for job queues)
+- Services run on port 3006 (notification), matches existing port allocation pattern
+- SSE routes MUST call `reply.raw.flushHeaders()` after `reply.raw.writeHead()` to send headers before first write
+- Integration tests: use `vitest.config.ts` with `singleFork: true` when tests share a real Postgres schema
+- Integration test pattern: `resetSchema(db)` in beforeAll, `truncateTables(db)` in beforeEach
+- SseCollector connects via REAL HTTP (not app.inject); app.inject can still be used for all non-streaming requests
+
+---
+
+# Ralph Progress Log
+Started: Mon Mar 30 13:08:41 +03 2026
+---
+
+## 2026-03-30 - US-002
+- What was implemented: Database migrations for platform_notifications schema
+- Files changed:
+  - apps/platform/notification/migrations/001_create_notifications.ts (notifications + notification_reads tables with all required indexes)
+  - apps/platform/notification/migrations/knexfile.ts (pg client, platform_notifications searchPath)
+- **Learnings for future iterations:**
+  - Use `table.specificType('seq', 'bigserial').notNullable()` for bigserial non-PK column in Knex
+  - Descending and partial indexes must be created with `knex.raw()` — Knex doesn't support them natively
+  - FK reference for cross-table in same schema: use `.references('id').inTable('platform_notifications.notifications')` (full schema-qualified)
+  - knexfile.ts mirrors automation service pattern: searchPath includes schema + public
+---
+
+## 2026-03-30 - US-001
+- What was implemented: Full project scaffold for @platform/notification service
+- Files changed:
+  - apps/platform/notification/package.json (name: @platform/notification, all required deps)
+  - apps/platform/notification/tsconfig.json (ESM, strict, NodeNext, dist/ output)
+  - apps/platform/notification/src/config.ts (requireEnv helper, PORT default 3006)
+  - apps/platform/notification/src/index.ts (Fastify app, GET /health, exports app)
+  - apps/platform/notification/Dockerfile (node:24-alpine, npm ci --omit=dev, dist/)
+  - apps/platform/notification/.env.example (all 4 env vars)
+  - apps/platform/notification/.gitignore
+  - apps/platform/notification/package-lock.json
+- **Learnings for future iterations:**
+  - All other platform services (messaging, email, etc.) directories are empty placeholders - notification is the first to be built
+  - Used automation service as reference for package.json/tsconfig patterns
+  - config.ts throws at module load time if required env vars are missing - this means tests need env vars set (or NODE_ENV=test guard in index.ts)
+  - Typecheck passes with no issues on the scaffold
+---

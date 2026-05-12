@@ -1,5 +1,9 @@
 import Fastify from 'fastify';
+import type { FastifyBaseLogger } from 'fastify';
 import sensible from '@fastify/sensible';
+import { openapiPlugin } from '@ortho/openapi';
+import { createLogger } from '@ortho/logger';
+import { requestLoggingPlugin } from '@ortho/fastify-logger';
 import { createDb } from './db.js';
 import rulesRoutes from './routes/rules.js';
 import { RulesRepository } from './repositories/rules.repository.js';
@@ -23,11 +27,24 @@ import { createSecretsResolver } from './services/secrets-resolver.js';
 import executionRoutes from './routes/executions.js';
 import { RetentionService } from './services/retention.js';
 
-const fastify = Fastify({ logger: true });
+const log = createLogger('platform-automation');
+const fastify = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, disableRequestLogging: true });
 
 await fastify.register(sensible);
+await fastify.register(requestLoggingPlugin, { logger: log });
+await fastify.register(openapiPlugin, {
+  title: 'Automation Engine',
+  description: 'Event-driven workflow runtime',
+  tags: [
+    { name: 'Rules', description: 'Automation rule management' },
+    { name: 'Executions', description: 'Execution history' },
+  ],
+});
 
-fastify.get('/healthz', async () => {
+fastify.get('/health', {
+  schema: { hide: true } as object,
+  config: { disableRequestLogging: true },
+}, async () => {
   return { ok: true };
 });
 
@@ -70,11 +87,11 @@ const workers = [
   createActionWorker(QUEUE_NAME, connection, createCallWebhookProcessor(execRepo, queue, secretsResolver), fastify.log as Pick<Console, 'error'>),
 ];
 
-const queueUrl = process.env['SQS_QUEUE_URL'] ?? '';
+const queueUrl = process.env['AUTOMATION_SQS_QUEUE_URL'] ?? '';
 let sqsConsumer: SqsConsumer | undefined;
 
-if (!queueUrl) {
-  fastify.log.warn('SQS_QUEUE_URL is not set — SQS consumer will not start');
+if (!queueUrl || !queueUrl.startsWith('http')) {
+  fastify.log.warn('AUTOMATION_SQS_QUEUE_URL is not set — SQS consumer will not start');
 } else {
   sqsConsumer = new SqsConsumer({
     queueUrl,

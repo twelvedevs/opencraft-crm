@@ -1,0 +1,27 @@
+# Ralph Progress Log
+Started: Sun Mar 29 2026
+
+## Codebase Patterns
+- Each service/package is standalone with its own node_modules (no root workspace manager)
+- Use `file:../../../packages/@ortho/<name>` for local package references in package.json
+- @ortho/event-bus must be built (`npm run build`) before dependent packages can typecheck
+- TypeBox `Value.Check` + `Value.Errors` is cleaner than `Value.Parse` for env validation with custom error messages
+- Fastify app builder pattern: `buildApp(db: Knex, eventBus: EventBus, queues: {...}): Promise<FastifyInstance>` — decorate instance, register hooks, register routes
+- Register `onReady` hook (not `onStart`) to call `eventBus.start()` after Fastify is ready
+- Module augmentation in `src/types.d.ts` is needed to type `fastify.db`, `fastify.eventBus`, `fastify.queues` decorators
+- `tsconfig.json`: no workspace base extension — standalone per service
+- Fastify TypeBox response schemas: define ALL used status codes (including error codes like 404, 409, 422) in the `response:` schema object — otherwise `reply.status(N)` causes TS type errors
+- `@fastify/sensible` v5 supports Fastify 4.x only — use `^6.0.0` for Fastify 5.x
+- For tests that import modules with top-level env parsing, set env vars in `vitest.config.ts` under `test.env` (not setupFiles) — they are applied before module evaluation
+- @ortho/logger package does not exist yet — use console or pino directly
+- Native `fetch` is available in Node 18+ — no extra HTTP lib needed for SendGrid calls
+- PG unique violation check: inspect `err.code === '23505'` (typeof guard required for TS)
+- BullMQ requires `maxRetriesPerRequest: null` on the IORedis connection
+- DomainRepository and DomainResolver instantiated inside Fastify plugin functions using `app.db` decorator — no need to pass via plugin options
+- TypeBox schema for DB entities: use `Type.Number()` for numeric columns, `Type.String()` for timestamps, `Type.Union([Type.String(), Type.Null()])` for nullable text
+- `app.ready()` triggers `onReady` hooks without binding a port — preferred over `app.listen()` for unit tests
+- `app.inject()` (Fastify's built-in HTTP injection) works without the app being in listening state
+- Use `vi.spyOn(Date, 'now').mockReturnValue(n)` for time-based cache tests
+- `vi.restoreAllMocks()` in `afterEach` keeps tests isolated when using spies
+
+---

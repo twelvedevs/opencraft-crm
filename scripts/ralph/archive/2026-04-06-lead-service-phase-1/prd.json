@@ -1,0 +1,283 @@
+{
+  "project": "Ortho CRM — Lead Service (Phase 1: Core CRUD)",
+  "branchName": "feature/lead-service-phase-1",
+  "description": "Lead Service core CRUD — scaffold, migrations, repositories, services, and all REST routes (no dedup/merge/events/worker — those are Phase 2 and 3)",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project scaffold — package.json, tsconfig, Dockerfile, env, db.ts, app.ts, index.ts",
+      "description": "As a developer, I need the apps/crm/lead/ service directory wired up with correct dependencies, TypeScript config, Dockerfile, env validation, Knex instance, and a minimal Fastify app shell, so that subsequent stories can add routes and repositories without touching infrastructure.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/package.json: name '@crm/lead', type 'module', engines node >=24, scripts build/dev/start/test/typecheck (same pattern as @platform/media)",
+        "Production dependencies: fastify ^5, @fastify/sensible ^6, @sinclair/typebox ^0.34, knex ^3, pg ^8, libphonenumber-js ^1, @ortho/auth-middleware file:../../../packages/@ortho/auth-middleware, @ortho/event-bus file:../../../packages/@ortho/event-bus, @ortho/logger file:../../../packages/@ortho/logger, @ortho/types file:../../../packages/@ortho/types",
+        "Dev dependencies: @types/node ^22, @types/pg ^8, tsx ^4, typescript ^5, vitest ^2",
+        "apps/crm/lead/tsconfig.json: target ES2022, module NodeNext, moduleResolution NodeNext, strict true, outDir dist, rootDir src, declaration true, declarationMap true, sourceMap true, esModuleInterop true, skipLibCheck true, include ['src/**/*'], exclude ['node_modules','dist']",
+        "apps/crm/lead/Dockerfile: FROM node:24-slim, WORKDIR /app, COPY package*.json ./, RUN npm ci --omit=dev, COPY dist/ ./dist/, CMD [\"node\",\"dist/index.js\"]",
+        "apps/crm/lead/src/env.ts: required vars — DATABASE_URL, PORT (parsed int, default 3000), IDENTITY_JWKS_URL, PIPELINE_ENGINE_URL, AI_SERVICE_URL, SERVICE_AUTH_TOKEN; optional with defaults — LOG_LEVEL ('info'), SEARCH_SIMILARITY_THRESHOLD (parsed float, default 0.2); EVENT_BUS_DRIVER required; conditional: EVENT_BRIDGE_BUS_NAME, SQS_QUEUE_URL, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY required if EVENT_BUS_DRIVER==='eventbridge'; REDIS_URL, EVENT_BUS_CONSUMER_GROUP required if EVENT_BUS_DRIVER==='redis'",
+        "apps/crm/lead/src/db.ts: exports default knex instance created via knexLib({ client: 'pg', connection: env.DATABASE_URL, searchPath: ['crm_leads', 'public'] }); also exports a destroy() function that calls knex.destroy()",
+        "apps/crm/lead/src/app.ts: exports buildApp() async function — creates Fastify with createLogger('crm-lead'), registers @fastify/sensible, registers authPlugin({ jwksUrl: env.IDENTITY_JWKS_URL, allowedPaths: ['/health'] }); GET /health returns 200 { ok: true }; returns FastifyInstance; route plugins will be registered here in later stories",
+        "apps/crm/lead/src/index.ts: imports buildApp and db; calls buildApp(); listens on env.PORT at 0.0.0.0; handles SIGTERM (app.close() then db.destroy() then process.exit(0))",
+        "apps/crm/lead/vitest.config.ts: defineConfig({ test: { pool: 'forks', poolOptions: { forks: { singleFork: true } } } })",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Migrations — all 6 tables + all indexes + pg_trgm extension",
+      "description": "As a developer, I need the crm_leads schema and all six tables (leads, appointments, lead_activities, tags, lead_tags, lead_merges) created via Knex migrations with all indexes from the spec, so that repositories have a complete schema to work against.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/knexfile.ts: exports default config with client 'pg', connection DATABASE_URL from process.env, migrations dir './migrations', searchPath ['crm_leads','public']",
+        "apps/crm/lead/migrations/001_create_schema_and_extensions.ts: up() — CREATE SCHEMA IF NOT EXISTS crm_leads; CREATE EXTENSION IF NOT EXISTS pg_trgm; down() — DROP SCHEMA IF EXISTS crm_leads CASCADE",
+        "apps/crm/lead/migrations/002_create_leads.ts: up() creates crm_leads.leads with columns: id uuid PK DEFAULT gen_random_uuid(), location_id uuid NOT NULL, first_name varchar NOT NULL, last_name varchar NOT NULL, phone varchar NOT NULL, email varchar, treatment_interest varchar, date_of_birth date, channel varchar NOT NULL CHECK IN ('website_form','google_ads','facebook_ads','call_tracking','referral','walk_in','chat','google_business_profile','csv_import'), contact_status varchar NOT NULL DEFAULT 'active' CHECK IN ('active','sms_opted_out','email_invalid','fully_unreachable'), current_pipeline varchar NOT NULL DEFAULT 'none' CHECK IN ('new_patient','in_treatment','in_retention','none'), current_stage varchar, last_activity_at timestamptz, score smallint NOT NULL DEFAULT 0, duplicate_status varchar NOT NULL DEFAULT 'none' CHECK IN ('none','flagged','resolved'), duplicate_of_id uuid, merged_into_id uuid, archived_at timestamptz, first_touch_source varchar, first_touch_medium varchar, first_touch_campaign varchar, first_touch_ad varchar, first_touch_keyword varchar, first_touch_landing_page varchar, first_touch_referring_url varchar, first_touch_device varchar, call_tracking_number varchar, referrer_id uuid, referrer_type varchar, referral_code varchar, ad_platform_lead_id varchar, created_by_location uuid, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(); down() drops table",
+        "migrations/002 also creates indexes on crm_leads.leads: B-tree on phone, B-tree on email, B-tree on ad_platform_lead_id, B-tree on location_id, B-tree composite on (current_pipeline, current_stage), B-tree on score DESC, B-tree on last_activity_at DESC; GIN trigram on (first_name || ' ' || last_name) using gin_trgm_ops, GIN trigram on phone using gin_trgm_ops, GIN trigram on email using gin_trgm_ops — use knex.raw for GIN trigram indexes",
+        "apps/crm/lead/migrations/003_create_appointments.ts: up() creates crm_leads.appointments with columns: id uuid PK DEFAULT gen_random_uuid(), lead_id uuid NOT NULL REFERENCES crm_leads.leads(id), location_id uuid NOT NULL, appointment_type varchar NOT NULL CHECK IN ('exam','follow_up','other'), scheduled_at timestamptz NOT NULL, status varchar NOT NULL DEFAULT 'scheduled' CHECK IN ('scheduled','completed','cancelled','no_show'), notes text, created_by uuid NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(); indexes: B-tree on lead_id, B-tree composite on (location_id, status, scheduled_at); down() drops table",
+        "apps/crm/lead/migrations/004_create_lead_activities.ts: up() creates crm_leads.lead_activities with columns: id uuid PK DEFAULT gen_random_uuid(), lead_id uuid NOT NULL REFERENCES crm_leads.leads(id), event_type varchar NOT NULL, actor_type varchar NOT NULL CHECK IN ('system','staff','automation'), actor_id uuid, payload jsonb NOT NULL DEFAULT '{}', occurred_at timestamptz NOT NULL, source_event_id varchar NOT NULL; indexes: B-tree composite on (lead_id, occurred_at DESC), B-tree unique on source_event_id; down() drops table",
+        "apps/crm/lead/migrations/005_create_tags_and_lead_tags.ts: up() creates crm_leads.tags with columns: id uuid PK DEFAULT gen_random_uuid(), name varchar NOT NULL, location_id uuid, created_by uuid NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(); UNIQUE constraint on (name, location_id); partial unique index 'UNIQUE (name) WHERE location_id IS NULL' via knex.raw; creates crm_leads.lead_tags with composite PK (lead_id, tag_id), lead_id uuid NOT NULL REFERENCES crm_leads.leads(id), tag_id uuid NOT NULL REFERENCES crm_leads.tags(id), applied_by uuid NOT NULL, applied_at timestamptz NOT NULL DEFAULT now(); down() drops both tables",
+        "apps/crm/lead/migrations/006_create_lead_merges.ts: up() creates crm_leads.lead_merges with columns: id uuid PK DEFAULT gen_random_uuid(), surviving_lead_id uuid NOT NULL REFERENCES crm_leads.leads(id), merged_lead_id uuid NOT NULL REFERENCES crm_leads.leads(id), merged_lead_location_id uuid NOT NULL, merged_by uuid NOT NULL, merged_at timestamptz NOT NULL DEFAULT now(), stage_chosen varchar NOT NULL; down() drops table",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "lead-repository.ts — full CRUD, list/search/pagination, bulk lookups",
+      "description": "As a developer, I need a typed lead-repository module covering create, findById, phone/email lookups, update, archive, list with filters and cursor pagination, trigram search, and bulk fetch, so that lead-service.ts and route handlers have a complete data access layer.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/repositories/lead-repository.ts created; exports TypeScript type Lead matching all leads table columns",
+        "createLead(db: Knex, data: CreateLeadData): Promise<Lead> — inserts into crm_leads.leads, returns inserted row",
+        "findById(db: Knex, id: string): Promise<Lead | null> — returns lead including archived and merged-away rows (no WHERE archived_at filter); returns null if not found",
+        "findByPhone(db: Knex, phone: string, excludeId?: string): Promise<Lead[]> — WHERE phone = phone AND archived_at IS NULL AND merged_into_id IS NULL AND (excludeId ? id != excludeId : true)",
+        "findByEmail(db: Knex, email: string, excludeId?: string): Promise<Lead[]> — case-insensitive LOWER(email) = LOWER(email); same archived/merged filters",
+        "findByAdPlatformLeadId(db: Knex, adPlatformLeadId: string): Promise<Lead | null> — returns first match or null; no archived filter (idempotency across all leads)",
+        "updateLead(db: Knex, id: string, fields: Partial<UpdateableLeadFields>): Promise<Lead> — sets updated_at = now(), returns updated row",
+        "archiveLead(db: Knex, id: string): Promise<Lead> — sets archived_at = now(), updated_at = now(), returns updated row",
+        "listLeads(db: Knex, params: ListLeadsParams): Promise<{ leads: Lead[]; nextCursor: string | null }> — ListLeadsParams has optional: locationIds (string[]), pipeline (string), stage (string), status ('active'|'archived'), contactStatus (string), channel (string), tagIds (string[]), q (string for trigram search), includeArchived (boolean, default false), sort ('score'|'created_at'|'last_activity_at', default 'score'), cursor (string — opaque base64), limit (number, default 50, max 200)",
+        "listLeads location scoping: if locationIds non-empty, add WHERE location_id = ANY($locationIds); if empty, no location filter",
+        "listLeads active/archived: by default WHERE archived_at IS NULL AND merged_into_id IS NULL; if includeArchived=true, omit archived_at filter but still keep merged_into_id IS NULL",
+        "listLeads tagIds filter: JOIN crm_leads.lead_tags lt ON lt.lead_id = leads.id WHERE lt.tag_id = ANY($tagIds) when tagIds non-empty",
+        "listLeads search (q): use pg_trgm similarity across (first_name || ' ' || last_name), phone, email — query: WHERE similarity(first_name || ' ' || last_name, $q) > threshold OR similarity(phone, $q) > threshold OR similarity(email, $q) > threshold; order by max similarity DESC, then sort column; threshold from env.SEARCH_SIMILARITY_THRESHOLD",
+        "listLeads cursor pagination: cursor is base64-decoded JSON { lastSeenId: string, lastSeenSortValue: string|number }; for sort=score: WHERE (score, id) < (lastSeenScore, lastSeenId) ORDER BY score DESC, id DESC; for sort=created_at: WHERE (created_at, id) < (lastSeenCreatedAt, lastSeenId) ORDER BY created_at DESC, id DESC; for sort=last_activity_at: WHERE (COALESCE(last_activity_at, '-infinity'), id) < (...) ORDER BY last_activity_at DESC NULLS LAST, id DESC; fetch limit+1 rows; if length > limit, pop last and encode nextCursor from last remaining row",
+        "findByPhones(db: Knex, phones: string[], locationIds: string[]): Promise<Lead[]> — WHERE phone = ANY($phones) AND archived_at IS NULL AND merged_into_id IS NULL + location scoping",
+        "findByEmails(db: Knex, emails: string[], locationIds: string[]): Promise<Lead[]> — case-insensitive LOWER(email) = ANY(array of lowercased emails) + same filters",
+        "findByIds(db: Knex, ids: string[], locationIds: string[]): Promise<Lead[]> — WHERE id = ANY($ids) + location scoping (no archived filter — batch fetch by PK should return whatever exists)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "appointment-repository.ts, tag-repository.ts, activity-repository.ts",
+      "description": "As a developer, I need typed repository modules for appointments, tags/lead_tags, and lead_activities, so that the corresponding service and route layers have clean data access.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/repositories/appointment-repository.ts: exports Appointment type; createAppointment(db, data): Promise<Appointment>; findById(db, id): Promise<Appointment | null>; findByLeadId(db, leadId): Promise<Appointment[]> — ordered scheduled_at ASC; updateAppointment(db, id, fields): Promise<Appointment>; deleteAppointment(db, id): Promise<void>; all queries use table crm_leads.appointments",
+        "apps/crm/lead/src/repositories/tag-repository.ts: exports Tag type and LeadTag type; findTagsByLocation(db, locationId: string | null): Promise<Tag[]> — returns tags WHERE location_id = $locationId OR location_id IS NULL; findTagById(db, id): Promise<Tag | null>; createTag(db, data: { name, location_id, created_by }): Promise<Tag>; deleteTag(db, id): Promise<void>; applyTagToLead(db, leadId, tagId, appliedBy): Promise<void> — INSERT INTO crm_leads.lead_tags ON CONFLICT DO NOTHING; removeTagFromLead(db, leadId, tagId): Promise<void>; findTagsByLeadId(db, leadId): Promise<Tag[]> — JOIN lead_tags; all queries use table prefix crm_leads.tags / crm_leads.lead_tags",
+        "apps/crm/lead/src/repositories/activity-repository.ts: exports Activity type; insertActivity(db, data: { lead_id, event_type, actor_type, actor_id, payload, occurred_at, source_event_id }): Promise<void> — INSERT ... ON CONFLICT (source_event_id) DO NOTHING; listActivities(db, leadId: string, params: { eventTypes?: string[], cursor?: string, limit?: number }): Promise<{ activities: Activity[], nextCursor: string | null }> — ordered occurred_at DESC, id DESC; cursor encodes { lastSeenOccurredAt, lastSeenId }; findBySourceEventId(db, sourceEventId): Promise<Activity | null>",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "service-auth.ts middleware — preHandler for internal service-to-service routes",
+      "description": "As a developer, I need a Fastify preHandler that validates Authorization: Bearer <SERVICE_AUTH_TOKEN> for internal-only routes, so that only trusted callers can reach endpoints like DELETE /leads/:id/appointments/:appt_id.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/middleware/service-auth.ts: exports serviceAuthHook — FastifyPreHandlerHookHandler that reads Authorization header, extracts Bearer token, compares against env.SERVICE_AUTH_TOKEN using crypto.timingSafeEqual (Buffer.from on both sides, check lengths first), returns 401 { error: 'Unauthorized' } if missing, not Bearer-prefixed, or token mismatch",
+        "No JWT involved — completely separate from authPlugin",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "lead-service.ts — CRUD operations with phone normalization (no dedup in Phase 1)",
+      "description": "As a developer, I need a lead-service module that wraps the repository with phone normalization via libphonenumber-js and enforces attribution field immutability on updates, so that route handlers have a clean business logic layer.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/services/lead-service.ts created; all functions receive db: Knex as first argument",
+        "normalizePhone(phone: string): string — uses parsePhoneNumber from libphonenumber-js with 'US' default region; throws Error with message 'invalid phone number' if parsing fails or number is not valid; returns E.164 string via .format('E.164')",
+        "createLead(db, data: CreateLeadInput): Promise<Lead> — normalizes data.phone via normalizePhone (throws on failure); sets score=0, current_pipeline='none', contact_status='active', duplicate_status='none'; calls leadRepository.createLead; does NOT check for duplicates (Phase 2); does NOT publish events (Phase 2)",
+        "getLead(db, id: string): Promise<Lead | null> — calls leadRepository.findById",
+        "updateLead(db, id: string, fields: UpdateLeadInput): Promise<Lead> — rejects if any attribution field is present in fields (throws Error with message 'attribution fields are immutable'; attribution field list: first_touch_source, first_touch_medium, first_touch_campaign, first_touch_ad, first_touch_keyword, first_touch_landing_page, first_touch_referring_url, first_touch_device, call_tracking_number, referrer_id, referrer_type, referral_code, ad_platform_lead_id, created_by_location, channel); normalizes phone if present; calls leadRepository.updateLead",
+        "archiveLead(db, id: string): Promise<Lead> — calls leadRepository.archiveLead; does NOT publish events (Phase 2)",
+        "listLeads(db, params, userLocations: string[]): Promise<...> — passes userLocations as locationIds to leadRepository.listLeads",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "appointment-service.ts + tag-service.ts",
+      "description": "As a developer, I need appointment and tag service modules wrapping their repositories, so that route handlers have a business logic layer for these entities.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/services/appointment-service.ts: createAppointment(db, leadId, data, createdBy): Promise<Appointment> — validates lead exists (findById), sets status='scheduled', calls appointmentRepository.createAppointment; does NOT publish events (Phase 2); updateAppointment(db, appointmentId, leadId, fields): Promise<Appointment> — validates appointment belongs to leadId (findById then check lead_id), calls appointmentRepository.updateAppointment; does NOT publish events (Phase 2); deleteAppointment(db, appointmentId): Promise<void> — calls appointmentRepository.deleteAppointment (hard delete, no event published); listAppointments(db, leadId): Promise<Appointment[]>",
+        "apps/crm/lead/src/services/tag-service.ts: listTags(db, locationId?: string): Promise<Tag[]> — calls tagRepository.findTagsByLocation; createTag(db, data: { name, location_id, created_by }): Promise<Tag> — attempts insert, lets unique constraint bubble as a 409 indicator (caller catches); deleteTag(db, id): Promise<void>; applyTagToLead(db, leadId, tagId, appliedBy): Promise<void>; removeTagFromLead(db, leadId, tagId): Promise<void>",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "routes/leads.ts — CRUD routes (POST, GET :id, PATCH, DELETE) + register in app.ts",
+      "description": "As an API consumer, I want endpoints to create, fetch, update, and archive individual leads with full TypeBox validation, so that coordinators can manage lead records.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/routes/leads.ts created; exports leadsRoutes(app: FastifyInstance, opts: { db: Knex }) async function registered as a Fastify plugin",
+        "POST /leads: TypeBox body schema — required: first_name (string), last_name (string), phone (string), channel (string enum); optional: email, treatment_interest, date_of_birth, location_id, all first_touch_* fields, call_tracking_number, referrer_id, referrer_type, referral_code, ad_platform_lead_id, created_by_location; calls leadService.createLead; returns 201 with lead object; returns 400 if phone normalization fails with { error: 'invalid phone number' }",
+        "GET /leads/:id: TypeBox params schema { id: string }; calls leadService.getLead; returns 200 with lead + tags (from tagRepository.findTagsByLeadId) + appointments (from appointmentRepository.findByLeadId); returns 404 if not found",
+        "PATCH /leads/:id: TypeBox body schema — all mutable fields optional (first_name, last_name, phone, email, treatment_interest, location_id); role enforcement: location_id reassignment requires role call_center_manager or higher (check req.user.role — return 403 if insufficient); calls leadService.updateLead; returns 200 with updated lead; returns 400 with { error: 'attribution fields are immutable' } or { error: 'invalid phone number' } as appropriate",
+        "DELETE /leads/:id: requires role call_center_manager or higher (403 if not); calls leadService.archiveLead; returns 204 on success; returns 404 if lead not found or already archived",
+        "All routes registered in app.ts — leadsRoutes imported and registered via app.register(leadsRoutes, { db }) in buildApp()",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "routes/leads.ts — GET /leads list (filters, bulk lookup, search, cursor pagination)",
+      "description": "As an API consumer, I want the GET /leads list endpoint with all filters, bulk phone/email/ID lookup modes, trigram search, and opaque cursor pagination, so that the coordinator queue, campaign tools, and import service can fetch leads efficiently.",
+      "acceptanceCriteria": [
+        "GET /leads added to apps/crm/lead/src/routes/leads.ts",
+        "TypeBox querystring schema: location_id (string), pipeline (string), stage (string), status (string enum 'active'|'archived'), contact_status (string), channel (string), tag_id (array of strings), q (string), include_archived (boolean), sort (string enum 'score'|'created_at'|'last_activity_at', default 'score'), cursor (string), limit (integer, default 50, max 200), phones (array of strings, ≤100), emails (array of strings, ≤100), ids (array of strings, ≤500)",
+        "Returns 400 with { error: 'bulk lookup limit exceeded' } if phones.length > 100, emails.length > 100, or ids.length > 500",
+        "Bulk lookup mode: if phones is present, call leadRepository.findByPhones and return leads array directly (no pagination); same for emails via findByEmails; same for ids via findByIds — these three bypass cursor pagination",
+        "Normal list mode (no bulk params): calls leadService.listLeads with parsed params and req.user.locations for location scoping; returns { leads, nextCursor }",
+        "Response shape: { leads: Lead[], nextCursor: string | null } for list mode; { leads: Lead[] } for bulk mode",
+        "GET /leads/duplicates added as a STUB in this story — returns 200 { leads: [], nextCursor: null } — full implementation is Phase 2",
+        "Note: GET /leads/duplicates route must be registered BEFORE GET /leads/:id to avoid Fastify treating 'duplicates' as an :id param",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "routes/appointments.ts — all appointment routes",
+      "description": "As a coordinator, I want to create, update, delete, and list appointments for a lead, with the internal DELETE endpoint protected by service-auth.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/routes/appointments.ts created; exports appointmentRoutes(app, { db }) async plugin; registered in app.ts",
+        "POST /leads/:id/appointments: TypeBox body — required: appointment_type (enum 'exam'|'follow_up'|'other'), scheduled_at (string); optional: notes; calls appointmentService.createAppointment with req.user.id as createdBy; returns 201 with appointment object; returns 404 if lead not found",
+        "PATCH /leads/:id/appointments/:appt_id: TypeBox body — optional: status (enum 'scheduled'|'completed'|'cancelled'|'no_show'), scheduled_at, notes; calls appointmentService.updateAppointment; returns 200 with updated appointment; returns 404 if not found or not belonging to this lead",
+        "DELETE /leads/:id/appointments/:appt_id: preHandler: serviceAuthHook (SERVICE_AUTH_TOKEN only — no JWT auth); calls appointmentService.deleteAppointment; returns 204; returns 401 if token missing/invalid; returns 404 if not found",
+        "GET /leads/:id/appointments: calls appointmentService.listAppointments; returns 200 with array",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "routes/tags.ts — tag registry and lead-tag assignment routes",
+      "description": "As a coordinator, I want to browse the tag vocabulary, create new tags, assign and remove tags on leads, with global tag uniqueness enforced.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/routes/tags.ts created; exports tagRoutes(app, { db }) async plugin; registered in app.ts",
+        "GET /tags: TypeBox querystring — optional location_id (string); calls tagService.listTags(db, location_id); returns 200 with array of tags",
+        "POST /tags: TypeBox body — required: name (string); optional: location_id (string); requires role marketing_manager or higher; calls tagService.createTag with req.user.id; catches unique constraint DB error (PostgreSQL code '23505') and returns 409 { error: 'tag name already exists' }; returns 201 with tag on success",
+        "DELETE /tags/:id: requires role marketing_manager or higher; calls tagService.deleteTag; returns 204; returns 404 if not found",
+        "POST /leads/:id/tags: TypeBox body — required: tag_id (string); calls tagService.applyTagToLead with req.user.id; returns 200; returns 404 if lead or tag not found",
+        "DELETE /leads/:id/tags/:tag_id: calls tagService.removeTagFromLead; returns 204",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "routes/activities.ts (GET timeline) + GET /leads/:id/score-commentary",
+      "description": "As a coordinator, I want to view a lead's activity timeline with cursor pagination and get an AI-generated score commentary, so that I can understand lead history and priority reasoning.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/src/routes/activities.ts created; exports activityRoutes(app, { db }) async plugin; registered in app.ts",
+        "GET /leads/:id/activities: TypeBox querystring — optional event_type (array of strings), cursor (string), limit (integer default 50 max 200); calls activityRepository.listActivities(db, id, { eventTypes, cursor, limit }); returns 200 { activities: Activity[], nextCursor: string | null }; returns 404 if lead not found (check leadRepository.findById first)",
+        "GET /leads/:id/score-commentary: no additional query params; validates lead exists (404 if not); calls AI Service via fetch: POST env.AI_SERVICE_URL + '/ai/complete' with JSON body { prompt_id: 'lead_score_commentary', context: { lead_id: id, score: lead.score, current_pipeline: lead.current_pipeline, current_stage: lead.current_stage, contact_status: lead.contact_status, channel: lead.channel } }; on AI Service success: returns 200 { score: lead.score, commentary: <string from AI response> }; on AI Service error or non-2xx: returns 503 { error: 'AI service unavailable' }",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Unit tests — repositories (mocked Knex)",
+      "description": "As a developer, I want unit tests for all four repository modules using a mocked Knex instance, so that data access logic is verified in isolation without a real database.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/unit/repositories/lead-repository.test.ts: mock knex via vi.fn() returning chainable builder; test createLead inserts correct fields; findById returns row when found, null when not; findByPhone filters by phone + archived/merged conditions; findByEmail does case-insensitive match; archiveLead sets archived_at and updated_at; updateLead sets updated_at; listLeads applies location filter when locationIds non-empty; listLeads omits location filter when locationIds empty; findByPhones applies ANY($phones) filter; findByIds applies ANY($ids) filter; cursor encoding/decoding round-trips correctly (encode then decode produces same values)",
+        "apps/crm/lead/test/unit/repositories/appointment-repository.test.ts: test createAppointment, findById, findByLeadId ordering, updateAppointment, deleteAppointment",
+        "apps/crm/lead/test/unit/repositories/tag-repository.test.ts: test findTagsByLocation includes location + global tags; createTag inserts correctly; applyTagToLead uses ON CONFLICT DO NOTHING; findTagsByLeadId joins correctly",
+        "apps/crm/lead/test/unit/repositories/activity-repository.test.ts: test insertActivity uses ON CONFLICT (source_event_id) DO NOTHING; listActivities ordered occurred_at DESC; cursor pagination encodes/decodes correctly",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Unit tests — services (lead-service, appointment-service, tag-service) + middleware (service-auth)",
+      "description": "As a developer, I want unit tests for all service modules and the service-auth middleware with mocked dependencies, so that business logic is verified in isolation.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/unit/services/lead-service.test.ts: mock leadRepository via vi.mock; test normalizePhone parses valid US number to E.164; test normalizePhone throws 'invalid phone number' on invalid input; test createLead sets score=0 / contact_status='active' / duplicate_status='none'; test updateLead throws 'attribution fields are immutable' when any attribution field is in the update payload (test with each: channel, first_touch_source, referrer_id, ad_platform_lead_id); test updateLead normalizes phone if present; test archiveLead calls leadRepository.archiveLead",
+        "apps/crm/lead/test/unit/services/appointment-service.test.ts: mock leadRepository and appointmentRepository; test createAppointment returns 404-triggering error when lead not found; test updateAppointment returns 404-triggering error when appointment not found or lead_id mismatch",
+        "apps/crm/lead/test/unit/services/tag-service.test.ts: mock tagRepository; test createTag calls tagRepository.createTag; test listTags passes locationId through; test applyTagToLead calls applyTagToLead",
+        "apps/crm/lead/test/unit/middleware/service-auth.test.ts: build minimal mock FastifyRequest and FastifyReply; test valid SERVICE_AUTH_TOKEN passes (reply.code not called); test missing Authorization header returns 401; test wrong token returns 401; test token of different length returns 401",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Integration tests — leads routes (CRUD + list + search + bulk lookup)",
+      "description": "As a developer, I want integration tests for all lead routes running against a real PostgreSQL test database, so that the full request-to-database flow is verified end-to-end.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/integration/helpers.ts: buildTestApp() builds Fastify app with real Knex pointed at DATABASE_URL (test DB); runs migrations via knex.migrate.latest(); helper makeJwt(payload) produces a signed JWT accepted by authPlugin (or bypasses auth via test-mode); cleanup() rolls back migrations; exported db instance for direct DB inspection",
+        "apps/crm/lead/test/integration/leads.test.ts covers:",
+        "  POST /leads: valid body creates lead, returns 201 with id and score=0; invalid phone returns 400 { error: 'invalid phone number' }; missing required field returns 400",
+        "  GET /leads/:id: returns 200 with lead + empty tags + empty appointments for fresh lead; returns 404 for unknown id; returns archived lead (no 404)",
+        "  PATCH /leads/:id: updates first_name and returns 200 with new value; phone update normalizes to E.164; attribution field in body returns 400 { error: 'attribution fields are immutable' }; location_id update by non-manager returns 403",
+        "  DELETE /leads/:id: manager-role JWT returns 204 and archived_at is set; coordinator-role JWT returns 403; unknown id returns 404",
+        "  GET /leads: no params returns list with correct structure { leads, nextCursor }; location_id filter returns only matching leads; sort=created_at returns leads in created_at DESC order; cursor from page 1 response used as cursor on page 2 request returns next page; q=<name> trigram search returns matching lead; phones[] bulk lookup returns matching leads; emails[] bulk lookup returns matching leads; ids[] bulk lookup returns matching leads; phones[] with 101 items returns 400",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Integration tests — appointments, tags, activities, score-commentary routes",
+      "description": "As a developer, I want integration tests for the remaining route groups — appointments, tags, activities, and score-commentary — so that full coverage of Phase 1 routes is achieved.",
+      "acceptanceCriteria": [
+        "apps/crm/lead/test/integration/appointments.test.ts covers: POST /leads/:id/appointments creates appointment with status 'scheduled', returns 201; PATCH updates status to 'completed', returns 200; DELETE /leads/:id/appointments/:appt_id with valid SERVICE_AUTH_TOKEN returns 204; DELETE without token returns 401; GET /leads/:id/appointments returns array including the created appointment",
+        "apps/crm/lead/test/integration/tags.test.ts covers: POST /tags creates global tag (location_id omitted), returns 201; POST /tags same name again returns 409; POST /tags creates location-scoped tag; GET /tags?location_id=X returns location + global tags; POST /leads/:id/tags applies tag to lead; GET /leads/:id returns lead with tags array populated; DELETE /leads/:id/tags/:tag_id removes tag; DELETE /tags/:id removes tag from system",
+        "apps/crm/lead/test/integration/activities.test.ts covers: GET /leads/:id/activities on fresh lead returns empty array; after manually inserting an activity row, GET returns it ordered occurred_at DESC; event_type filter returns only matching events; cursor pagination returns second page correctly; unknown lead_id returns 404",
+        "apps/crm/lead/test/integration/score-commentary.test.ts covers: GET /leads/:id/score-commentary with mocked AI service (vi.spyOn on global fetch or mock fetch) returns 200 { score, commentary }; AI service returns non-2xx → returns 503 { error: 'AI service unavailable' }",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
