@@ -1,0 +1,28 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="104" fill="white"/>
+
+  <!-- Outer ring (O) -->
+  <circle cx="256" cy="256" r="156" stroke="#1E2A78" stroke-width="44"/>
+
+  <!-- Open cut to imply headless/open architecture -->
+  <rect x="330" y="160" width="120" height="192" fill="white"/>
+
+  <!-- Inner C form -->
+  <path
+    d="M322 183C304 164 280 152 253 152C195 152 148 199 148 257C148 315 195 362 253 362C280 362 304 350 322 331"
+    stroke="#2ED3FF"
+    stroke-width="30"
+    stroke-linecap="round"
+  />
+
+  <!-- Node graph accent -->
+  <line x1="356" y1="176" x2="404" y2="208" stroke="#1E2A78" stroke-width="10" stroke-linecap="round"/>
+  <line x1="356" y1="336" x2="404" y2="304" stroke="#1E2A78" stroke-width="10" stroke-linecap="round"/>
+  <line x1="356" y1="256" x2="424" y2="256" stroke="#1E2A78" stroke-width="10" stroke-linecap="round"/>
+
+  <circle cx="352" cy="176" r="12" fill="#6FFFB0"/>
+  <circle cx="404" cy="208" r="12" fill="#2ED3FF"/>
+  <circle cx="352" cy="336" r="12" fill="#6FFFB0"/>
+  <circle cx="404" cy="304" r="12" fill="#2ED3FF"/>
+  <circle cx="424" cy="256" r="12" fill="#6FFFB0"/>
+</svg>
